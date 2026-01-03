@@ -34,13 +34,17 @@ type Repository struct {
 // Container represents a Docker container instance
 type Container struct {
 	gorm.Model
-	DockerID     string     `gorm:"uniqueIndex" json:"docker_id"`
-	Name         string     `gorm:"not null" json:"name"`
-	Status       string     `json:"status"` // created, running, stopped, deleted
-	RepositoryID uint       `json:"repository_id"`
-	Repository   Repository `gorm:"foreignKey:RepositoryID" json:"repository,omitempty"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	StoppedAt    *time.Time `json:"stopped_at,omitempty"`
+	DockerID      string     `gorm:"uniqueIndex" json:"docker_id"`
+	Name          string     `gorm:"not null" json:"name"`
+	Status        string     `json:"status"`      // created, running, stopped, deleted
+	InitStatus    string     `json:"init_status"` // pending, cloning, initializing, ready, failed
+	InitMessage   string     `json:"init_message,omitempty"`
+	GitRepoURL    string     `json:"git_repo_url,omitempty"`  // GitHub repo URL to clone
+	GitRepoName   string     `json:"git_repo_name,omitempty"` // GitHub repo name
+	WorkDir       string     `json:"work_dir,omitempty"`      // Working directory inside container
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	StoppedAt     *time.Time `json:"stopped_at,omitempty"`
+	InitializedAt *time.Time `json:"initialized_at,omitempty"`
 }
 
 // ClaudeConfig represents Claude Code configuration
@@ -58,4 +62,13 @@ const (
 	ContainerStatusRunning = "running"
 	ContainerStatusStopped = "stopped"
 	ContainerStatusDeleted = "deleted"
+)
+
+// ContainerInitStatus constants
+const (
+	InitStatusPending      = "pending"
+	InitStatusCloning      = "cloning"
+	InitStatusInitializing = "initializing"
+	InitStatusReady        = "ready"
+	InitStatusFailed       = "failed"
 )

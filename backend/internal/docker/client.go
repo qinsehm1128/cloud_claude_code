@@ -10,7 +10,6 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 )
 
@@ -96,7 +95,7 @@ func (c *Client) BuildBaseImage(ctx context.Context, dockerfilePath string) erro
 
 // PullImage pulls an image from registry
 func (c *Client) PullImage(ctx context.Context, imageName string) error {
-	resp, err := c.cli.ImagePull(ctx, imageName, image.PullOptions{})
+	resp, err := c.cli.ImagePull(ctx, imageName, types.ImagePullOptions{})
 	if err != nil {
 		return err
 	}
@@ -182,7 +181,7 @@ func (c *Client) ListContainers(ctx context.Context) ([]types.Container, error) 
 
 // ExecInContainer executes a command in a container
 func (c *Client) ExecInContainer(ctx context.Context, containerID string, cmd []string) (string, error) {
-	execConfig := container.ExecOptions{
+	execConfig := types.ExecConfig{
 		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
@@ -193,7 +192,7 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, cmd []
 		return "", err
 	}
 
-	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
+	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, types.ExecStartCheck{})
 	if err != nil {
 		return "", err
 	}

@@ -29,7 +29,7 @@ func main() {
 	githubService := services.NewGitHubService(db, cfg)
 	claudeConfigService := services.NewClaudeConfigService(db, cfg)
 	
-	containerService, err := services.NewContainerService(db, cfg, claudeConfigService)
+	containerService, err := services.NewContainerService(db, cfg, claudeConfigService, githubService)
 	if err != nil {
 		log.Fatalf("Failed to initialize container service: %v", err)
 	}
@@ -97,6 +97,7 @@ func main() {
 		protected.GET("/containers", containerHandler.ListContainers)
 		protected.POST("/containers", containerHandler.CreateContainer)
 		protected.GET("/containers/:id", containerHandler.GetContainer)
+		protected.GET("/containers/:id/status", containerHandler.GetContainerStatus)
 		protected.POST("/containers/:id/start", containerHandler.StartContainer)
 		protected.POST("/containers/:id/stop", containerHandler.StopContainer)
 		protected.DELETE("/containers/:id", containerHandler.DeleteContainer)

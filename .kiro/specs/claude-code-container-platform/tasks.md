@@ -74,7 +74,7 @@
     - 验证有效 token 通过验证，无效/过期 token 被拒绝
     - **Validates: Requirements 1.3, 1.4, 1.5, 1.6**
 
-- [ ] 4. Checkpoint - 认证模块完成
+- [x] 4. Checkpoint - 认证模块完成
   - 确保所有测试通过，如有问题请询问用户
 
 - [-] 5. 配置管理模块
@@ -124,7 +124,7 @@
     - 验证返回的仓库包含所有必需字段
     - **Validates: Requirements 2.6**
 
-- [ ] 7. Checkpoint - 配置和仓库模块完成
+- [x] 7. Checkpoint - 配置和仓库模块完成
   - 确保所有测试通过，如有问题请询问用户
 
 - [-] 8. 容器管理模块
@@ -167,7 +167,7 @@
     - 验证返回的容器包含所有必需字段
     - **Validates: Requirements 5.7**
 
-- [ ] 9. Checkpoint - 容器管理模块完成
+- [x] 9. Checkpoint - 容器管理模块完成
   - 确保所有测试通过，如有问题请询问用户
 
 - [x] 10. 终端交互模块
@@ -224,7 +224,7 @@
     - 验证返回的文件信息包含所有必需字段
     - **Validates: Requirements 7.5**
 
-- [ ] 12. Checkpoint - 后端核心功能完成
+- [x] 12. Checkpoint - 后端核心功能完成
   - 确保所有测试通过，如有问题请询问用户
 
 
@@ -348,7 +348,7 @@
     - 添加按钮加载状态
     - _Requirements: 10.1_
 
-- [ ] 20. Checkpoint - 前端功能完成
+- [x] 20. Checkpoint - 前端功能完成
   - 确保前后端集成正常，如有问题请询问用户
 
 - [x] 21. 集成与部署
@@ -370,7 +370,7 @@
     - 配置说明
     - _Requirements: 1.1, 1.2_
 
-- [ ] 22. Final Checkpoint - 项目完成
+- [x] 22. Final Checkpoint - 项目完成
   - 确保所有功能正常工作
   - 确保所有测试通过
   - 如有问题请询问用户

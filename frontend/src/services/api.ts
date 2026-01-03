@@ -64,8 +64,9 @@ export const repoApi = {
 export const containerApi = {
   list: () => api.get('/containers'),
   get: (id: number) => api.get(`/containers/${id}`),
-  create: (name: string, repositoryId: number) =>
-    api.post('/containers', { name, repository_id: repositoryId }),
+  getStatus: (id: number) => api.get(`/containers/${id}/status`),
+  create: (name: string, gitRepoUrl: string, gitRepoName?: string) =>
+    api.post('/containers', { name, git_repo_url: gitRepoUrl, git_repo_name: gitRepoName }),
   start: (id: number) => api.post(`/containers/${id}/start`),
   stop: (id: number) => api.post(`/containers/${id}/stop`),
   delete: (id: number) => api.delete(`/containers/${id}`),

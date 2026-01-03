@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
@@ -62,7 +63,7 @@ func (m *PTYManager) Close() error {
 // CreateSession creates a new PTY session for a container
 func (m *PTYManager) CreateSession(ctx context.Context, containerID string, cols, rows uint) (*PTYSession, error) {
 	// Create exec instance with PTY
-	execConfig := container.ExecOptions{
+	execConfig := types.ExecConfig{
 		Cmd:          []string{"/bin/bash"},
 		AttachStdin:  true,
 		AttachStdout: true,
@@ -77,7 +78,7 @@ func (m *PTYManager) CreateSession(ctx context.Context, containerID string, cols
 	}
 
 	// Attach to exec instance
-	attachResp, err := m.dockerClient.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{
+	attachResp, err := m.dockerClient.ContainerExecAttach(ctx, execResp.ID, types.ExecStartCheck{
 		Tty: true,
 	})
 	if err != nil {
