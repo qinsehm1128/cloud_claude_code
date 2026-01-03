@@ -24,6 +24,7 @@ const (
 	MessageTypeHistoryStart = "history_start"
 	MessageTypeHistoryEnd   = "history_end"
 	MessageTypeSession = "session"
+	MessageTypeClose   = "close" // Client requests to close session permanently
 
 	// WebSocket settings
 	writeWait      = 10 * time.Second
@@ -227,6 +228,14 @@ func (s *TerminalService) readFromWebSocket(ctx context.Context, conn *websocket
 					s.sendError(conn, fmt.Sprintf("Failed to resize terminal: %v", err))
 				}
 			}
+
+		case MessageTypeClose:
+			// Client requested to close session permanently
+			if msg.SessionID != "" {
+				s.ptyManager.CloseSession(msg.SessionID)
+				fmt.Printf("Session %s closed by client request\n", msg.SessionID)
+			}
+			return nil
 
 		case MessageTypePong:
 			continue

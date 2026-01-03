@@ -150,7 +150,8 @@ export default function ContainerTerminal() {
   const removeTab = useCallback((targetKey: string) => {
     const tab = tabs.find(t => t.key === targetKey)
     if (tab) {
-      tab.ws?.disconnect()
+      // Close session permanently when user manually closes the tab
+      tab.ws?.closeSession()
       tab.terminal?.dispose()
     }
 
@@ -322,33 +323,6 @@ export default function ContainerTerminal() {
     }
   }, [tabs, activeKey])
 
-  // Handle drag events for terminal area
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    // Check if it's a file path from our FileBrowser
-    if (e.dataTransfer.types.includes('text/plain')) {
-      setIsDraggingOver(true)
-    }
-  }, [])
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDraggingOver(false)
-  }, [])
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDraggingOver(false)
-    
-    const path = e.dataTransfer.getData('text/plain')
-    if (path && path.startsWith('/')) {
-      handleFileDrop(path)
-    }
-  }, [handleFileDrop])
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -440,16 +414,46 @@ export default function ContainerTerminal() {
 
       {/* Terminal Content */}
       <div 
-        className={`flex-1 relative bg-[#0a0a0a] transition-all ${
-          isDraggingOver ? 'ring-2 ring-primary ring-inset' : ''
-        }`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        className="flex-1 relative bg-[#0a0a0a]"
+        onDragEnter={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          if (e.dataTransfer.types.includes('text/plain')) {
+            setIsDraggingOver(true)
+          }
+        }}
       >
+        {/* Drag overlay - captures drag events over terminal */}
         {isDraggingOver && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 pointer-events-none">
-            <div className="text-center">
+          <div 
+            className="absolute inset-0 z-20 flex items-center justify-center bg-background/80"
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              e.dataTransfer.dropEffect = 'copy'
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              // Only hide if leaving the overlay entirely
+              const rect = e.currentTarget.getBoundingClientRect()
+              const x = e.clientX
+              const y = e.clientY
+              if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+                setIsDraggingOver(false)
+              }
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setIsDraggingOver(false)
+              const path = e.dataTransfer.getData('text/plain')
+              if (path && path.startsWith('/')) {
+                handleFileDrop(path)
+              }
+            }}
+          >
+            <div className="text-center pointer-events-none">
               <FolderOpen className="h-12 w-12 mx-auto mb-2 text-primary" />
               <p className="text-sm text-muted-foreground">Drop to insert file path</p>
             </div>

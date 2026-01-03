@@ -1,5 +1,5 @@
 export interface TerminalMessage {
-  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session'
+  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session' | 'close'
   data?: string
   cols?: number
   rows?: number
@@ -191,6 +191,15 @@ export class TerminalWebSocket {
       this.ws.close()
       this.ws = null
     }
+  }
+
+  // Close session permanently (user manually closed the tab)
+  closeSession() {
+    if (this.ws?.readyState === WebSocket.OPEN && this.sessionId) {
+      const msg: TerminalMessage = { type: 'close', session_id: this.sessionId }
+      this.ws.send(JSON.stringify(msg))
+    }
+    this.disconnect()
   }
 
   isConnected(): boolean {
