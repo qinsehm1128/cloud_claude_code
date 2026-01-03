@@ -1,261 +1,322 @@
 # Claude Code Container Platform
 
-一个基于 Web 的 Docker 容器管理平台，用于运行和管理 Claude Code 开发环境。
+<p align="center">
+  <b>Web-based Docker container management platform for Claude Code development environments</b>
+</p>
 
-## 功能特性
+<p align="center">
+  <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat-square&logo=go" alt="Go">
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react" alt="React">
+  <img src="https://img.shields.io/badge/Docker-Required-2496ED?style=flat-square&logo=docker" alt="Docker">
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License">
+</p>
 
-- 🔐 **用户认证** - JWT 认证，支持环境变量配置管理员凭据
-- 🐙 **GitHub 集成** - 配置 GitHub Token，浏览和克隆仓库到容器内
-- 🤖 **Claude Code 初始化** - 自动使用 Claude Code 初始化项目环境（可选）
-- 🐳 **容器管理** - 创建、启动、停止、删除 Docker 容器
-- 💻 **Web 终端** - 通过 WebSocket 实时交互容器终端，支持会话持久化
-- 📁 **文件管理** - 浏览、上传、下载容器内文件，支持拖拽文件路径到终端
-- 🌐 **服务代理** - 通过 Traefik 反向代理暴露容器内服务，支持域名和端口访问
-- ⚙️ **资源配置** - 自定义容器 CPU 和内存限制
-- 🔒 **安全隔离** - 容器安全配置，防止容器逃逸
-- 🎨 **现代 UI** - 基于 shadcn/ui 的 Vercel 风格深色主题
+---
 
-## 技术栈
+## Features
 
-### 后端
-- Go 1.21+
-- Gin Web Framework
-- GORM + SQLite
-- Docker SDK
-- gorilla/websocket
+| Feature | Description |
+|---------|-------------|
+| **User Auth** | JWT authentication with configurable admin credentials |
+| **GitHub Integration** | Browse and clone repositories directly into containers |
+| **Claude Code Init** | Auto-initialize projects with Claude Code (optional) |
+| **Container Management** | Create, start, stop, delete Docker containers |
+| **Web Terminal** | Real-time terminal via WebSocket with session persistence |
+| **File Manager** | Browse, upload, download files with drag-and-drop support |
+| **Service Proxy** | Expose container services via Traefik (domain or port access) |
+| **Code-Server** | Access VS Code in browser via subdomain routing |
+| **Resource Control** | Custom CPU and memory limits per container |
+| **Security** | Container isolation, capability dropping, seccomp profiles |
 
-### 前端
-- React 18 + TypeScript
-- Vite
-- shadcn/ui + Tailwind CSS
-- xterm.js
+## Architecture
 
-### 代理
-- Traefik v3 (可选，用于服务代理)
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Browser                                      │
+└─────────────────────────────┬───────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Nginx (Reverse Proxy)                            │
+│  ┌─────────────────────┐    ┌─────────────────────────────────────┐ │
+│  │   Main Site (80)    │    │  *.code.example.com (Subdomain)     │ │
+│  │   example.com       │    │  → Traefik → Container:8080         │ │
+│  └──────────┬──────────┘    └──────────────┬──────────────────────┘ │
+└─────────────┼──────────────────────────────┼────────────────────────┘
+              │                              │
+              ▼                              ▼
+┌─────────────────────────┐    ┌─────────────────────────────────────┐
+│   Backend (Go:8080)     │    │         Traefik (38080)             │
+│  ┌───────────────────┐  │    │  Auto-routing by container name     │
+│  │ REST API          │  │    └──────────────┬──────────────────────┘
+│  │ WebSocket Terminal│  │                   │
+│  │ Container Manager │  │                   ▼
+│  └───────────────────┘  │    ┌─────────────────────────────────────┐
+└─────────────┬───────────┘    │         Docker Containers           │
+              │                │  ┌─────────┐ ┌─────────┐ ┌─────────┐│
+              └───────────────▶│  │ dev-1   │ │ dev-2   │ │ dev-N   ││
+                               │  │ :8080   │ │ :8080   │ │ :8080   ││
+                               │  └─────────┘ └─────────┘ └─────────┘│
+                               └─────────────────────────────────────┘
+```
 
-## 快速开始
+## Tech Stack
 
-### 前置要求
+<table>
+<tr>
+<td width="50%">
 
-- Docker（用于运行开发容器）
+### Backend
+- **Go 1.21+** - Core language
+- **Gin** - Web framework
+- **GORM + SQLite** - Database
+- **Docker SDK** - Container management
+- **gorilla/websocket** - Terminal WebSocket
+
+</td>
+<td width="50%">
+
+### Frontend
+- **React 18 + TypeScript**
+- **Vite** - Build tool
+- **shadcn/ui + Tailwind CSS** - UI
+- **xterm.js** - Terminal emulator
+
+</td>
+</tr>
+</table>
+
+## Quick Start
+
+### Prerequisites
+
+- Docker (for running dev containers)
 - Node.js 20+
 - Go 1.21+
 
-### 1. 构建 Claude Code 基础镜像
-
-首先需要构建用于开发容器的基础镜像：
+### 1. Build Base Image
 
 ```bash
 cd docker
-chmod +x build-base.sh
 ./build-base.sh
 ```
 
-这会创建一个包含 Node.js 20、Git 和 Claude Code CLI 的基础镜像 `cc-base:latest`。
+This creates `cc-base:latest` with Node.js 20, Git, and Claude Code CLI.
 
-### 2. 配置环境变量
-
-在项目根目录创建 `.env` 文件：
+### 2. Configure Environment
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env` 文件配置管理员凭据和其他设置：
-
+Edit `.env`:
 ```env
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your-secure-password
-JWT_SECRET=your-jwt-secret
-ENCRYPTION_KEY=your-32-char-encryption-key
 ```
 
-### 3. 启动 Traefik（可选，用于服务代理）
+### 3. Start Development Server
 
-如果需要通过域名或端口访问容器内运行的服务：
-
+**Linux/macOS:**
 ```bash
-cd docker/traefik
-docker-compose up -d
-```
-
-详细配置请参考 [docker/traefik/README.md](docker/traefik/README.md)
-
-### 4. 启动开发服务
-
-**方式一：使用启动脚本**
-
-Linux/macOS:
-```bash
-chmod +x start-dev.sh
 ./start-dev.sh
 ```
 
-Windows:
+**Windows:**
 ```cmd
 start-dev.bat
 ```
 
-**方式二：手动启动**
+### 4. Access Application
 
-启动后端：
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:5173 |
+| Backend API | http://localhost:8080 |
+| Traefik Dashboard | http://localhost:8081/dashboard/ |
+
+> If `ADMIN_PASSWORD` is not set, a random password will be generated and shown in backend logs.
+
+---
+
+## Deployment
+
+For production deployment, see the **[Deployment Guide](deploy/README.md)**.
+
+### Quick Deploy
+
 ```bash
-cd backend
-go mod download
-go run ./cmd/server
+# One-command full deployment
+./deploy.sh --full-deploy
+
+# Custom directories
+./deploy.sh --full-deploy \
+    --frontend-dir /var/www/mysite.com \
+    --backend-dir /opt/myapp
 ```
 
-启动前端（新终端）：
-```bash
-cd frontend
-npm install
-npm run dev
+### Deployment Options
+
+| Command | Description |
+|---------|-------------|
+| `./deploy.sh --build` | Build frontend and backend |
+| `./deploy.sh --install` | Install to deploy directories |
+| `./deploy.sh --setup-service` | Create systemd service |
+| `./deploy.sh --full-deploy` | All of the above + start |
+
+> **[View Full Deployment Guide →](deploy/README.md)**
+
+---
+
+## Service Proxy
+
+### Option 1: Subdomain Access (Recommended)
+
+Access container services via `{container-name}.code.example.com`
+
+```
+User → Nginx → Traefik → Container:8080
 ```
 
-### 5. 访问应用
+**Setup:**
+1. DNS: Add `*.code.example.com → Server IP`
+2. Nginx: Configure subdomain routing (see [nginx.conf](deploy/nginx.conf))
+3. Environment: Set `CODE_SERVER_BASE_DOMAIN=code.example.com`
 
-- 前端: http://localhost:5173
-- 后端 API: http://localhost:8080
-- Traefik Dashboard: http://localhost:8081/dashboard/ (如已启动)
+### Option 2: Direct Port Access
 
-首次启动时，如果未配置 `ADMIN_PASSWORD`，系统会自动生成密码并显示在后端日志中。
+Access via `http://server-ip:30001`
 
-## 使用流程
+Available ports: `30001-30020`
 
-1. **登录** - 使用管理员凭据登录系统
-2. **配置 GitHub Token** - 在 Settings 页面配置 GitHub Personal Access Token
-3. **配置环境变量** - 在 Settings 页面配置 Claude Code 所需的环境变量（如 API Key）
-4. **创建容器** - 在 Dashboard 选择 GitHub 仓库创建新容器
-   - 可选择是否使用 Claude Code 自动初始化项目
-   - 可配置 CPU/内存资源限制
-   - 可配置 Traefik 代理暴露容器服务
-5. **使用终端** - 容器就绪后，通过 Web 终端进行开发
-6. **文件管理** - 使用文件浏览器管理容器内文件，支持拖拽路径到终端
-7. **访问服务** - 通过配置的域名或端口访问容器内运行的服务
+---
 
-## 服务代理配置
+## Environment Variables
 
-平台支持通过 Traefik 反向代理暴露容器内服务，提供两种访问方式：
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Backend server port | `8080` |
+| `ADMIN_USERNAME` | Admin username | `admin` |
+| `ADMIN_PASSWORD` | Admin password | Auto-generated |
+| `JWT_SECRET` | JWT signing key | Auto-generated |
+| `DATABASE_PATH` | SQLite database path | `./data/cc-platform.db` |
+| `AUTO_START_TRAEFIK` | Auto-start Traefik | `false` |
+| `CODE_SERVER_BASE_DOMAIN` | Subdomain for code-server | (empty) |
+| `TRAEFIK_HTTP_PORT` | Traefik HTTP port | Auto (38000+) |
 
-### 方式一：域名访问
-```
-myapp.containers.yourdomain.com → Nginx:80 → Traefik:8080 → 容器服务
-```
+---
 
-需要配置：
-1. DNS 泛域名解析 `*.containers.yourdomain.com`
-2. Nginx 转发到 Traefik:8080（参考 `docker/traefik/nginx-example.conf`）
+## API Reference
 
-### 方式二：IP:端口直接访问
-```
-http://your-server-ip:9001 → Traefik:9001 → 容器服务
-```
+<details>
+<summary><b>Authentication</b></summary>
 
-可用端口范围：9001-9010
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/login` | User login |
+| POST | `/api/auth/logout` | User logout |
+| GET | `/api/auth/verify` | Verify token |
 
-### 创建容器时配置
+</details>
 
-1. 勾选 "Enable Traefik Proxy"
-2. 填写容器服务端口（如 3000）
-3. 可选：填写完整域名或选择直接端口
+<details>
+<summary><b>Settings</b></summary>
 
-## 环境变量
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/settings/github` | Get GitHub config status |
+| POST | `/api/settings/github` | Save GitHub token |
+| GET | `/api/settings/claude` | Get Claude config |
+| POST | `/api/settings/claude` | Save Claude config |
 
-| 变量名 | 描述 | 默认值 |
-|--------|------|--------|
-| `ENVIRONMENT` | 运行环境 (development/production) | development |
-| `DATABASE_PATH` | SQLite 数据库路径 | ./data/cc-platform.db |
-| `DATA_DIR` | 数据目录 | ./data |
-| `JWT_SECRET` | JWT 签名密钥 | 自动生成 |
-| `ENCRYPTION_KEY` | 加密密钥（32字符） | 自动生成 |
-| `ADMIN_USERNAME` | 管理员用户名 | admin |
-| `ADMIN_PASSWORD` | 管理员密码 | 自动生成 |
-| `PORT` | 后端服务端口 | 8080 |
+</details>
 
-## API 端点
+<details>
+<summary><b>Repositories</b></summary>
 
-### 认证
-- `POST /api/auth/login` - 用户登录
-- `POST /api/auth/logout` - 用户登出
-- `GET /api/auth/verify` - 验证 Token
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/repos/remote` | List GitHub repos |
+| POST | `/api/repos/clone` | Clone repository |
+| GET | `/api/repos/local` | List local repos |
+| DELETE | `/api/repos/:id` | Delete repository |
 
-### 设置
-- `GET /api/settings/github` - 获取 GitHub 配置状态
-- `POST /api/settings/github` - 保存 GitHub Token
-- `GET /api/settings/claude` - 获取 Claude 配置
-- `POST /api/settings/claude` - 保存 Claude 配置
+</details>
 
-### 仓库
-- `GET /api/repos/remote` - 列出 GitHub 仓库
-- `POST /api/repos/clone` - 克隆仓库
-- `GET /api/repos/local` - 列出本地仓库
-- `DELETE /api/repos/:id` - 删除仓库
+<details>
+<summary><b>Containers</b></summary>
 
-### 容器
-- `GET /api/containers` - 列出容器
-- `POST /api/containers` - 创建容器（支持资源配置和代理配置）
-- `GET /api/containers/:id` - 获取容器详情
-- `GET /api/containers/:id/status` - 获取容器状态
-- `GET /api/containers/:id/logs` - 获取容器初始化日志
-- `POST /api/containers/:id/start` - 启动容器
-- `POST /api/containers/:id/stop` - 停止容器
-- `DELETE /api/containers/:id` - 删除容器
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/containers` | List containers |
+| POST | `/api/containers` | Create container |
+| GET | `/api/containers/:id` | Get container details |
+| POST | `/api/containers/:id/start` | Start container |
+| POST | `/api/containers/:id/stop` | Stop container |
+| DELETE | `/api/containers/:id` | Delete container |
 
-### 终端
-- `GET /api/ws/terminal/:id` - WebSocket 终端连接
+</details>
 
-### 文件
-- `GET /api/files/:id/list` - 列出目录
-- `GET /api/files/:id/download` - 下载文件
-- `POST /api/files/:id/upload` - 上传文件
-- `DELETE /api/files/:id` - 删除文件
-- `POST /api/files/:id/mkdir` - 创建目录
+<details>
+<summary><b>Terminal & Files</b></summary>
 
-## 安全说明
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| WS | `/api/ws/terminal/:id` | WebSocket terminal |
+| GET | `/api/files/:id/list` | List directory |
+| GET | `/api/files/:id/download` | Download file |
+| POST | `/api/files/:id/upload` | Upload file |
 
-- 容器以非 root 用户运行
-- 删除所有不必要的 Linux capabilities
-- 应用 seccomp 安全配置
-- 设置 CPU 和内存资源限制（可自定义）
-- 禁止访问 Docker socket
-- 路径遍历防护
+</details>
 
-## 项目结构
+---
+
+## Project Structure
 
 ```
 .
-├── backend/                 # Go 后端
-│   ├── cmd/server/         # 入口点
-│   ├── internal/           # 内部包
-│   │   ├── config/         # 配置
-│   │   ├── database/       # 数据库
-│   │   ├── docker/         # Docker 客户端
-│   │   ├── handlers/       # HTTP 处理器
-│   │   ├── middleware/     # 中间件
-│   │   ├── models/         # 数据模型
-│   │   ├── services/       # 业务逻辑
-│   │   └── terminal/       # 终端管理
-│   └── pkg/                # 公共包
-├── frontend/               # React 前端
-│   ├── src/
-│   │   ├── components/     # UI 组件
-│   │   ├── pages/          # 页面
-│   │   ├── services/       # API 服务
-│   │   └── hooks/          # React Hooks
-│   └── ...
-├── docker/                 # Docker 相关配置
-│   ├── Dockerfile.base     # Claude Code 基础镜像
-│   ├── build-base.sh       # 基础镜像构建脚本
-│   └── traefik/            # Traefik 代理配置
-│       ├── docker-compose.yml
-│       ├── traefik.yml
-│       ├── nginx-example.conf
-│       └── README.md
-├── .env.example            # 环境变量示例
-├── start-dev.sh            # Linux/macOS 启动脚本
-└── start-dev.bat           # Windows 启动脚本
+├── backend/                 # Go backend
+│   ├── cmd/server/          # Entry point
+│   ├── internal/            # Internal packages
+│   │   ├── config/          # Configuration
+│   │   ├── handlers/        # HTTP handlers
+│   │   ├── services/        # Business logic
+│   │   └── terminal/        # Terminal management
+│   └── pkg/                 # Public packages
+│
+├── frontend/                # React frontend
+│   └── src/
+│       ├── components/      # UI components
+│       ├── pages/           # Pages
+│       └── services/        # API services
+│
+├── docker/                  # Docker configs
+│   ├── Dockerfile.base      # Base image
+│   └── traefik/             # Traefik proxy config
+│
+├── deploy/                  # Deployment configs
+│   ├── README.md            # Deployment guide
+│   └── nginx.conf           # Nginx config
+│
+├── .env.example             # Environment template
+├── start-dev.sh             # Dev startup (Linux/Mac)
+├── start-dev.bat            # Dev startup (Windows)
+└── deploy.sh                # Deployment script
 ```
 
-## 许可证
+---
+
+## Security
+
+- Containers run as non-root user
+- All unnecessary Linux capabilities dropped
+- Seccomp security profile applied
+- CPU and memory limits enforced
+- Docker socket access disabled
+- Path traversal protection
+
+---
+
+## License
 
 MIT License
