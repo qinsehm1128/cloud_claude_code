@@ -35,6 +35,7 @@ SKIP_DEPS=false
 BUILD_ONLY=false
 BACKEND_ONLY=false
 FRONTEND_ONLY=false
+AUTO_INSTALL=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -54,15 +55,21 @@ while [[ $# -gt 0 ]]; do
             FRONTEND_ONLY=true
             shift
             ;;
+        --auto-install|-y)
+            AUTO_INSTALL=true
+            shift
+            ;;
         -h|--help)
             echo "Usage: $0 [options]"
             echo ""
             echo "Options:"
-            echo "  --skip-deps    Skip dependency installation"
-            echo "  --build        Build only, don't start servers"
-            echo "  --backend      Start backend only"
-            echo "  --frontend     Start frontend only"
-            echo "  -h, --help     Show this help message"
+            echo "  --skip-deps      Skip dependency installation"
+            echo "  --build          Build only, don't start servers"
+            echo "  --backend        Start backend only"
+            echo "  --frontend       Start frontend only"
+            echo "  --auto-install   Auto install missing tools (Go, Node.js)"
+            echo "  -y               Same as --auto-install"
+            echo "  -h, --help       Show this help message"
             echo ""
             echo "Environment variables:"
             echo "  BACKEND_PORT   Backend server port (default: 8080)"
@@ -106,14 +113,228 @@ check_port() {
     return 1
 }
 
+# Detect OS and architecture
+detect_platform() {
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m)
+    
+    case $ARCH in
+        x86_64|amd64)
+            ARCH="amd64"
+            ;;
+        aarch64|arm64)
+            ARCH="arm64"
+            ;;
+        armv7l|armv6l)
+            ARCH="armv6l"
+            ;;
+        *)
+            log_error "Unsupported architecture: $ARCH"
+            exit 1
+            ;;
+    esac
+    
+    case $OS in
+        linux)
+            OS="linux"
+            ;;
+        darwin)
+            OS="darwin"
+            ;;
+        *)
+            log_error "Unsupported OS: $OS"
+            exit 1
+            ;;
+    esac
+}
+
+# Install Go
+install_go() {
+    local GO_VERSION="1.22.5"
+    
+    detect_platform
+    
+    log_info "Installing Go $GO_VERSION for $OS/$ARCH..."
+    
+    local GO_TAR="go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
+    local GO_URL="https://go.dev/dl/${GO_TAR}"
+    local INSTALL_DIR="/usr/local"
+    
+    # Check if we have sudo access
+    if [ "$EUID" -ne 0 ]; then
+        if ! command -v sudo &> /dev/null; then
+            log_error "Need root privileges to install Go. Please run as root or install sudo."
+            exit 1
+        fi
+        SUDO="sudo"
+    else
+        SUDO=""
+    fi
+    
+    # Download Go
+    log_info "Downloading from $GO_URL..."
+    local TMP_DIR=$(mktemp -d)
+    
+    if command -v wget &> /dev/null; then
+        wget -q --show-progress -O "$TMP_DIR/$GO_TAR" "$GO_URL"
+    elif command -v curl &> /dev/null; then
+        curl -L --progress-bar -o "$TMP_DIR/$GO_TAR" "$GO_URL"
+    else
+        log_error "Neither wget nor curl is available"
+        rm -rf "$TMP_DIR"
+        exit 1
+    fi
+    
+    # Remove old Go installation if exists
+    if [ -d "$INSTALL_DIR/go" ]; then
+        log_info "Removing old Go installation..."
+        $SUDO rm -rf "$INSTALL_DIR/go"
+    fi
+    
+    # Extract Go
+    log_info "Extracting to $INSTALL_DIR..."
+    $SUDO tar -C "$INSTALL_DIR" -xzf "$TMP_DIR/$GO_TAR"
+    
+    # Cleanup
+    rm -rf "$TMP_DIR"
+    
+    # Setup PATH
+    GO_BIN="$INSTALL_DIR/go/bin"
+    
+    # Add to current session
+    export PATH="$GO_BIN:$PATH"
+    
+    # Add to shell profile
+    local PROFILE=""
+    if [ -f "$HOME/.bashrc" ]; then
+        PROFILE="$HOME/.bashrc"
+    elif [ -f "$HOME/.zshrc" ]; then
+        PROFILE="$HOME/.zshrc"
+    elif [ -f "$HOME/.profile" ]; then
+        PROFILE="$HOME/.profile"
+    fi
+    
+    if [ -n "$PROFILE" ]; then
+        if ! grep -q "$GO_BIN" "$PROFILE" 2>/dev/null; then
+            echo "" >> "$PROFILE"
+            echo "# Go installation" >> "$PROFILE"
+            echo "export PATH=\"$GO_BIN:\$PATH\"" >> "$PROFILE"
+            log_info "Added Go to PATH in $PROFILE"
+        fi
+    fi
+    
+    # Verify installation
+    if command -v go &> /dev/null; then
+        local installed_version=$(go version | awk '{print $3}' | sed 's/go//')
+        log_success "Go $installed_version installed successfully"
+    else
+        # Try with full path
+        if [ -x "$GO_BIN/go" ]; then
+            local installed_version=$("$GO_BIN/go" version | awk '{print $3}' | sed 's/go//')
+            log_success "Go $installed_version installed successfully"
+            log_warn "Please restart your terminal or run: source $PROFILE"
+        else
+            log_error "Go installation failed"
+            exit 1
+        fi
+    fi
+}
+
+# Install Node.js
+install_node() {
+    local NODE_VERSION="20"
+    
+    detect_platform
+    
+    log_info "Installing Node.js $NODE_VERSION..."
+    
+    # Check if we have sudo access
+    if [ "$EUID" -ne 0 ]; then
+        if ! command -v sudo &> /dev/null; then
+            log_error "Need root privileges to install Node.js. Please run as root or install sudo."
+            exit 1
+        fi
+        SUDO="sudo"
+    else
+        SUDO=""
+    fi
+    
+    if [ "$OS" = "linux" ]; then
+        # Use NodeSource for Linux
+        if command -v apt-get &> /dev/null; then
+            log_info "Using apt (Debian/Ubuntu)..."
+            $SUDO apt-get update
+            $SUDO apt-get install -y ca-certificates curl gnupg
+            $SUDO mkdir -p /etc/apt/keyrings
+            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | $SUDO gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+            echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_VERSION.x nodistro main" | $SUDO tee /etc/apt/sources.list.d/nodesource.list
+            $SUDO apt-get update
+            $SUDO apt-get install -y nodejs
+        elif command -v yum &> /dev/null; then
+            log_info "Using yum (RHEL/CentOS)..."
+            curl -fsSL https://rpm.nodesource.com/setup_$NODE_VERSION.x | $SUDO bash -
+            $SUDO yum install -y nodejs
+        elif command -v dnf &> /dev/null; then
+            log_info "Using dnf (Fedora)..."
+            curl -fsSL https://rpm.nodesource.com/setup_$NODE_VERSION.x | $SUDO bash -
+            $SUDO dnf install -y nodejs
+        else
+            log_error "Unsupported package manager. Please install Node.js manually."
+            exit 1
+        fi
+    elif [ "$OS" = "darwin" ]; then
+        if command -v brew &> /dev/null; then
+            log_info "Using Homebrew..."
+            brew install node@$NODE_VERSION
+        else
+            log_error "Please install Homebrew first: https://brew.sh"
+            exit 1
+        fi
+    fi
+    
+    # Verify installation
+    if command -v node &> /dev/null; then
+        local installed_version=$(node --version)
+        log_success "Node.js $installed_version installed successfully"
+    else
+        log_error "Node.js installation failed"
+        exit 1
+    fi
+}
+
+# Prompt for installation
+prompt_install() {
+    local tool=$1
+    local install_func=$2
+    
+    if [ "$AUTO_INSTALL" = true ]; then
+        log_info "Auto-installing $tool..."
+        $install_func
+        return 0
+    fi
+    
+    echo ""
+    read -p "Would you like to install $tool automatically? [y/N] " -n 1 -r
+    echo ""
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        $install_func
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Check if required tools are installed
 check_requirements() {
     log_info "Checking requirements..."
     
     local missing=()
+    local can_install=()
     
     if ! command -v go &> /dev/null; then
         missing+=("go")
+        can_install+=("go")
     else
         local go_version=$(go version | awk '{print $3}' | sed 's/go//')
         log_success "Go $go_version"
@@ -121,6 +342,7 @@ check_requirements() {
     
     if ! command -v node &> /dev/null; then
         missing+=("node")
+        can_install+=("node")
     else
         local node_version=$(node --version)
         log_success "Node.js $node_version"
@@ -145,21 +367,50 @@ check_requirements() {
         fi
     fi
     
+    # Handle missing tools
     if [ ${#missing[@]} -ne 0 ]; then
         log_error "Missing required tools: ${missing[*]}"
         echo ""
-        echo "Please install the missing tools:"
-        for tool in "${missing[@]}"; do
+        
+        # Try to install missing tools
+        for tool in "${can_install[@]}"; do
             case $tool in
                 go)
-                    echo "  - Go: https://golang.org/dl/"
+                    if prompt_install "Go" install_go; then
+                        # Remove from missing array
+                        missing=("${missing[@]/go}")
+                    fi
                     ;;
-                node|npm)
-                    echo "  - Node.js: https://nodejs.org/"
+                node)
+                    if prompt_install "Node.js" install_node; then
+                        # Remove from missing array
+                        missing=("${missing[@]/node}")
+                        missing=("${missing[@]/npm}")
+                    fi
                     ;;
             esac
         done
-        exit 1
+        
+        # Check if still missing
+        missing=($(echo "${missing[@]}" | tr ' ' '\n' | grep -v '^$'))
+        
+        if [ ${#missing[@]} -ne 0 ]; then
+            echo ""
+            log_error "Still missing: ${missing[*]}"
+            echo ""
+            echo "Please install manually:"
+            for tool in "${missing[@]}"; do
+                case $tool in
+                    go)
+                        echo "  - Go: https://golang.org/dl/"
+                        ;;
+                    node|npm)
+                        echo "  - Node.js: https://nodejs.org/"
+                        ;;
+                esac
+            done
+            exit 1
+        fi
     fi
     
     log_success "All requirements satisfied"
