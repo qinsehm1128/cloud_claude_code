@@ -614,6 +614,15 @@ func (s *ContainerService) StartContainer(ctx context.Context, id uint) error {
 				s.addLog(id, models.LogLevelWarn, models.LogStageStartup, fmt.Sprintf("Failed to start code-server: %v", err))
 			} else {
 				s.addLog(id, models.LogLevelInfo, models.LogStageStartup, "code-server started")
+				
+				// Re-add port record for code-server
+				portService := NewPortService(s.db)
+				// Use subdomain routing port (internal) or host port
+				port := CodeServerInternalPort
+				if container.CodeServerDomain == "" && container.CodeServerPort > 0 {
+					port = container.CodeServerPort
+				}
+				portService.AddPort(id, port, "VS Code", "http", true)
 			}
 		}()
 	}
@@ -647,6 +656,9 @@ func (s *ContainerService) StopContainer(ctx context.Context, id uint) error {
 	s.db.Model(&models.TerminalSession{}).
 		Where("container_id = ?", id).
 		Update("active", false)
+
+	// Remove port records (will be re-added on restart)
+	s.db.Where("container_id = ?", id).Delete(&models.ContainerPort{})
 
 	// Update status
 	now := time.Now()
