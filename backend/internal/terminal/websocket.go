@@ -4,55 +4,65 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"gorm.io/gorm"
 )
 
 const (
 	// WebSocket message types
-	MessageTypeInput  = "input"
-	MessageTypeOutput = "output"
-	MessageTypeResize = "resize"
-	MessageTypeError  = "error"
-	MessageTypePing   = "ping"
-	MessageTypePong   = "pong"
+	MessageTypeInput   = "input"
+	MessageTypeOutput  = "output"
+	MessageTypeResize  = "resize"
+	MessageTypeError   = "error"
+	MessageTypePing    = "ping"
+	MessageTypePong    = "pong"
+	MessageTypeHistory = "history"
+	MessageTypeHistoryStart = "history_start"
+	MessageTypeHistoryEnd   = "history_end"
+	MessageTypeSession = "session"
 
 	// WebSocket settings
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 8192
+	
+	// History chunk size for sending
+	historyChunkSize = 64 * 1024 // 64KB per message
 )
 
 // TerminalMessage represents a WebSocket message
 type TerminalMessage struct {
-	Type  string `json:"type"`
-	Data  string `json:"data,omitempty"`
-	Cols  uint   `json:"cols,omitempty"`
-	Rows  uint   `json:"rows,omitempty"`
-	Error string `json:"error,omitempty"`
+	Type      string `json:"type"`
+	Data      string `json:"data,omitempty"`
+	Cols      uint   `json:"cols,omitempty"`
+	Rows      uint   `json:"rows,omitempty"`
+	Error     string `json:"error,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	TotalSize int64  `json:"total_size,omitempty"` // Total history size for progress
+	ChunkIndex int   `json:"chunk_index,omitempty"` // Current chunk index
+	TotalChunks int  `json:"total_chunks,omitempty"` // Total number of chunks
 }
 
 // TerminalService handles WebSocket terminal connections
 type TerminalService struct {
 	ptyManager *PTYManager
-	clients    map[string]map[*websocket.Conn]bool // containerID -> connections
 	mu         sync.RWMutex
 }
 
 // NewTerminalService creates a new terminal service
-func NewTerminalService() (*TerminalService, error) {
-	ptyManager, err := NewPTYManager()
+func NewTerminalService(db *gorm.DB) (*TerminalService, error) {
+	ptyManager, err := NewPTYManager(db)
 	if err != nil {
 		return nil, err
 	}
 
 	return &TerminalService{
 		ptyManager: ptyManager,
-		clients:    make(map[string]map[*websocket.Conn]bool),
 	}, nil
 }
 
@@ -62,7 +72,7 @@ func (s *TerminalService) Close() error {
 }
 
 // HandleConnection handles a new WebSocket connection
-func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.Conn, containerID string) error {
+func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.Conn, dockerID string, containerID uint, sessionID string) error {
 	// Configure WebSocket
 	conn.SetReadLimit(maxMessageSize)
 	conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -71,24 +81,45 @@ func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.
 		return nil
 	})
 
-	// Create PTY session with default size
-	session, err := s.ptyManager.CreateSession(ctx, containerID, 80, 24)
+	// Default terminal size
+	cols := uint(80)
+	rows := uint(24)
+
+	// Get or create PTY session
+	session, isExisting, err := s.ptyManager.GetOrCreateSession(ctx, dockerID, containerID, sessionID, cols, rows)
 	if err != nil {
 		s.sendError(conn, fmt.Sprintf("Failed to create terminal session: %v", err))
 		return err
 	}
 
-	// Register client
-	s.registerClient(containerID, conn)
-	defer s.unregisterClient(containerID, conn)
-	defer s.ptyManager.CloseSession(session.ExecID)
+	// Generate unique client ID
+	clientID := uuid.New().String()
 
-	// Start goroutines for reading/writing
+	// Send session ID to client
+	s.sendMessage(conn, TerminalMessage{
+		Type:      MessageTypeSession,
+		SessionID: session.ID,
+	})
+
+	// If reconnecting to existing session, send history in chunks
+	if isExisting {
+		go s.sendHistoryInChunks(conn, session)
+	}
+
+	// Register as client to receive output
+	outputChan := session.AddClient(clientID)
+	defer session.RemoveClient(clientID)
+
+	// Create done channel
+	done := make(chan struct{})
+	defer close(done)
+
+	// Start goroutines
 	errChan := make(chan error, 2)
 
-	// Read from PTY and send to WebSocket
+	// Read from session output channel and send to WebSocket
 	go func() {
-		errChan <- s.readFromPTY(conn, session)
+		errChan <- s.forwardOutputToWebSocket(conn, outputChan, done)
 	}()
 
 	// Read from WebSocket and write to PTY
@@ -97,7 +128,7 @@ func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.
 	}()
 
 	// Start ping ticker
-	go s.pingLoop(conn)
+	go s.pingLoop(conn, done)
 
 	// Wait for error or context cancellation
 	select {
@@ -108,24 +139,63 @@ func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.
 	}
 }
 
-// readFromPTY reads from PTY and sends to WebSocket
-func (s *TerminalService) readFromPTY(conn *websocket.Conn, session *PTYSession) error {
-	buf := make([]byte, 4096)
+
+// sendHistoryInChunks sends history data in chunks for large histories
+func (s *TerminalService) sendHistoryInChunks(conn *websocket.Conn, session *PTYSession) {
+	history := session.GetHistory()
+	if len(history) == 0 {
+		return
+	}
+	
+	totalSize := int64(len(history))
+	totalChunks := (len(history) + historyChunkSize - 1) / historyChunkSize
+	
+	// Send history start message
+	s.sendMessage(conn, TerminalMessage{
+		Type:        MessageTypeHistoryStart,
+		TotalSize:   totalSize,
+		TotalChunks: totalChunks,
+	})
+	
+	// Send history in chunks
+	for i := 0; i < len(history); i += historyChunkSize {
+		end := i + historyChunkSize
+		if end > len(history) {
+			end = len(history)
+		}
+		
+		chunkIndex := i / historyChunkSize
+		s.sendMessage(conn, TerminalMessage{
+			Type:        MessageTypeHistory,
+			Data:        string(history[i:end]),
+			ChunkIndex:  chunkIndex,
+			TotalChunks: totalChunks,
+		})
+		
+		// Small delay to prevent overwhelming the client
+		time.Sleep(10 * time.Millisecond)
+	}
+	
+	// Send history end message
+	s.sendMessage(conn, TerminalMessage{
+		Type: MessageTypeHistoryEnd,
+	})
+}
+
+// forwardOutputToWebSocket forwards PTY output to WebSocket
+func (s *TerminalService) forwardOutputToWebSocket(conn *websocket.Conn, outputChan chan []byte, done chan struct{}) error {
 	for {
-		n, err := session.Read(buf)
-		if err != nil {
-			if err == io.EOF {
+		select {
+		case <-done:
+			return nil
+		case data, ok := <-outputChan:
+			if !ok {
 				return nil
 			}
-			return err
-		}
-
-		if n > 0 {
 			msg := TerminalMessage{
 				Type: MessageTypeOutput,
-				Data: string(buf[:n]),
+				Data: string(data),
 			}
-
 			conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := conn.WriteJSON(msg); err != nil {
 				return err
@@ -153,29 +223,39 @@ func (s *TerminalService) readFromWebSocket(ctx context.Context, conn *websocket
 
 		case MessageTypeResize:
 			if msg.Cols > 0 && msg.Rows > 0 {
-				if err := s.ptyManager.ResizeSession(ctx, session.ExecID, msg.Cols, msg.Rows); err != nil {
+				if err := s.ptyManager.ResizeSession(ctx, session.ID, msg.Cols, msg.Rows); err != nil {
 					s.sendError(conn, fmt.Sprintf("Failed to resize terminal: %v", err))
 				}
 			}
 
 		case MessageTypePong:
-			// Pong received, connection is alive
 			continue
 		}
 	}
 }
 
 // pingLoop sends periodic ping messages
-func (s *TerminalService) pingLoop(conn *websocket.Conn) {
+func (s *TerminalService) pingLoop(conn *websocket.Conn, done chan struct{}) {
 	ticker := time.NewTicker(pingPeriod)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		conn.SetWriteDeadline(time.Now().Add(writeWait))
-		if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+	for {
+		select {
+		case <-done:
 			return
+		case <-ticker.C:
+			conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
+}
+
+// sendMessage sends a message to the WebSocket
+func (s *TerminalService) sendMessage(conn *websocket.Conn, msg TerminalMessage) {
+	conn.SetWriteDeadline(time.Now().Add(writeWait))
+	conn.WriteJSON(msg)
 }
 
 // sendError sends an error message to the WebSocket
@@ -188,54 +268,28 @@ func (s *TerminalService) sendError(conn *websocket.Conn, errMsg string) {
 	conn.WriteJSON(msg)
 }
 
-// registerClient registers a WebSocket client for a container
-func (s *TerminalService) registerClient(containerID string, conn *websocket.Conn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.clients[containerID] == nil {
-		s.clients[containerID] = make(map[*websocket.Conn]bool)
+// GetSessionsForContainer returns all active sessions for a container
+func (s *TerminalService) GetSessionsForContainer(containerID string) []SessionInfo {
+	sessions := s.ptyManager.ListSessionsForContainer(containerID)
+	infos := make([]SessionInfo, len(sessions))
+	for i, session := range sessions {
+		infos[i] = session.GetInfo()
 	}
-	s.clients[containerID][conn] = true
+	return infos
 }
 
-// unregisterClient unregisters a WebSocket client
-func (s *TerminalService) unregisterClient(containerID string, conn *websocket.Conn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if clients, ok := s.clients[containerID]; ok {
-		delete(clients, conn)
-		if len(clients) == 0 {
-			delete(s.clients, containerID)
-		}
-	}
+// CloseSession closes a specific session
+func (s *TerminalService) CloseSession(sessionID string) error {
+	return s.ptyManager.CloseSession(sessionID)
 }
 
 // BroadcastToContainer sends a message to all clients connected to a container
 func (s *TerminalService) BroadcastToContainer(containerID string, msg TerminalMessage) {
-	s.mu.RLock()
-	clients := s.clients[containerID]
-	s.mu.RUnlock()
-
+	sessions := s.ptyManager.ListSessionsForContainer(containerID)
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return
 	}
-
-	for conn := range clients {
-		conn.SetWriteDeadline(time.Now().Add(writeWait))
-		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			s.unregisterClient(containerID, conn)
-			conn.Close()
-		}
-	}
-}
-
-// GetConnectedClients returns the number of connected clients for a container
-func (s *TerminalService) GetConnectedClients(containerID string) int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	return len(s.clients[containerID])
+	_ = data // For future use if needed
+	_ = sessions
 }

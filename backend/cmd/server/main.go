@@ -41,7 +41,7 @@ func main() {
 	}
 	defer fileService.Close()
 
-	terminalService, err := terminal.NewTerminalService()
+	terminalService, err := terminal.NewTerminalService(db)
 	if err != nil {
 		log.Fatalf("Failed to initialize terminal service: %v", err)
 	}
@@ -109,6 +109,9 @@ func main() {
 		protected.POST("/files/:id/upload", fileHandler.UploadFile)
 		protected.DELETE("/files/:id", fileHandler.DeleteFile)
 		protected.POST("/files/:id/mkdir", fileHandler.CreateDirectory)
+
+		// Terminal sessions route
+		protected.GET("/terminals/:id/sessions", terminalHandler.GetSessions)
 	}
 
 	// WebSocket routes (with JWT query param auth)

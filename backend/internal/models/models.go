@@ -80,6 +80,28 @@ type ContainerLog struct {
 	Message     string `gorm:"type:text" json:"message"`
 }
 
+// TerminalSession represents a persistent terminal session
+type TerminalSession struct {
+	gorm.Model
+	SessionID   string `gorm:"uniqueIndex;not null" json:"session_id"`
+	ContainerID uint   `gorm:"index" json:"container_id"`
+	DockerID    string `json:"docker_id"`
+	ExecID      string `json:"exec_id"`
+	Width       uint   `json:"width"`
+	Height      uint   `json:"height"`
+	Active      bool   `gorm:"default:true" json:"active"`
+	LastActive  time.Time `json:"last_active"`
+}
+
+// TerminalHistory stores terminal output history in chunks
+type TerminalHistory struct {
+	gorm.Model
+	SessionID  string `gorm:"index;not null" json:"session_id"`
+	ChunkIndex int    `gorm:"index" json:"chunk_index"` // Order of chunks
+	Data       []byte `gorm:"type:blob" json:"-"`       // Compressed data
+	DataSize   int    `json:"data_size"`                // Original size before compression
+}
+
 // LogLevel constants
 const (
 	LogLevelInfo  = "info"

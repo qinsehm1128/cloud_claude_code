@@ -1,9 +1,21 @@
 export interface TerminalMessage {
-  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong'
+  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session'
   data?: string
   cols?: number
   rows?: number
   error?: string
+  session_id?: string
+  total_size?: number
+  chunk_index?: number
+  total_chunks?: number
+}
+
+export interface HistoryLoadProgress {
+  loading: boolean
+  totalSize: number
+  totalChunks: number
+  loadedChunks: number
+  percent: number
 }
 
 export class TerminalWebSocket {
@@ -12,10 +24,16 @@ export class TerminalWebSocket {
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
   private containerId: string
+  private sessionId: string | null = null
   private onMessage: (msg: TerminalMessage) => void
   private onConnect: () => void
   private onDisconnect: () => void
   private onError: (error: string) => void
+  private onSessionId?: (sessionId: string) => void
+  private onHistoryStart?: (totalSize: number, totalChunks: number) => void
+  private onHistoryChunk?: (data: string, chunkIndex: number, totalChunks: number) => void
+  private onHistoryEnd?: () => void
+  private onHistoryProgress?: (progress: HistoryLoadProgress) => void
 
   constructor(
     containerId: string,
@@ -24,13 +42,25 @@ export class TerminalWebSocket {
       onConnect: () => void
       onDisconnect: () => void
       onError: (error: string) => void
-    }
+      onSessionId?: (sessionId: string) => void
+      onHistoryStart?: (totalSize: number, totalChunks: number) => void
+      onHistoryChunk?: (data: string, chunkIndex: number, totalChunks: number) => void
+      onHistoryEnd?: () => void
+      onHistoryProgress?: (progress: HistoryLoadProgress) => void
+    },
+    sessionId?: string
   ) {
     this.containerId = containerId
+    this.sessionId = sessionId || null
     this.onMessage = callbacks.onMessage
     this.onConnect = callbacks.onConnect
     this.onDisconnect = callbacks.onDisconnect
     this.onError = callbacks.onError
+    this.onSessionId = callbacks.onSessionId
+    this.onHistoryStart = callbacks.onHistoryStart
+    this.onHistoryChunk = callbacks.onHistoryChunk
+    this.onHistoryEnd = callbacks.onHistoryEnd
+    this.onHistoryProgress = callbacks.onHistoryProgress
   }
 
   connect() {
@@ -41,7 +71,12 @@ export class TerminalWebSocket {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/api/ws/terminal/${this.containerId}?token=${token}`
+    let wsUrl = `${protocol}//${window.location.host}/api/ws/terminal/${this.containerId}?token=${token}`
+    
+    // Add session ID for reconnection
+    if (this.sessionId) {
+      wsUrl += `&session=${this.sessionId}`
+    }
 
     this.ws = new WebSocket(wsUrl)
 
@@ -50,9 +85,65 @@ export class TerminalWebSocket {
       this.onConnect()
     }
 
+    let historyState = {
+      loading: false,
+      totalSize: 0,
+      totalChunks: 0,
+      loadedChunks: 0,
+    }
+
     this.ws.onmessage = (event) => {
       try {
         const msg: TerminalMessage = JSON.parse(event.data)
+        
+        // Handle special message types
+        if (msg.type === 'session' && msg.session_id) {
+          this.sessionId = msg.session_id
+          this.onSessionId?.(msg.session_id)
+          return
+        }
+        
+        if (msg.type === 'history_start') {
+          historyState = {
+            loading: true,
+            totalSize: msg.total_size || 0,
+            totalChunks: msg.total_chunks || 0,
+            loadedChunks: 0,
+          }
+          this.onHistoryStart?.(msg.total_size || 0, msg.total_chunks || 0)
+          this.onHistoryProgress?.({
+            ...historyState,
+            percent: 0,
+          })
+          return
+        }
+        
+        if (msg.type === 'history' && msg.data) {
+          historyState.loadedChunks++
+          const percent = historyState.totalChunks > 0 
+            ? Math.round((historyState.loadedChunks / historyState.totalChunks) * 100)
+            : 0
+          this.onHistoryChunk?.(msg.data, msg.chunk_index || 0, msg.total_chunks || 0)
+          this.onHistoryProgress?.({
+            ...historyState,
+            percent,
+          })
+          // Also send as output for terminal to display
+          this.onMessage({ type: 'output', data: msg.data })
+          return
+        }
+        
+        if (msg.type === 'history_end') {
+          historyState.loading = false
+          this.onHistoryEnd?.()
+          this.onHistoryProgress?.({
+            ...historyState,
+            loading: false,
+            percent: 100,
+          })
+          return
+        }
+        
         this.onMessage(msg)
       } catch {
         // Handle raw text messages
@@ -104,5 +195,13 @@ export class TerminalWebSocket {
 
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  getSessionId(): string | null {
+    return this.sessionId
+  }
+
+  setSessionId(sessionId: string) {
+    this.sessionId = sessionId
   }
 }

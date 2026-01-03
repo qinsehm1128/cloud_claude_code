@@ -78,6 +78,9 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
+	// Get optional session ID for reconnection
+	sessionID := c.Query("session")
+
 	// Upgrade to WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -86,9 +89,32 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	// Handle the terminal connection
-	if err := h.terminalService.HandleConnection(c.Request.Context(), conn, container.DockerID); err != nil {
+	// Handle the terminal connection with session support
+	if err := h.terminalService.HandleConnection(c.Request.Context(), conn, container.DockerID, containerID, sessionID); err != nil {
 		// Connection closed, log error if needed
 		return
 	}
+}
+
+// GetSessions returns active terminal sessions for a container
+func (h *TerminalHandler) GetSessions(c *gin.Context) {
+	containerIDStr := c.Param("id")
+	containerID, err := parseID(containerIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid container ID"})
+		return
+	}
+
+	container, err := h.containerService.GetContainer(containerID)
+	if err != nil {
+		if err == services.ErrContainerNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get container"})
+		return
+	}
+
+	sessions := h.terminalService.GetSessionsForContainer(container.DockerID)
+	c.JSON(http.StatusOK, sessions)
 }

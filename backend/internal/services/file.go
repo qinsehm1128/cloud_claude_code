@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,15 +82,99 @@ func (s *FileService) ListDirectory(ctx context.Context, containerID uint, path 
 		return nil, err
 	}
 
-	// Execute ls command in container
-	cmd := []string{"ls", "-la", "--time-style=+%Y-%m-%dT%H:%M:%S", safePath}
+	// Use stat and find for more reliable parsing
+	// First check if path exists and is a directory
+	checkCmd := []string{"sh", "-c", fmt.Sprintf("test -d '%s' && echo 'DIR' || echo 'NOTDIR'", safePath)}
+	checkOutput, err := s.execInContainer(ctx, cont.DockerID, checkCmd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check path: %w", err)
+	}
+	
+	checkOutput = strings.TrimSpace(stripControlChars(checkOutput))
+	if checkOutput != "DIR" {
+		return nil, fmt.Errorf("path is not a directory: %s", safePath)
+	}
+
+	// Use find with stat for reliable file listing
+	cmd := []string{"sh", "-c", fmt.Sprintf(
+		`find '%s' -maxdepth 1 -mindepth 1 -printf '%%y|%%s|%%T@|%%f\n' 2>/dev/null | sort`,
+		safePath,
+	)}
 	output, err := s.execInContainer(ctx, cont.DockerID, cmd)
+	if err != nil {
+		// Fallback to ls if find doesn't support -printf
+		return s.listDirectoryFallback(ctx, cont.DockerID, safePath)
+	}
+
+	return s.parseFindOutput(output, safePath)
+}
+
+// listDirectoryFallback uses ls as fallback
+func (s *FileService) listDirectoryFallback(ctx context.Context, dockerID, safePath string) ([]FileInfo, error) {
+	cmd := []string{"sh", "-c", fmt.Sprintf(
+		`ls -la '%s' | tail -n +2`,
+		safePath,
+	)}
+	output, err := s.execInContainer(ctx, dockerID, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list directory: %w", err)
 	}
 
-	// Parse ls output
 	return s.parseLsOutput(output, safePath)
+}
+
+// parseFindOutput parses the output of find -printf command
+func (s *FileService) parseFindOutput(output, basePath string) ([]FileInfo, error) {
+	var files []FileInfo
+	output = stripControlChars(output)
+	lines := strings.Split(output, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Format: type|size|timestamp|name
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) != 4 {
+			continue
+		}
+
+		fileType := parts[0]
+		sizeStr := parts[1]
+		timestampStr := parts[2]
+		name := parts[3]
+
+		// Skip . and ..
+		if name == "." || name == ".." {
+			continue
+		}
+
+		// Parse size
+		var size int64
+		fmt.Sscanf(sizeStr, "%d", &size)
+
+		// Parse timestamp (Unix timestamp with decimal)
+		var modTime time.Time
+		if ts, err := strconv.ParseFloat(timestampStr, 64); err == nil {
+			modTime = time.Unix(int64(ts), 0)
+		}
+
+		// Determine if directory (d = directory, f = file, l = link, etc.)
+		isDir := fileType == "d"
+
+		files = append(files, FileInfo{
+			Name:         name,
+			Path:         filepath.Join(basePath, name),
+			Size:         size,
+			IsDirectory:  isDir,
+			ModifiedTime: modTime,
+			Permissions:  fileType,
+		})
+	}
+
+	return files, nil
 }
 
 // UploadFile uploads a file to a container
@@ -319,6 +404,7 @@ func (s *FileService) execInContainer(ctx context.Context, dockerID string, cmd 
 // parseLsOutput parses the output of ls -la command
 func (s *FileService) parseLsOutput(output, basePath string) ([]FileInfo, error) {
 	var files []FileInfo
+	output = stripControlChars(output)
 	lines := strings.Split(output, "\n")
 
 	for _, line := range lines {
@@ -329,27 +415,48 @@ func (s *FileService) parseLsOutput(output, basePath string) ([]FileInfo, error)
 
 		// Parse ls -la output format:
 		// drwxr-xr-x 2 user group 4096 2024-01-01T12:00:00 filename
+		// or: drwxr-xr-x 2 user group 4096 Jan  1 12:00 filename
 		parts := strings.Fields(line)
 		if len(parts) < 6 {
 			continue
 		}
 
 		permissions := parts[0]
-		sizeStr := parts[4]
-		timeStr := parts[5]
-		name := strings.Join(parts[6:], " ")
+		
+		// Find the filename - it's everything after the date/time
+		// Try to find where the filename starts
+		var name string
+		var size int64
+		var modTime time.Time
 
-		// Skip . and ..
-		if name == "." || name == ".." {
-			continue
+		// Parse size (usually 5th field)
+		if len(parts) >= 5 {
+			fmt.Sscanf(parts[4], "%d", &size)
 		}
 
-		// Parse size
-		var size int64
-		fmt.Sscanf(sizeStr, "%d", &size)
+		// The filename is typically the last part(s)
+		// Handle different ls output formats
+		if len(parts) >= 9 {
+			// Format: perms links user group size month day time filename
+			name = strings.Join(parts[8:], " ")
+			// Try to parse date
+			dateStr := fmt.Sprintf("%s %s %s", parts[5], parts[6], parts[7])
+			modTime, _ = time.Parse("Jan 2 15:04", dateStr)
+			if modTime.Year() == 0 {
+				modTime = modTime.AddDate(time.Now().Year(), 0, 0)
+			}
+		} else if len(parts) >= 7 {
+			// Format with ISO date: perms links user group size date filename
+			name = strings.Join(parts[6:], " ")
+			modTime, _ = time.Parse("2006-01-02T15:04:05", parts[5])
+		} else if len(parts) >= 6 {
+			name = strings.Join(parts[5:], " ")
+		}
 
-		// Parse time
-		modTime, _ := time.Parse("2006-01-02T15:04:05", timeStr)
+		// Skip . and ..
+		if name == "." || name == ".." || name == "" {
+			continue
+		}
 
 		// Determine if directory
 		isDir := strings.HasPrefix(permissions, "d")
@@ -365,4 +472,45 @@ func (s *FileService) parseLsOutput(output, basePath string) ([]FileInfo, error)
 	}
 
 	return files, nil
+}
+
+// stripControlChars removes ANSI control characters and Docker mux header bytes
+func stripControlChars(s string) string {
+	// Remove Docker stream mux header (first 8 bytes per frame)
+	// and ANSI escape sequences
+	var result strings.Builder
+	i := 0
+	for i < len(s) {
+		// Skip Docker mux header bytes (0x01 or 0x02 followed by 7 bytes)
+		if i+8 <= len(s) && (s[i] == 0x01 || s[i] == 0x02) {
+			// Check if this looks like a mux header
+			if s[i+1] == 0x00 && s[i+2] == 0x00 && s[i+3] == 0x00 {
+				i += 8
+				continue
+			}
+		}
+		
+		// Skip ANSI escape sequences
+		if i+1 < len(s) && s[i] == 0x1b && s[i+1] == '[' {
+			// Find end of escape sequence
+			j := i + 2
+			for j < len(s) && !((s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= 'a' && s[j] <= 'z')) {
+				j++
+			}
+			if j < len(s) {
+				i = j + 1
+				continue
+			}
+		}
+		
+		// Skip other control characters except newline and tab
+		if s[i] < 32 && s[i] != '\n' && s[i] != '\t' {
+			i++
+			continue
+		}
+		
+		result.WriteByte(s[i])
+		i++
+	}
+	return result.String()
 }
