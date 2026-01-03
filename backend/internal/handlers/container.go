@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"cc-platform/internal/services"
 	"cc-platform/internal/terminal"
@@ -180,7 +182,12 @@ func (h *ContainerHandler) StopContainer(c *gin.Context) {
 		}
 	}
 
-	if err := h.containerService.StopContainer(c.Request.Context(), id); err != nil {
+	// Use a background context with longer timeout for Docker stop operation
+	// This prevents HTTP request timeout from canceling the Docker operation
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := h.containerService.StopContainer(ctx, id); err != nil {
 		if err == services.ErrContainerNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
 			return
@@ -205,7 +212,11 @@ func (h *ContainerHandler) DeleteContainer(c *gin.Context) {
 		h.terminalService.CloseSessionsForContainer(id)
 	}
 
-	if err := h.containerService.DeleteContainer(c.Request.Context(), id); err != nil {
+	// Use a background context with longer timeout for Docker delete operation
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := h.containerService.DeleteContainer(ctx, id); err != nil {
 		if err == services.ErrContainerNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
 			return
