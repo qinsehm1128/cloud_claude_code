@@ -45,8 +45,6 @@ export const settingsApi = {
   saveGitHubToken: (token: string) => api.post('/settings/github', { token }),
   getClaudeConfig: () => api.get('/settings/claude'),
   saveClaudeConfig: (config: {
-    api_key?: string
-    api_url?: string
     custom_env_vars?: string
     startup_command?: string
   }) => api.post('/settings/claude', config),
@@ -65,6 +63,8 @@ export const containerApi = {
   list: () => api.get('/containers'),
   get: (id: number) => api.get(`/containers/${id}`),
   getStatus: (id: number) => api.get(`/containers/${id}/status`),
+  getLogs: (id: number, limit?: number) => 
+    api.get(`/containers/${id}/logs`, { params: { limit: limit || 100 } }),
   create: (name: string, gitRepoUrl: string, gitRepoName?: string) =>
     api.post('/containers', { name, git_repo_url: gitRepoUrl, git_repo_name: gitRepoName }),
   start: (id: number) => api.post(`/containers/${id}/start`),

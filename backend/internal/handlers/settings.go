@@ -56,8 +56,6 @@ func (h *SettingsHandler) SaveGitHubToken(c *gin.Context) {
 
 // ClaudeConfigRequest represents the request to save Claude configuration
 type ClaudeConfigRequest struct {
-	APIKey         string `json:"api_key"`
-	APIURL         string `json:"api_url"`
 	CustomEnvVars  string `json:"custom_env_vars"`
 	StartupCommand string `json:"startup_command"`
 }
@@ -82,8 +80,6 @@ func (h *SettingsHandler) SaveClaudeConfig(c *gin.Context) {
 	}
 
 	input := services.ClaudeConfigInput{
-		APIKey:         req.APIKey,
-		APIURL:         req.APIURL,
 		CustomEnvVars:  req.CustomEnvVars,
 		StartupCommand: req.StartupCommand,
 	}

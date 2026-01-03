@@ -62,8 +62,6 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 	container, err := h.containerService.CreateContainer(c.Request.Context(), input)
 	if err != nil {
 		switch err {
-		case services.ErrNoAPIKeyConfigured:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Claude API key not configured. Please configure it in Settings."})
 		case services.ErrNoGitHubTokenConfigured:
 			c.JSON(http.StatusBadRequest, gin.H{"error": "GitHub token not configured. Please configure it in Settings."})
 		default:
@@ -72,7 +70,10 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, services.ToContainerInfo(container))
+	c.JSON(http.StatusCreated, gin.H{
+		"container": services.ToContainerInfo(container),
+		"message":   "Container created and initialization started",
+	})
 }
 
 // GetContainer gets a container by ID
@@ -96,7 +97,7 @@ func (h *ContainerHandler) GetContainer(c *gin.Context) {
 	c.JSON(http.StatusOK, services.ToContainerInfo(container))
 }
 
-// StartContainer starts a container and begins initialization
+// StartContainer starts a container (only if initialized)
 func (h *ContainerHandler) StartContainer(c *gin.Context) {
 	id, err := parseID(c.Param("id"))
 	if err != nil {
@@ -104,33 +105,15 @@ func (h *ContainerHandler) StartContainer(c *gin.Context) {
 		return
 	}
 
-	// Check if this is a fresh start (needs initialization)
-	container, err := h.containerService.GetContainer(id)
-	if err != nil {
-		if err == services.ErrContainerNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// If container has never been initialized, start with init
-	if container.InitStatus == "" || container.InitStatus == "pending" {
-		if err := h.containerService.StartContainerWithInit(c.Request.Context(), id); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Container started, initialization in progress",
-			"init_status": "cloning",
-		})
-		return
-	}
-
-	// Otherwise just start normally
 	if err := h.containerService.StartContainer(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		switch err {
+		case services.ErrContainerNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+		case services.ErrContainerNotReady:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Container initialization not complete. Please wait for initialization to finish."})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
 		return
 	}
 
@@ -200,6 +183,31 @@ func (h *ContainerHandler) GetContainerStatus(c *gin.Context) {
 		"init_status":  container.InitStatus,
 		"init_message": container.InitMessage,
 	})
+}
+
+// GetContainerLogs gets logs for a container
+func (h *ContainerHandler) GetContainerLogs(c *gin.Context) {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid container ID"})
+		return
+	}
+
+	// Get limit from query param, default 100
+	limit := 100
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	logs, err := h.containerService.GetContainerLogs(id, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get logs"})
+		return
+	}
+
+	c.JSON(http.StatusOK, logs)
 }
 
 // parseID parses a string ID to uint

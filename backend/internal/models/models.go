@@ -50,9 +50,7 @@ type Container struct {
 // ClaudeConfig represents Claude Code configuration
 type ClaudeConfig struct {
 	gorm.Model
-	APIKey         string `gorm:"type:text" json:"-"`      // Encrypted
-	APIURL         string `json:"api_url,omitempty"`
-	CustomEnvVars  string `gorm:"type:text" json:"custom_env_vars,omitempty"` // JSON format
+	CustomEnvVars  string `gorm:"type:text" json:"custom_env_vars,omitempty"` // Multi-line VAR=value format
 	StartupCommand string `json:"startup_command,omitempty"`
 }
 
@@ -71,4 +69,28 @@ const (
 	InitStatusInitializing = "initializing"
 	InitStatusReady        = "ready"
 	InitStatusFailed       = "failed"
+)
+
+// ContainerLog represents a log entry for container operations
+type ContainerLog struct {
+	gorm.Model
+	ContainerID uint   `gorm:"index" json:"container_id"`
+	Level       string `json:"level"` // info, warn, error
+	Stage       string `json:"stage"` // startup, clone, init, ready
+	Message     string `gorm:"type:text" json:"message"`
+}
+
+// LogLevel constants
+const (
+	LogLevelInfo  = "info"
+	LogLevelWarn  = "warn"
+	LogLevelError = "error"
+)
+
+// LogStage constants
+const (
+	LogStageStartup = "startup"
+	LogStageClone   = "clone"
+	LogStageInit    = "init"
+	LogStageReady   = "ready"
 )

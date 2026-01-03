@@ -34,6 +34,7 @@ func Initialize(dbPath string) (*gorm.DB, error) {
 		&models.Repository{},
 		&models.Container{},
 		&models.ClaudeConfig{},
+		&models.ContainerLog{},
 	); err != nil {
 		return nil, err
 	}

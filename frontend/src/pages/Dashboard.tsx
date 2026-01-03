@@ -17,6 +17,7 @@ import {
   Spin,
   Progress,
   Typography,
+  Timeline,
 } from 'antd'
 import {
   PlayCircleOutlined,
@@ -28,6 +29,11 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   LoadingOutlined,
+  ReloadOutlined,
+  FileTextOutlined,
+  InfoCircleOutlined,
+  WarningOutlined,
+  CloseCircleFilled,
 } from '@ant-design/icons'
 import { containerApi, repoApi } from '../services/api'
 
@@ -58,6 +64,15 @@ interface RemoteRepository {
   private: boolean
 }
 
+interface ContainerLog {
+  ID: number
+  CreatedAt: string
+  container_id: number
+  level: string
+  stage: string
+  message: string
+}
+
 export default function Dashboard() {
   const [containers, setContainers] = useState<Container[]>([])
   const [remoteRepos, setRemoteRepos] = useState<RemoteRepository[]>([])
@@ -66,6 +81,10 @@ export default function Dashboard() {
   const [creating, setCreating] = useState(false)
   const [loadingRepos, setLoadingRepos] = useState(false)
   const [repoSource, setRepoSource] = useState<'select' | 'url'>('select')
+  const [logModalVisible, setLogModalVisible] = useState(false)
+  const [selectedContainerId, setSelectedContainerId] = useState<number | null>(null)
+  const [logs, setLogs] = useState<ContainerLog[]>([])
+  const [loadingLogs, setLoadingLogs] = useState(false)
   const [form] = Form.useForm()
   const navigate = useNavigate()
 
@@ -103,7 +122,7 @@ export default function Dashboard() {
   // Poll for container status updates
   useEffect(() => {
     const initializingContainers = containers.filter(
-      c => c.init_status === 'cloning' || c.init_status === 'initializing'
+      c => c.init_status === 'pending' || c.init_status === 'cloning' || c.init_status === 'initializing'
     )
     
     if (initializingContainers.length === 0) return
@@ -148,7 +167,7 @@ export default function Dashboard() {
       }
 
       await containerApi.create(values.name, gitRepoUrl, gitRepoName)
-      message.success('Container created successfully')
+      message.success('Container created! Initialization starting...')
       setModalVisible(false)
       form.resetFields()
       fetchContainers()
@@ -163,7 +182,7 @@ export default function Dashboard() {
   const handleStart = async (id: number) => {
     try {
       await containerApi.start(id)
-      message.success('Container starting...')
+      message.success('Container started')
       fetchContainers()
     } catch (error: unknown) {
       const err = error as { response?: { data?: { error?: string } } }
@@ -209,8 +228,8 @@ export default function Dashboard() {
       case 'pending':
         return (
           <div>
-            <Tag color="default">Pending</Tag>
-            <Text type="secondary" style={{ fontSize: 12 }}>Start to begin setup</Text>
+            <Tag icon={<LoadingOutlined spin />} color="processing">Starting</Tag>
+            <Text type="secondary" style={{ fontSize: 12 }}>Preparing container...</Text>
           </div>
         )
       case 'cloning':
@@ -239,11 +258,59 @@ export default function Dashboard() {
         return (
           <div>
             <Tag icon={<CloseCircleOutlined />} color="error">Failed</Tag>
-            <Text type="danger" style={{ fontSize: 12 }}>{init_message}</Text>
+            <Text type="danger" style={{ fontSize: 12, display: 'block' }}>{init_message}</Text>
           </div>
         )
       default:
         return null
+    }
+  }
+
+  const canAccessTerminal = (container: Container) => {
+    return container.status === 'running' && container.init_status === 'ready'
+  }
+
+  const canStartContainer = (container: Container) => {
+    return container.status === 'stopped' && container.init_status === 'ready'
+  }
+
+  const canStopContainer = (container: Container) => {
+    return container.status === 'running'
+  }
+
+  const handleViewLogs = async (containerId: number) => {
+    setSelectedContainerId(containerId)
+    setLogModalVisible(true)
+    setLoadingLogs(true)
+    try {
+      const response = await containerApi.getLogs(containerId, 50)
+      setLogs(response.data || [])
+    } catch (error) {
+      message.error('Failed to fetch logs')
+    } finally {
+      setLoadingLogs(false)
+    }
+  }
+
+  const getLogIcon = (level: string) => {
+    switch (level) {
+      case 'error':
+        return <CloseCircleFilled style={{ color: '#ff4d4f' }} />
+      case 'warn':
+        return <WarningOutlined style={{ color: '#faad14' }} />
+      default:
+        return <InfoCircleOutlined style={{ color: '#1890ff' }} />
+    }
+  }
+
+  const getLogColor = (level: string) => {
+    switch (level) {
+      case 'error':
+        return 'red'
+      case 'warn':
+        return 'orange'
+      default:
+        return 'blue'
     }
   }
 
@@ -283,7 +350,7 @@ export default function Dashboard() {
                 title={container.name}
                 extra={getStatusTag(container.status)}
                 actions={[
-                  container.status === 'running' ? (
+                  canStopContainer(container) ? (
                     <Button
                       type="text"
                       icon={<PauseCircleOutlined />}
@@ -291,7 +358,7 @@ export default function Dashboard() {
                     >
                       Stop
                     </Button>
-                  ) : (
+                  ) : canStartContainer(container) ? (
                     <Button
                       type="text"
                       icon={<PlayCircleOutlined />}
@@ -299,12 +366,23 @@ export default function Dashboard() {
                     >
                       Start
                     </Button>
+                  ) : (
+                    <Button type="text" disabled icon={<ReloadOutlined spin />}>
+                      Initializing
+                    </Button>
                   ),
+                  <Button
+                    type="text"
+                    icon={<FileTextOutlined />}
+                    onClick={() => handleViewLogs(container.id)}
+                  >
+                    Logs
+                  </Button>,
                   <Button
                     type="text"
                     icon={<CodeOutlined />}
                     onClick={() => navigate(`/terminal/${container.id}`)}
-                    disabled={container.status !== 'running' || container.init_status !== 'ready'}
+                    disabled={!canAccessTerminal(container)}
                   >
                     Terminal
                   </Button>,
@@ -323,7 +401,7 @@ export default function Dashboard() {
                 <p><strong>Repository:</strong> {container.git_repo_name || 'N/A'}</p>
                 <p><strong>Created:</strong> {new Date(container.created_at).toLocaleString()}</p>
                 <div style={{ marginTop: 8 }}>
-                  <strong>Init Status:</strong>
+                  <strong>Status:</strong>
                   {getInitStatusDisplay(container)}
                 </div>
               </Card>
@@ -403,7 +481,7 @@ export default function Dashboard() {
           <Form.Item>
             <Space>
               <Button type="primary" htmlType="submit" loading={creating}>
-                Create & Initialize
+                Create Container
               </Button>
               <Button onClick={() => {
                 setModalVisible(false)
@@ -417,16 +495,62 @@ export default function Dashboard() {
 
         <div style={{ marginTop: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
           <Text type="secondary">
-            <strong>What happens next:</strong>
-            <ol style={{ marginTop: 8, paddingLeft: 20 }}>
-              <li>Container will be created</li>
-              <li>Click "Start" to begin initialization</li>
+            <strong>What happens:</strong>
+            <ol style={{ marginTop: 8, paddingLeft: 20, marginBottom: 0 }}>
+              <li>Container will be created and started automatically</li>
               <li>Repository will be cloned inside the container</li>
-              <li>Claude Code will automatically set up the development environment</li>
+              <li>Claude Code will set up the development environment</li>
               <li>Once ready, you can access the terminal</li>
             </ol>
           </Text>
         </div>
+      </Modal>
+
+      <Modal
+        title="Container Logs"
+        open={logModalVisible}
+        onCancel={() => {
+          setLogModalVisible(false)
+          setLogs([])
+          setSelectedContainerId(null)
+        }}
+        footer={[
+          <Button key="refresh" icon={<SyncOutlined />} onClick={() => selectedContainerId && handleViewLogs(selectedContainerId)}>
+            Refresh
+          </Button>,
+          <Button key="close" onClick={() => setLogModalVisible(false)}>
+            Close
+          </Button>,
+        ]}
+        width={700}
+      >
+        {loadingLogs ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Spin size="large" />
+          </div>
+        ) : logs.length === 0 ? (
+          <Empty description="No logs yet" />
+        ) : (
+          <div style={{ maxHeight: 400, overflow: 'auto' }}>
+            <Timeline
+              items={logs.slice().reverse().map((log) => ({
+                dot: getLogIcon(log.level),
+                color: getLogColor(log.level),
+                children: (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Tag color={getLogColor(log.level)}>{log.stage}</Tag>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {new Date(log.CreatedAt).toLocaleString()}
+                      </Text>
+                    </div>
+                    <div style={{ marginTop: 4 }}>{log.message}</div>
+                  </div>
+                ),
+              }))}
+            />
+          </div>
+        )}
       </Modal>
     </div>
   )

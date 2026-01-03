@@ -17,10 +17,10 @@ import (
 )
 
 var (
-	ErrContainerNotFound      = errors.New("container not found")
-	ErrContainerAlreadyExists = errors.New("container already exists")
-	ErrNoAPIKeyConfigured     = errors.New("Claude API key not configured")
+	ErrContainerNotFound       = errors.New("container not found")
+	ErrContainerAlreadyExists  = errors.New("container already exists")
 	ErrNoGitHubTokenConfigured = errors.New("GitHub token not configured")
+	ErrContainerNotReady       = errors.New("container initialization not complete")
 )
 
 // ContainerService handles container operations
@@ -61,13 +61,8 @@ type CreateContainerInput struct {
 	GitRepoName string `json:"git_repo_name,omitempty"`        // Optional: repo name, extracted from URL if not provided
 }
 
-// CreateContainer creates a new container and starts initialization
+// CreateContainer creates a new container and automatically starts initialization
 func (s *ContainerService) CreateContainer(ctx context.Context, input CreateContainerInput) (*models.Container, error) {
-	// Check if Claude API key is configured
-	if !s.claudeService.HasAPIKey() {
-		return nil, ErrNoAPIKeyConfigured
-	}
-
 	// Check if GitHub token is configured
 	if !s.githubService.HasToken() {
 		return nil, ErrNoGitHubTokenConfigured
@@ -79,7 +74,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		repoName = extractRepoName(input.GitRepoURL)
 	}
 
-	// Get environment variables from Claude config
+	// Get environment variables from config
 	envVars, err := s.claudeService.GetContainerEnvVars()
 	if err != nil {
 		return nil, err
@@ -136,20 +131,39 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		return nil, err
 	}
 
+	// Add initial log
+	s.addLog(container.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Container created for repository: %s", input.GitRepoURL))
+
+	// Auto-start the container and begin initialization
+	go func() {
+		if err := s.startAndInitialize(container.ID); err != nil {
+			log.Printf("Failed to auto-start container %d: %v", container.ID, err)
+		}
+	}()
+
 	return container, nil
 }
 
-// StartContainerWithInit starts a container and begins initialization
-func (s *ContainerService) StartContainerWithInit(ctx context.Context, id uint) error {
-	container, err := s.GetContainer(id)
+// startAndInitialize starts the container and runs initialization
+func (s *ContainerService) startAndInitialize(containerID uint) error {
+	ctx := context.Background()
+	
+	container, err := s.GetContainer(containerID)
 	if err != nil {
 		return err
 	}
 
+	// Log startup
+	s.addLog(containerID, models.LogLevelInfo, models.LogStageStartup, "Starting container...")
+
 	// Start the container
 	if err := s.dockerClient.StartContainer(ctx, container.DockerID); err != nil {
+		s.addLog(containerID, models.LogLevelError, models.LogStageStartup, fmt.Sprintf("Failed to start container: %v", err))
+		s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Failed to start: %v", err))
 		return err
 	}
+
+	s.addLog(containerID, models.LogLevelInfo, models.LogStageStartup, "Container started successfully")
 
 	// Update status
 	now := time.Now()
@@ -160,9 +174,8 @@ func (s *ContainerService) StartContainerWithInit(ctx context.Context, id uint) 
 		return err
 	}
 
-	// Start initialization in background
-	go s.runInitialization(container.ID)
-
+	// Run initialization
+	s.runInitialization(containerID)
 	return nil
 }
 
@@ -177,22 +190,28 @@ func (s *ContainerService) runInitialization(containerID uint) {
 
 	container, err := s.GetContainer(containerID)
 	if err != nil {
+		s.addLog(containerID, models.LogLevelError, models.LogStageInit, fmt.Sprintf("Failed to get container: %v", err))
 		log.Printf("Init error: failed to get container %d: %v", containerID, err)
 		return
 	}
 
 	// Step 1: Clone repository
+	s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, fmt.Sprintf("Cloning repository: %s", container.GitRepoURL))
 	s.updateInitStatus(containerID, models.InitStatusCloning, "Cloning repository...")
 	
 	if err := s.cloneRepository(ctx, container); err != nil {
+		s.addLog(containerID, models.LogLevelError, models.LogStageClone, fmt.Sprintf("Clone failed: %v", err))
 		s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Clone failed: %v", err))
 		return
 	}
+	s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, "Repository cloned successfully")
 
 	// Step 2: Run Claude Code initialization
+	s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, "Starting Claude Code initialization...")
 	s.updateInitStatus(containerID, models.InitStatusInitializing, "Initializing project environment...")
 	
 	if err := s.runClaudeInit(ctx, container); err != nil {
+		s.addLog(containerID, models.LogLevelError, models.LogStageInit, fmt.Sprintf("Initialization failed: %v", err))
 		s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Initialization failed: %v", err))
 		return
 	}
@@ -205,6 +224,7 @@ func (s *ContainerService) runInitialization(containerID uint) {
 		"initialized_at": &now,
 	})
 
+	s.addLog(containerID, models.LogLevelInfo, models.LogStageReady, "Container initialization completed successfully. Environment is ready!")
 	log.Printf("Container %d initialization completed successfully", containerID)
 }
 
@@ -321,16 +341,53 @@ func (s *ContainerService) updateInitStatus(containerID uint, status, message st
 	log.Printf("Container %d init status: %s - %s", containerID, status, message)
 }
 
-// StartContainer starts a container (without initialization)
+// addLog adds a log entry for a container
+func (s *ContainerService) addLog(containerID uint, level, stage, message string) {
+	logEntry := &models.ContainerLog{
+		ContainerID: containerID,
+		Level:       level,
+		Stage:       stage,
+		Message:     message,
+	}
+	if err := s.db.Create(logEntry).Error; err != nil {
+		log.Printf("Failed to save log for container %d: %v", containerID, err)
+	}
+}
+
+// GetContainerLogs retrieves logs for a container
+func (s *ContainerService) GetContainerLogs(containerID uint, limit int) ([]models.ContainerLog, error) {
+	var logs []models.ContainerLog
+	query := s.db.Where("container_id = ?", containerID).Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+// StartContainer starts a container (only if already initialized or restarting)
 func (s *ContainerService) StartContainer(ctx context.Context, id uint) error {
 	container, err := s.GetContainer(id)
 	if err != nil {
 		return err
 	}
 
+	// Only allow starting if initialization is complete
+	if container.InitStatus != models.InitStatusReady {
+		return ErrContainerNotReady
+	}
+
+	// Add log for restart
+	s.addLog(id, models.LogLevelInfo, models.LogStageStartup, "Restarting container...")
+
 	if err := s.dockerClient.StartContainer(ctx, container.DockerID); err != nil {
+		s.addLog(id, models.LogLevelError, models.LogStageStartup, fmt.Sprintf("Failed to restart: %v", err))
 		return err
 	}
+
+	s.addLog(id, models.LogLevelInfo, models.LogStageStartup, "Container restarted successfully")
 
 	// Update status
 	now := time.Now()
@@ -352,10 +409,15 @@ func (s *ContainerService) StopContainer(ctx context.Context, id uint) error {
 		cancel.(context.CancelFunc)()
 	}
 
+	s.addLog(id, models.LogLevelInfo, models.LogStageStartup, "Stopping container...")
+
 	timeout := 30
 	if err := s.dockerClient.StopContainer(ctx, container.DockerID, &timeout); err != nil {
+		s.addLog(id, models.LogLevelError, models.LogStageStartup, fmt.Sprintf("Failed to stop: %v", err))
 		return err
 	}
+
+	s.addLog(id, models.LogLevelInfo, models.LogStageStartup, "Container stopped")
 
 	// Update status
 	now := time.Now()

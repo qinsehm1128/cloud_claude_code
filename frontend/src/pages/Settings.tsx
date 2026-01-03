@@ -1,21 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Card, Form, Input, Button, message, Tabs, Space, Alert } from 'antd'
+import { Card, Form, Input, Button, message, Tabs, Alert } from 'antd'
 import { settingsApi } from '../services/api'
 
 const { TextArea } = Input
-
-interface ClaudeConfig {
-  has_api_key: boolean
-  api_url: string
-  custom_env_vars: string
-  startup_command: string
-}
 
 export default function Settings() {
   const [githubForm] = Form.useForm()
   const [claudeForm] = Form.useForm()
   const [githubConfigured, setGithubConfigured] = useState(false)
-  const [claudeConfig, setClaudeConfig] = useState<ClaudeConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [savingGithub, setSavingGithub] = useState(false)
   const [savingClaude, setSavingClaude] = useState(false)
@@ -28,9 +20,7 @@ export default function Settings() {
           settingsApi.getClaudeConfig(),
         ])
         setGithubConfigured(githubRes.data.configured)
-        setClaudeConfig(claudeRes.data)
         claudeForm.setFieldsValue({
-          api_url: claudeRes.data.api_url,
           custom_env_vars: claudeRes.data.custom_env_vars,
           startup_command: claudeRes.data.startup_command || 'claude --dangerously-skip-permissions',
         })
@@ -59,21 +49,16 @@ export default function Settings() {
   }
 
   const handleSaveClaude = async (values: {
-    api_key?: string
-    api_url?: string
     custom_env_vars?: string
     startup_command?: string
   }) => {
     setSavingClaude(true)
     try {
       await settingsApi.saveClaudeConfig(values)
-      message.success('Claude configuration saved successfully')
-      // Refresh config
-      const res = await settingsApi.getClaudeConfig()
-      setClaudeConfig(res.data)
+      message.success('Configuration saved successfully')
     } catch (error: unknown) {
       const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to save Claude configuration')
+      message.error(err.response?.data?.error || 'Failed to save configuration')
     } finally {
       setSavingClaude(false)
     }
@@ -98,7 +83,7 @@ export default function Settings() {
               name="token"
               label="Personal Access Token"
               rules={[{ required: true, message: 'Please enter your GitHub token' }]}
-              extra="Create a token at GitHub Settings > Developer settings > Personal access tokens"
+              extra="Create a token at GitHub Settings > Developer settings > Personal access tokens. Required scopes: repo"
             >
               <Input.Password placeholder="ghp_xxxxxxxxxxxx" />
             </Form.Item>
@@ -112,49 +97,44 @@ export default function Settings() {
       ),
     },
     {
-      key: 'claude',
-      label: 'Claude Code',
+      key: 'environment',
+      label: 'Environment Variables',
       children: (
         <Card>
-          {claudeConfig?.has_api_key && (
-            <Alert
-              message="Claude API key is configured"
-              type="success"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-          )}
+          <Alert
+            message="Environment Variables"
+            description="These environment variables will be injected into all containers. Include your API keys and other configuration here."
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
           <Form form={claudeForm} onFinish={handleSaveClaude} layout="vertical">
             <Form.Item
-              name="api_key"
-              label="API Key"
-              extra="Leave empty to keep existing key"
-            >
-              <Input.Password placeholder="sk-ant-xxxxxxxxxxxx" />
-            </Form.Item>
-            <Form.Item
-              name="api_url"
-              label="API URL (Optional)"
-              extra="Custom API endpoint URL (e.g., for proxy or alternative providers)"
-            >
-              <Input placeholder="https://api.anthropic.com" />
-            </Form.Item>
-            <Form.Item
               name="custom_env_vars"
-              label="Custom Environment Variables"
-              extra="One per line in VAR_NAME=value format"
+              label="Environment Variables"
+              extra="One per line in VAR_NAME=value format. Example: ANTHROPIC_API_KEY=sk-ant-xxx"
             >
               <TextArea
-                rows={4}
-                placeholder="MY_VAR=value&#10;ANOTHER_VAR=another_value"
+                rows={10}
+                placeholder={`# API Keys
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxx
+OPENAI_API_KEY=sk-xxxxxxxxxxxx
+
+# Custom Configuration
+MY_CUSTOM_VAR=value
+DEBUG=true`}
+                style={{ fontFamily: 'monospace' }}
               />
             </Form.Item>
             <Form.Item
               name="startup_command"
-              label="Startup Command"
-              extra="Command to run when starting Claude Code"
+              label="Claude Code Startup Command"
+              extra="Command to run Claude Code for environment initialization"
             >
-              <Input placeholder="claude --dangerously-skip-permissions" />
+              <Input 
+                placeholder="claude --dangerously-skip-permissions" 
+                style={{ fontFamily: 'monospace' }}
+              />
             </Form.Item>
             <Form.Item>
               <Button type="primary" htmlType="submit" loading={savingClaude}>

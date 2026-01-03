@@ -1,30 +1,44 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Button, message, Spin, Alert } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
+import { Button, message, Spin, Alert, Tabs, Splitter } from 'antd'
+import { ArrowLeftOutlined, PlusOutlined, CloseOutlined } from '@ant-design/icons'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebLinksAddon } from 'xterm-addon-web-links'
 import { TerminalWebSocket } from '../services/websocket'
 import { containerApi } from '../services/api'
+import FileBrowser from '../components/FileManager/FileBrowser'
 import 'xterm/css/xterm.css'
 
 interface Container {
   id: number
   name: string
   status: string
+  init_status: string
+  work_dir?: string
 }
+
+interface TerminalTab {
+  key: string
+  label: string
+  terminal: Terminal | null
+  ws: TerminalWebSocket | null
+  fitAddon: FitAddon | null
+  connected: boolean
+}
+
+let tabCounter = 0
 
 export default function ContainerTerminal() {
   const { containerId } = useParams<{ containerId: string }>()
   const navigate = useNavigate()
-  const terminalRef = useRef<HTMLDivElement>(null)
-  const [terminal, setTerminal] = useState<Terminal | null>(null)
-  const [ws, setWs] = useState<TerminalWebSocket | null>(null)
+  const terminalRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [container, setContainer] = useState<Container | null>(null)
   const [loading, setLoading] = useState(true)
-  const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tabs, setTabs] = useState<TerminalTab[]>([])
+  const [activeKey, setActiveKey] = useState<string>('')
+  const [showFileBrowser, setShowFileBrowser] = useState(true)
 
   // Fetch container info
   useEffect(() => {
@@ -35,6 +49,8 @@ export default function ContainerTerminal() {
         setContainer(response.data)
         if (response.data.status !== 'running') {
           setError('Container is not running')
+        } else if (response.data.init_status !== 'ready') {
+          setError('Container initialization not complete')
         }
       } catch (err) {
         setError('Failed to fetch container information')
@@ -45,89 +61,160 @@ export default function ContainerTerminal() {
     fetchContainer()
   }, [containerId])
 
-  // Initialize terminal
+  // Create initial terminal tab
   useEffect(() => {
-    if (!terminalRef.current || !container || container.status !== 'running') return
-
-    const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-      },
-    })
-
-    const fitAddon = new FitAddon()
-    const webLinksAddon = new WebLinksAddon()
-
-    term.loadAddon(fitAddon)
-    term.loadAddon(webLinksAddon)
-    term.open(terminalRef.current)
-    fitAddon.fit()
-
-    setTerminal(term)
-
-    // Handle window resize
-    const handleResize = () => {
-      fitAddon.fit()
-    }
-    window.addEventListener('resize', handleResize)
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      term.dispose()
+    if (container && container.status === 'running' && container.init_status === 'ready' && tabs.length === 0) {
+      addNewTab()
     }
   }, [container])
 
-  // Initialize WebSocket connection
+  const addNewTab = useCallback(() => {
+    tabCounter++
+    const newKey = `terminal-${tabCounter}`
+    const newTab: TerminalTab = {
+      key: newKey,
+      label: `Terminal ${tabCounter}`,
+      terminal: null,
+      ws: null,
+      fitAddon: null,
+      connected: false,
+    }
+    setTabs(prev => [...prev, newTab])
+    setActiveKey(newKey)
+  }, [])
+
+  const removeTab = useCallback((targetKey: string) => {
+    const tab = tabs.find(t => t.key === targetKey)
+    if (tab) {
+      tab.ws?.disconnect()
+      tab.terminal?.dispose()
+    }
+
+    const newTabs = tabs.filter(t => t.key !== targetKey)
+    setTabs(newTabs)
+
+    if (activeKey === targetKey && newTabs.length > 0) {
+      setActiveKey(newTabs[newTabs.length - 1].key)
+    }
+  }, [tabs, activeKey])
+
+  // Initialize terminal for active tab
   useEffect(() => {
-    if (!terminal || !containerId || !container || container.status !== 'running') return
+    if (!activeKey || !container || !containerId) return
 
-    const websocket = new TerminalWebSocket(containerId, {
-      onMessage: (msg) => {
-        if (msg.type === 'output' && msg.data) {
-          terminal.write(msg.data)
-        } else if (msg.type === 'error' && msg.error) {
-          message.error(msg.error)
-        }
-      },
-      onConnect: () => {
-        setConnected(true)
-        terminal.write('\r\n\x1b[32mConnected to container terminal\x1b[0m\r\n\r\n')
-        // Send initial resize
-        websocket.resize(terminal.cols, terminal.rows)
-      },
-      onDisconnect: () => {
-        setConnected(false)
-        terminal.write('\r\n\x1b[31mDisconnected from container\x1b[0m\r\n')
-      },
-      onError: (err) => {
-        message.error(err)
-      },
-    })
+    const tab = tabs.find(t => t.key === activeKey)
+    if (!tab || tab.terminal) return
 
-    websocket.connect()
-    setWs(websocket)
+    // Wait for DOM element
+    const initTerminal = () => {
+      const element = terminalRefs.current.get(activeKey)
+      if (!element) {
+        setTimeout(initTerminal, 100)
+        return
+      }
 
-    // Handle terminal input
-    const inputDisposable = terminal.onData((data) => {
-      websocket.send(data)
-    })
+      const term = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        theme: {
+          background: '#1e1e1e',
+          foreground: '#d4d4d4',
+          cursor: '#d4d4d4',
+        },
+      })
 
-    // Handle terminal resize
-    const resizeDisposable = terminal.onResize(({ cols, rows }) => {
-      websocket.resize(cols, rows)
-    })
+      const fitAddon = new FitAddon()
+      const webLinksAddon = new WebLinksAddon()
+
+      term.loadAddon(fitAddon)
+      term.loadAddon(webLinksAddon)
+      term.open(element)
+      fitAddon.fit()
+
+      // Create WebSocket connection
+      const ws = new TerminalWebSocket(containerId, {
+        onMessage: (msg) => {
+          if (msg.type === 'output' && msg.data) {
+            term.write(msg.data)
+          } else if (msg.type === 'error' && msg.error) {
+            message.error(msg.error)
+          }
+        },
+        onConnect: () => {
+          setTabs(prev => prev.map(t => 
+            t.key === activeKey ? { ...t, connected: true } : t
+          ))
+          term.write('\r\n\x1b[32mConnected to container terminal\x1b[0m\r\n\r\n')
+          ws.resize(term.cols, term.rows)
+        },
+        onDisconnect: () => {
+          setTabs(prev => prev.map(t => 
+            t.key === activeKey ? { ...t, connected: false } : t
+          ))
+          term.write('\r\n\x1b[31mDisconnected from container\x1b[0m\r\n')
+        },
+        onError: (err) => {
+          message.error(err)
+        },
+      })
+
+      ws.connect()
+
+      // Handle terminal input
+      term.onData((data) => {
+        ws.send(data)
+      })
+
+      // Handle terminal resize
+      term.onResize(({ cols, rows }) => {
+        ws.resize(cols, rows)
+      })
+
+      // Update tab
+      setTabs(prev => prev.map(t => 
+        t.key === activeKey ? { ...t, terminal: term, ws, fitAddon } : t
+      ))
+    }
+
+    initTerminal()
 
     return () => {
-      inputDisposable.dispose()
-      resizeDisposable.dispose()
-      websocket.disconnect()
+      // Cleanup handled in removeTab
     }
-  }, [terminal, containerId, container])
+  }, [activeKey, container, containerId, tabs])
+
+  // Handle window resize
+  useEffect(() => {
+    const handleResize = () => {
+      tabs.forEach(tab => {
+        if (tab.fitAddon && tab.terminal) {
+          tab.fitAddon.fit()
+        }
+      })
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [tabs])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      tabs.forEach(tab => {
+        tab.ws?.disconnect()
+        tab.terminal?.dispose()
+      })
+    }
+  }, [])
+
+  const setTerminalRef = useCallback((key: string, element: HTMLDivElement | null) => {
+    if (element) {
+      terminalRefs.current.set(key, element)
+    } else {
+      terminalRefs.current.delete(key)
+    }
+  }, [])
 
   if (loading) {
     return (
@@ -152,39 +239,91 @@ export default function ContainerTerminal() {
     )
   }
 
-  return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate('/')}
+  const tabItems = tabs.map(tab => ({
+    key: tab.key,
+    label: (
+      <span>
+        {tab.label}
+        <span
+          style={{
+            marginLeft: 8,
+            color: tab.connected ? '#52c41a' : '#ff4d4f',
+          }}
         >
+          ●
+        </span>
+        {tabs.length > 1 && (
+          <CloseOutlined
+            style={{ marginLeft: 8, fontSize: 12 }}
+            onClick={(e) => {
+              e.stopPropagation()
+              removeTab(tab.key)
+            }}
+          />
+        )}
+      </span>
+    ),
+    children: (
+      <div
+        ref={(el) => setTerminalRef(tab.key, el)}
+        style={{
+          height: 'calc(100vh - 200px)',
+          backgroundColor: '#1e1e1e',
+          borderRadius: 4,
+        }}
+      />
+    ),
+  }))
+
+  return (
+    <div style={{ height: 'calc(100vh - 112px)' }}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
           Back to Dashboard
         </Button>
         <div>
           <span style={{ marginRight: 16 }}>
             <strong>Container:</strong> {container?.name}
           </span>
-          <span
-            style={{
-              color: connected ? '#52c41a' : '#ff4d4f',
-              fontWeight: 'bold',
-            }}
+          <Button 
+            type={showFileBrowser ? 'primary' : 'default'}
+            onClick={() => setShowFileBrowser(!showFileBrowser)}
+            style={{ marginRight: 8 }}
           >
-            {connected ? '● Connected' : '○ Disconnected'}
-          </span>
+            {showFileBrowser ? 'Hide Files' : 'Show Files'}
+          </Button>
+          <Button icon={<PlusOutlined />} onClick={addNewTab}>
+            New Terminal
+          </Button>
         </div>
       </div>
-      <div
-        ref={terminalRef}
-        style={{
-          flex: 1,
-          backgroundColor: '#1e1e1e',
-          borderRadius: 4,
-          padding: 8,
-          minHeight: 400,
-        }}
-      />
+
+      <Splitter style={{ height: 'calc(100% - 48px)' }}>
+        {showFileBrowser && (
+          <Splitter.Panel defaultSize="25%" min="15%" max="40%">
+            <div style={{ height: '100%', overflow: 'auto', background: '#fff', borderRadius: 4, padding: 8 }}>
+              <FileBrowser containerId={parseInt(containerId || '0')} />
+            </div>
+          </Splitter.Panel>
+        )}
+        <Splitter.Panel>
+          <Tabs
+            type="card"
+            activeKey={activeKey}
+            onChange={setActiveKey}
+            items={tabItems}
+            style={{ height: '100%' }}
+            tabBarExtraContent={
+              <Button 
+                type="text" 
+                icon={<PlusOutlined />} 
+                onClick={addNewTab}
+                size="small"
+              />
+            }
+          />
+        </Splitter.Panel>
+      </Splitter>
     </div>
   )
 }

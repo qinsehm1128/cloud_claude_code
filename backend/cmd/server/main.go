@@ -98,6 +98,7 @@ func main() {
 		protected.POST("/containers", containerHandler.CreateContainer)
 		protected.GET("/containers/:id", containerHandler.GetContainer)
 		protected.GET("/containers/:id/status", containerHandler.GetContainerStatus)
+		protected.GET("/containers/:id/logs", containerHandler.GetContainerLogs)
 		protected.POST("/containers/:id/start", containerHandler.StartContainer)
 		protected.POST("/containers/:id/stop", containerHandler.StopContainer)
 		protected.DELETE("/containers/:id", containerHandler.DeleteContainer)
