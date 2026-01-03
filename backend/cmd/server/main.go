@@ -9,6 +9,7 @@ import (
 	"cc-platform/internal/handlers"
 	"cc-platform/internal/middleware"
 	"cc-platform/internal/services"
+	"cc-platform/internal/terminal"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,7 +26,27 @@ func main() {
 
 	// Initialize services
 	authService := services.NewAuthService(db, cfg)
+	githubService := services.NewGitHubService(db, cfg)
+	claudeConfigService := services.NewClaudeConfigService(db, cfg)
 	
+	containerService, err := services.NewContainerService(db, cfg, claudeConfigService)
+	if err != nil {
+		log.Fatalf("Failed to initialize container service: %v", err)
+	}
+	defer containerService.Close()
+
+	fileService, err := services.NewFileService(db)
+	if err != nil {
+		log.Fatalf("Failed to initialize file service: %v", err)
+	}
+	defer fileService.Close()
+
+	terminalService, err := terminal.NewTerminalService()
+	if err != nil {
+		log.Fatalf("Failed to initialize terminal service: %v", err)
+	}
+	defer terminalService.Close()
+
 	// Display generated credentials if applicable
 	if cfg.AdminUsername != "" && cfg.AdminPassword != "" {
 		log.Printf("Admin credentials - Username: %s, Password: %s", cfg.AdminUsername, cfg.AdminPassword)
@@ -41,8 +62,15 @@ func main() {
 	// CORS middleware
 	router.Use(middleware.CORS())
 
-	// Public routes
+	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService)
+	settingsHandler := handlers.NewSettingsHandler(githubService, claudeConfigService)
+	repoHandler := handlers.NewRepositoryHandler(githubService)
+	containerHandler := handlers.NewContainerHandler(containerService)
+	fileHandler := handlers.NewFileHandler(fileService)
+	terminalHandler := handlers.NewTerminalHandler(terminalService, containerService, authService)
+
+	// Public routes
 	router.POST("/api/auth/login", authHandler.Login)
 	router.POST("/api/auth/logout", authHandler.Logout)
 
@@ -50,17 +78,39 @@ func main() {
 	protected := router.Group("/api")
 	protected.Use(middleware.JWTAuth(authService))
 	{
+		// Auth routes
 		protected.GET("/auth/verify", authHandler.Verify)
 		
-		// Settings routes will be added here
-		// Repository routes will be added here
-		// Container routes will be added here
-		// File routes will be added here
+		// Settings routes
+		protected.GET("/settings/github", settingsHandler.GetGitHubConfig)
+		protected.POST("/settings/github", settingsHandler.SaveGitHubToken)
+		protected.GET("/settings/claude", settingsHandler.GetClaudeConfig)
+		protected.POST("/settings/claude", settingsHandler.SaveClaudeConfig)
+
+		// Repository routes
+		protected.GET("/repos/remote", repoHandler.ListRemoteRepositories)
+		protected.POST("/repos/clone", repoHandler.CloneRepository)
+		protected.GET("/repos/local", repoHandler.ListLocalRepositories)
+		protected.DELETE("/repos/:id", repoHandler.DeleteRepository)
+
+		// Container routes
+		protected.GET("/containers", containerHandler.ListContainers)
+		protected.POST("/containers", containerHandler.CreateContainer)
+		protected.GET("/containers/:id", containerHandler.GetContainer)
+		protected.POST("/containers/:id/start", containerHandler.StartContainer)
+		protected.POST("/containers/:id/stop", containerHandler.StopContainer)
+		protected.DELETE("/containers/:id", containerHandler.DeleteContainer)
+
+		// File routes
+		protected.GET("/files/:id/list", fileHandler.ListDirectory)
+		protected.GET("/files/:id/download", fileHandler.DownloadFile)
+		protected.POST("/files/:id/upload", fileHandler.UploadFile)
+		protected.DELETE("/files/:id", fileHandler.DeleteFile)
+		protected.POST("/files/:id/mkdir", fileHandler.CreateDirectory)
 	}
 
 	// WebSocket routes (with JWT query param auth)
-	// ws := router.Group("/api/ws")
-	// ws.GET("/terminal/:containerId", terminalHandler.HandleWebSocket)
+	router.GET("/api/ws/terminal/:id", terminalHandler.HandleWebSocket)
 
 	// Start server
 	port := os.Getenv("PORT")

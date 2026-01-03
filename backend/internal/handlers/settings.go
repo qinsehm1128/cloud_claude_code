@@ -32,14 +32,14 @@ type GitHubTokenResponse struct {
 	Configured bool `json:"configured"`
 }
 
-// GetGitHubSettings returns GitHub configuration status
-func (h *SettingsHandler) GetGitHubSettings(c *gin.Context) {
+// GetGitHubConfig returns GitHub configuration status
+func (h *SettingsHandler) GetGitHubConfig(c *gin.Context) {
 	configured := h.githubService.HasToken()
 	c.JSON(http.StatusOK, GitHubTokenResponse{Configured: configured})
 }
 
-// SaveGitHubSettings saves GitHub token
-func (h *SettingsHandler) SaveGitHubSettings(c *gin.Context) {
+// SaveGitHubToken saves GitHub token
+func (h *SettingsHandler) SaveGitHubToken(c *gin.Context) {
 	var req GitHubTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
@@ -62,8 +62,8 @@ type ClaudeConfigRequest struct {
 	StartupCommand string `json:"startup_command"`
 }
 
-// GetClaudeSettings returns Claude Code configuration
-func (h *SettingsHandler) GetClaudeSettings(c *gin.Context) {
+// GetClaudeConfig returns Claude Code configuration
+func (h *SettingsHandler) GetClaudeConfig(c *gin.Context) {
 	config, err := h.claudeService.GetConfig()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get configuration"})
@@ -73,8 +73,8 @@ func (h *SettingsHandler) GetClaudeSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, config)
 }
 
-// SaveClaudeSettings saves Claude Code configuration
-func (h *SettingsHandler) SaveClaudeSettings(c *gin.Context) {
+// SaveClaudeConfig saves Claude Code configuration
+func (h *SettingsHandler) SaveClaudeConfig(c *gin.Context) {
 	var req ClaudeConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})

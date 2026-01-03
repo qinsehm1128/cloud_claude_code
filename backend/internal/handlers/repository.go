@@ -21,8 +21,8 @@ func NewRepositoryHandler(githubService *services.GitHubService) *RepositoryHand
 	}
 }
 
-// ListRemoteRepos lists repositories from GitHub
-func (h *RepositoryHandler) ListRemoteRepos(c *gin.Context) {
+// ListRemoteRepositories lists repositories from GitHub
+func (h *RepositoryHandler) ListRemoteRepositories(c *gin.Context) {
 	repos, err := h.githubService.ListRemoteRepositories()
 	if err != nil {
 		if err == services.ErrGitHubTokenNotConfigured {
@@ -42,8 +42,8 @@ type CloneRepoRequest struct {
 	Name string `json:"name" binding:"required"`
 }
 
-// CloneRepo clones a repository from GitHub
-func (h *RepositoryHandler) CloneRepo(c *gin.Context) {
+// CloneRepository clones a repository from GitHub
+func (h *RepositoryHandler) CloneRepository(c *gin.Context) {
 	var req CloneRepoRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
@@ -63,8 +63,8 @@ func (h *RepositoryHandler) CloneRepo(c *gin.Context) {
 	c.JSON(http.StatusOK, repo)
 }
 
-// ListLocalRepos lists cloned repositories
-func (h *RepositoryHandler) ListLocalRepos(c *gin.Context) {
+// ListLocalRepositories lists cloned repositories
+func (h *RepositoryHandler) ListLocalRepositories(c *gin.Context) {
 	repos, err := h.githubService.ListLocalRepositories()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list repositories"})
@@ -96,8 +96,8 @@ func (h *RepositoryHandler) GetRepo(c *gin.Context) {
 	c.JSON(http.StatusOK, repo)
 }
 
-// DeleteRepo deletes a cloned repository
-func (h *RepositoryHandler) DeleteRepo(c *gin.Context) {
+// DeleteRepository deletes a cloned repository
+func (h *RepositoryHandler) DeleteRepository(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {

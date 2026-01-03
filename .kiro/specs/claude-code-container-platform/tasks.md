@@ -14,7 +14,7 @@
     - 创建 `main.go` 入口文件
     - _Requirements: 9.1_
 
-  - [ ] 1.2 初始化 React 前端项目
+  - [x] 1.2 初始化 React 前端项目
     - 使用 Vite 创建 React + TypeScript 项目
     - 安装依赖：Ant Design, xterm.js, axios
     - 配置代理到后端 API
@@ -157,12 +157,12 @@
     - 实现 DELETE /api/containers/:id
     - _Requirements: 5.1, 5.4, 5.5, 5.6, 5.7_
 
-  - [ ] 8.5 编写容器安全配置属性测试
+  - [x] 8.5 编写容器安全配置属性测试
     - **Property 11: Container Security Configuration**
     - 验证创建的容器具有正确的安全配置
     - **Validates: Requirements 5.2, 8.1, 8.2, 8.3, 8.6, 8.9**
 
-  - [ ] 8.6 编写容器列表属性测试
+  - [x] 8.6 编写容器列表属性测试
     - **Property 7: Container Listing Completeness**
     - 验证返回的容器包含所有必需字段
     - **Validates: Requirements 5.7**
@@ -170,14 +170,14 @@
 - [ ] 9. Checkpoint - 容器管理模块完成
   - 确保所有测试通过，如有问题请询问用户
 
-- [ ] 10. 终端交互模块
-  - [ ] 10.1 实现 PTY 管理
+- [x] 10. 终端交互模块
+  - [x] 10.1 实现 PTY 管理
     - 创建 `internal/terminal/pty.go`
     - 实现容器 exec 和 PTY 附加
     - 实现 PTY 大小调整
     - _Requirements: 6.1, 6.6_
 
-  - [ ] 10.2 实现 WebSocket 终端服务
+  - [x] 10.2 实现 WebSocket 终端服务
     - 创建 `internal/terminal/websocket.go`
     - 实现 WebSocket 连接处理
     - 实现输入转发到容器
@@ -185,20 +185,20 @@
     - 实现多客户端广播
     - _Requirements: 6.1, 6.2, 6.3, 6.5, 6.7_
 
-  - [ ] 10.3 实现终端 WebSocket 路由
+  - [x] 10.3 实现终端 WebSocket 路由
     - 创建 `internal/handlers/terminal.go`
     - 实现 GET /api/ws/terminal/:containerId
     - 处理连接升级和消息路由
     - _Requirements: 6.1, 6.4_
 
-- [ ] 11. 文件管理模块
-  - [ ] 11.1 实现路径验证工具
+- [x] 11. 文件管理模块
+  - [x] 11.1 实现路径验证工具
     - 创建 `pkg/pathutil/validate.go`
     - 实现路径清理和验证
     - 防止路径遍历攻击
     - _Requirements: 7.4, 7.6_
 
-  - [ ] 11.2 实现文件服务
+  - [x] 11.2 实现文件服务
     - 创建 `internal/services/file.go`
     - 实现目录列表
     - 实现文件上传（通过 docker cp 或 exec）
@@ -206,14 +206,14 @@
     - 实现文件大小限制检查
     - _Requirements: 7.1, 7.2, 7.3, 7.5_
 
-  - [ ] 11.3 实现文件 API 路由
+  - [x] 11.3 实现文件 API 路由
     - 创建 `internal/handlers/file.go`
     - 实现 GET /api/files/:containerId/list
     - 实现 GET /api/files/:containerId/download
     - 实现 POST /api/files/:containerId/upload
     - _Requirements: 7.1, 7.2, 7.5_
 
-  - [ ] 11.4 编写路径验证属性测试
+  - [x] 11.4 编写路径验证属性测试
     - **Property 9: Path Traversal Prevention**
     - 验证包含 .. 的路径被拒绝
     - 验证超出允许目录的路径被拒绝
@@ -228,20 +228,20 @@
   - 确保所有测试通过，如有问题请询问用户
 
 
-- [ ] 13. 前端 - 基础框架与认证
-  - [ ] 13.1 实现前端路由和布局
+- [x] 13. 前端 - 基础框架与认证
+  - [x] 13.1 实现前端路由和布局
     - 创建 `src/App.tsx` 路由配置
     - 创建 `src/layouts/MainLayout.tsx` 主布局
     - 配置 Ant Design 主题
     - _Requirements: 10.1_
 
-  - [ ] 13.2 实现认证状态管理
+  - [x] 13.2 实现认证状态管理
     - 创建 `src/hooks/useAuth.ts`
     - 创建 `src/services/auth.ts` API 调用
     - 实现 token 存储和自动刷新
     - _Requirements: 1.3, 1.5_
 
-  - [ ] 13.3 实现登录页面
+  - [x] 13.3 实现登录页面
     - 创建 `src/pages/Login.tsx`
     - 实现登录表单
     - 实现错误提示
