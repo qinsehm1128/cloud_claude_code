@@ -1,0 +1,25 @@
+# IDE and editor folders
+.kiro/
+.vscode/
+
+# Environment files
+.env
+
+# Build outputs
+backend/server.exe
+backend/server
+bin/
+
+# Logs
+logs/
+*.log
+
+# Data directory
+data/
+
+# Node modules (frontend has its own .gitignore)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
