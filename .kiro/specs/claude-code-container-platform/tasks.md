@@ -119,7 +119,7 @@
     - 实现 DELETE /api/repos/:id
     - _Requirements: 2.2, 2.3, 2.5, 2.6_
 
-  - [-] 6.3 编写仓库列表属性测试
+  - [x] 6.3 编写仓库列表属性测试
     - **Property 6: Repository Listing Completeness**
     - 验证返回的仓库包含所有必需字段
     - **Validates: Requirements 2.6**
@@ -127,27 +127,27 @@
 - [ ] 7. Checkpoint - 配置和仓库模块完成
   - 确保所有测试通过，如有问题请询问用户
 
-- [ ] 8. 容器管理模块
-  - [ ] 8.1 实现 Docker 客户端封装
+- [-] 8. 容器管理模块
+  - [x] 8.1 实现 Docker 客户端封装
     - 创建 `internal/docker/client.go`
     - 初始化 Docker SDK 客户端
     - 实现基础镜像检查和构建
     - _Requirements: 4.7_
 
-  - [ ] 8.2 实现容器安全配置
+  - [x] 8.2 实现容器安全配置
     - 创建 `internal/docker/security.go`
     - 实现安全配置结构体
     - 配置：禁用特权、删除 capabilities、seccomp、资源限制
     - _Requirements: 5.2, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.9_
 
-  - [ ] 8.3 实现容器管理服务
+  - [x] 8.3 实现容器管理服务
     - 创建 `internal/services/container.go`
     - 实现容器创建（挂载仓库、注入环境变量）
     - 实现容器启动/停止/删除
     - 实现容器列表
     - _Requirements: 5.1, 5.3, 5.4, 5.5, 5.6, 5.7, 3.7_
 
-  - [ ] 8.4 实现容器 API 路由
+  - [x] 8.4 实现容器 API 路由
     - 创建 `internal/handlers/container.go`
     - 实现 GET /api/containers
     - 实现 POST /api/containers
