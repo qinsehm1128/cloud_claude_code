@@ -137,35 +137,15 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		portBindings[containerPort] = hostPort
 	}
 
-	// code-server uses Traefik routing, no direct port mapping needed
-	// This allows multiple containers to use the same internal port (8443)
+	// code-server is accessed via container IP through Docker network
+	// No direct port mapping or Traefik path routing needed
 
-	// Build Traefik labels
+	// Build Traefik labels for user-defined proxy only
 	labels := make(map[string]string)
 	
-	// Always connect to traefik-net if code-server is enabled (for Traefik routing)
+	// Connect to traefik-net if code-server or proxy is enabled
+	// This allows backend to access container via Docker network
 	useTraefikNet := input.Proxy.Enabled || input.EnableCodeServer
-	
-	// Add code-server Traefik labels if enabled
-	if input.EnableCodeServer {
-		codeServerServiceName := fmt.Sprintf("cc-%s-code", input.Name)
-		labels["traefik.enable"] = "true"
-		
-		// Router for code-server - use path prefix based on container ID (will be updated after creation)
-		// For now, use container name as identifier
-		codeServerRouterName := fmt.Sprintf("%s-code", input.Name)
-		labels[fmt.Sprintf("traefik.http.routers.%s.rule", codeServerRouterName)] = fmt.Sprintf("PathPrefix(`/code/%s`)", input.Name)
-		labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", codeServerRouterName)] = "web"
-		labels[fmt.Sprintf("traefik.http.routers.%s.service", codeServerRouterName)] = codeServerServiceName
-		// Strip the path prefix before forwarding to code-server
-		labels[fmt.Sprintf("traefik.http.routers.%s.middlewares", codeServerRouterName)] = fmt.Sprintf("%s-strip", codeServerRouterName)
-		labels[fmt.Sprintf("traefik.http.middlewares.%s-strip.stripprefix.prefixes", codeServerRouterName)] = fmt.Sprintf("/code/%s", input.Name)
-		
-		// Service configuration - point to code-server port
-		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", codeServerServiceName)] = fmt.Sprintf("%d", CodeServerInternalPort)
-		
-		log.Printf("code-server Traefik routing: /code/%s -> container:%d", input.Name, CodeServerInternalPort)
-	}
 	
 	// Add user-defined proxy labels if enabled
 	if input.Proxy.Enabled && input.Proxy.ServicePort > 0 {
@@ -280,10 +260,10 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	}
 	s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Resources: Memory=%dMB, CPU=%.1f cores", memoryLimit, cpuLimit))
 
-	// Log code-server Traefik routing if enabled
+	// Log code-server if enabled
 	if input.EnableCodeServer {
 		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, 
-			fmt.Sprintf("code-server: Traefik route /code/%s -> container:%d", input.Name, CodeServerInternalPort))
+			fmt.Sprintf("code-server enabled on container port %d", CodeServerInternalPort))
 	}
 
 	// Auto-start the container and begin initialization

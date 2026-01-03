@@ -19,21 +19,18 @@ import (
 type ProxyHandler struct {
 	containerService *services.ContainerService
 	portService      *services.PortService
-	traefikService   *services.TraefikService
 }
 
 // NewProxyHandler creates a new ProxyHandler
-func NewProxyHandler(containerService *services.ContainerService, db *gorm.DB, traefikService *services.TraefikService) *ProxyHandler {
+func NewProxyHandler(containerService *services.ContainerService, db *gorm.DB) *ProxyHandler {
 	return &ProxyHandler{
 		containerService: containerService,
 		portService:      services.NewPortService(db),
-		traefikService:   traefikService,
 	}
 }
 
-// ProxyRequest proxies HTTP requests to container services through Traefik
-// The port parameter is the container internal port (e.g., 8443 for code-server)
-// Requests are routed through Traefik which handles the container networking
+// ProxyRequest proxies HTTP requests to container services
+// Routes directly to container IP via Docker network (traefik-net or bridge)
 func (h *ProxyHandler) ProxyRequest(c *gin.Context) {
 	// Get container ID and port from path
 	idStr := c.Param("id")
@@ -51,50 +48,37 @@ func (h *ProxyHandler) ProxyRequest(c *gin.Context) {
 		return
 	}
 	
-	// Get container to verify it exists and is running
+	// Get container to verify it exists
 	container, err := h.containerService.GetContainer(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Container not found: %v", err)})
 		return
 	}
 	
-	// Check if this is the code-server port - route through Traefik
-	if containerPort == services.CodeServerInternalPort && container.EnableCodeServer {
-		h.proxyThroughTraefik(c, container, idStr, portStr)
+	// Get container IP (prefers traefik-net, falls back to bridge)
+	containerIP, err := h.containerService.GetContainerIP(c.Request.Context(), container.ID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Container not running: %v", err)})
 		return
 	}
 	
-	// For other ports, try direct container IP access (legacy behavior)
-	h.proxyDirectToContainer(c, container, containerPort, idStr, portStr)
+	h.proxyToContainer(c, container, containerIP, containerPort, idStr, portStr)
 }
 
-// proxyThroughTraefik routes requests through Traefik for code-server
-func (h *ProxyHandler) proxyThroughTraefik(c *gin.Context, container *models.Container, idStr, portStr string) {
-	// Get Traefik HTTP port
-	traefikPort := h.traefikService.HTTPPort
-	if traefikPort == 0 {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Traefik is not running"})
-		return
-	}
-	
-	// Build target URL - proxy through Traefik
-	// Traefik routes /code/{container-name}/* to the container's code-server
-	targetURL := fmt.Sprintf("http://127.0.0.1:%d", traefikPort)
+// proxyToContainer proxies requests directly to container IP
+func (h *ProxyHandler) proxyToContainer(c *gin.Context, container *models.Container, containerIP string, port int, idStr, portStr string) {
+	targetURL := fmt.Sprintf("http://%s:%d", containerIP, port)
 	target, err := url.Parse(targetURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse target URL"})
 		return
 	}
 	
-	// Base path for this proxy (what the client sees)
+	// Base path for this proxy
 	basePath := fmt.Sprintf("/api/proxy/%s/%s", idStr, portStr)
-	// Traefik path (what Traefik expects)
-	traefikPath := fmt.Sprintf("/code/%s", container.Name)
 	
-	// Create reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	
-	// Modify the request
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
@@ -107,9 +91,7 @@ func (h *ProxyHandler) proxyThroughTraefik(c *gin.Context, container *models.Con
 		if !strings.HasPrefix(path, "/") {
 			path = "/" + path
 		}
-		
-		// Route through Traefik's path: /code/{container-name}{path}
-		req.URL.Path = traefikPath + path
+		req.URL.Path = path
 		req.URL.RawQuery = c.Request.URL.RawQuery
 		
 		// Set headers for proper proxying
@@ -117,7 +99,6 @@ func (h *ProxyHandler) proxyThroughTraefik(c *gin.Context, container *models.Con
 		req.Header.Set("X-Forwarded-Proto", "http")
 		req.Header.Set("X-Real-IP", c.ClientIP())
 		req.Header.Set("X-Forwarded-For", c.ClientIP())
-		req.Header.Set("X-Forwarded-Prefix", basePath)
 		req.Host = target.Host
 	}
 	
@@ -126,82 +107,12 @@ func (h *ProxyHandler) proxyThroughTraefik(c *gin.Context, container *models.Con
 		if location := resp.Header.Get("Location"); location != "" {
 			locURL, err := url.Parse(location)
 			if err == nil {
-				// Rewrite Traefik paths back to our proxy paths
-				if strings.HasPrefix(locURL.Path, traefikPath) {
-					locURL.Path = basePath + strings.TrimPrefix(locURL.Path, traefikPath)
-					resp.Header.Set("Location", locURL.String())
-				} else if locURL.Host == "" || locURL.Host == target.Host {
-					// Relative redirect
-					if !strings.HasPrefix(locURL.Path, basePath) {
-						locURL.Path = basePath + locURL.Path
-					}
-					resp.Header.Set("Location", locURL.String())
-				}
-			}
-		}
-		return nil
-	}
-	
-	// Handle errors
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error": fmt.Sprintf("Proxy error: %v", err),
-			"hint":  "Make sure Traefik is running and the container is connected to traefik-net",
-		})
-	}
-	
-	proxy.ServeHTTP(c.Writer, c.Request)
-}
-
-// proxyDirectToContainer routes requests directly to container IP (legacy)
-func (h *ProxyHandler) proxyDirectToContainer(c *gin.Context, container *models.Container, port int, idStr, portStr string) {
-	// Get container IP
-	containerIP, err := h.containerService.GetContainerIP(c.Request.Context(), container.ID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Container not running: %v", err)})
-		return
-	}
-	
-	targetURL := fmt.Sprintf("http://%s:%d", containerIP, port)
-	target, err := url.Parse(targetURL)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse target URL"})
-		return
-	}
-	
-	basePath := fmt.Sprintf("/api/proxy/%s/%s", idStr, portStr)
-	
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		
-		path := c.Param("path")
-		if path == "" {
-			path = "/"
-		}
-		if !strings.HasPrefix(path, "/") {
-			path = "/" + path
-		}
-		req.URL.Path = path
-		req.URL.RawQuery = c.Request.URL.RawQuery
-		
-		req.Header.Set("X-Forwarded-Host", c.Request.Host)
-		req.Header.Set("X-Forwarded-Proto", "http")
-		req.Header.Set("X-Real-IP", c.ClientIP())
-		req.Header.Set("X-Forwarded-For", c.ClientIP())
-		req.Header.Set("X-Forwarded-Prefix", basePath)
-		req.Host = target.Host
-	}
-	
-	proxy.ModifyResponse = func(resp *http.Response) error {
-		if location := resp.Header.Get("Location"); location != "" {
-			locURL, err := url.Parse(location)
-			if err == nil {
+				// If it's a relative path or same host, prepend our base path
 				if locURL.Host == "" || locURL.Host == target.Host {
-					if !strings.HasPrefix(locURL.Path, basePath) {
-						locURL.Path = basePath + locURL.Path
+					newPath := locURL.Path
+					// Don't double-prefix
+					if !strings.HasPrefix(newPath, basePath) && !strings.HasPrefix(newPath, "/api/proxy/") {
+						locURL.Path = basePath + newPath
 					}
 					resp.Header.Set("Location", locURL.String())
 				}

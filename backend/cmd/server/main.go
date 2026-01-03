@@ -99,7 +99,7 @@ func main() {
 	fileHandler := handlers.NewFileHandler(fileService)
 	terminalHandler := handlers.NewTerminalHandler(terminalService, containerService, authService)
 	portHandler := handlers.NewPortHandler(portService)
-	proxyHandler := handlers.NewProxyHandler(containerService, db, traefikService)
+	proxyHandler := handlers.NewProxyHandler(containerService, db)
 
 	// Public routes
 	router.POST("/api/auth/login", authHandler.Login)
