@@ -7,6 +7,8 @@ import {
   FolderOpen,
   Loader2,
   AlertCircle,
+  PanelLeftClose,
+  PanelLeft,
 } from 'lucide-react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
@@ -14,12 +16,6 @@ import { WebLinksAddon } from 'xterm-addon-web-links'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
 import { TerminalWebSocket, HistoryLoadProgress } from '@/services/websocket'
 import { containerApi } from '@/services/api'
 import FileBrowser from '@/components/FileManager/FileBrowser'
@@ -74,7 +70,7 @@ export default function ContainerTerminal() {
   const [error, setError] = useState<string | null>(null)
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeKey, setActiveKey] = useState<string>('')
-  const [fileDrawerOpen, setFileDrawerOpen] = useState(false)
+  const [filePanelOpen, setFilePanelOpen] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const initializedRef = useRef(false)
 
@@ -283,6 +279,18 @@ export default function ContainerTerminal() {
     initTerminal()
   }, [activeKey, container, containerId, tabs])
 
+  // Refit terminal when file panel toggles
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      tabs.forEach(tab => {
+        if (tab.fitAddon && tab.terminal) {
+          tab.fitAddon.fit()
+        }
+      })
+    }, 300) // Wait for transition
+    return () => clearTimeout(timer)
+  }, [filePanelOpen, tabs])
+
   useEffect(() => {
     const handleResize = () => {
       tabs.forEach(tab => {
@@ -349,145 +357,168 @@ export default function ContainerTerminal() {
   const activeTab = tabs.find(t => t.key === activeKey)
 
   return (
-    <div className="flex flex-col h-[calc(100vh-1px)]">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Container: <span className="text-foreground font-medium">{container?.name}</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setFileDrawerOpen(true)}>
-            <FolderOpen className="h-4 w-4 mr-2" />
-            Files
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => addNewTab()}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Terminal
-          </Button>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50">
-        <Tabs value={activeKey} onValueChange={setActiveKey} className="flex-1">
-          <TabsList className="h-8 bg-transparent p-0 gap-1">
-            {tabs.map((tab) => (
-              <TabsTrigger
-                key={tab.key}
-                value={tab.key}
-                className="h-8 px-3 data-[state=active]:bg-secondary rounded-md gap-2"
-              >
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    tab.connected ? 'bg-green-500' : 'bg-red-500'
-                  }`}
-                />
-                {tab.label}
-                {tab.historyLoading && (
-                  <span className="text-xs text-blue-400">{tab.historyProgress}%</span>
-                )}
-                {tabs.length > 1 && (
-                  <button
-                    className="ml-1 hover:bg-muted rounded p-0.5"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeTab(tab.key)
-                    }}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-        <Button variant="ghost" size="sm" onClick={() => addNewTab()}>
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {/* Terminal Content */}
+    <div className="flex h-[calc(100vh-1px)]">
+      {/* File Browser Panel - No overlay, side by side */}
       <div 
-        className="flex-1 relative bg-[#0a0a0a]"
-        onDragEnter={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          if (e.dataTransfer.types.includes('text/plain')) {
-            setIsDraggingOver(true)
-          }
-        }}
+        className={`h-full bg-card border-r flex flex-col transition-all duration-300 ${
+          filePanelOpen ? 'w-80' : 'w-0'
+        } overflow-hidden`}
       >
-        {/* Drag overlay - captures drag events over terminal */}
-        {isDraggingOver && (
-          <div 
-            className="absolute inset-0 z-20 flex items-center justify-center bg-background/80"
-            onDragOver={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              e.dataTransfer.dropEffect = 'copy'
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              // Only hide if leaving the overlay entirely
-              const rect = e.currentTarget.getBoundingClientRect()
-              const x = e.clientX
-              const y = e.clientY
-              if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-                setIsDraggingOver(false)
-              }
-            }}
-            onDrop={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setIsDraggingOver(false)
-              const path = e.dataTransfer.getData('text/plain')
-              if (path && path.startsWith('/')) {
-                handleFileDrop(path)
-              }
-            }}
+        <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
+          <h3 className="font-medium text-sm">File Browser</h3>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-7 w-7 p-0"
+            onClick={() => setFilePanelOpen(false)}
           >
-            <div className="text-center pointer-events-none">
-              <FolderOpen className="h-12 w-12 mx-auto mb-2 text-primary" />
-              <p className="text-sm text-muted-foreground">Drop to insert file path</p>
-            </div>
-          </div>
-        )}
-        {activeTab?.historyLoading && (
-          <div className="absolute top-0 left-0 right-0 z-10 bg-background/90 p-3 border-b">
-            <div className="text-sm text-muted-foreground mb-2">
-              Restoring session history...
-            </div>
-            <Progress value={activeTab.historyProgress} className="h-1" />
-          </div>
-        )}
-        {tabs.map((tab) => (
-          <div
-            key={tab.key}
-            ref={(el) => setTerminalRef(tab.key, el)}
-            className={`absolute inset-0 ${tab.key === activeKey ? 'block' : 'hidden'}`}
-            style={{ padding: '8px' }}
-          />
-        ))}
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex-1 overflow-auto p-3">
+          {filePanelOpen && (
+            <FileBrowser containerId={parseInt(containerId || '0')} />
+          )}
+        </div>
       </div>
 
-      {/* File Browser Sheet */}
-      <Sheet open={fileDrawerOpen} onOpenChange={setFileDrawerOpen}>
-        <SheetContent side="left" className="w-[400px] sm:w-[500px]">
-          <SheetHeader>
-            <SheetTitle>File Browser</SheetTitle>
-          </SheetHeader>
-          <div className="mt-4 h-[calc(100vh-100px)] overflow-auto">
-            <FileBrowser containerId={parseInt(containerId || '0')} />
+      {/* Main Terminal Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-2 border-b bg-card flex-shrink-0">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Container: <span className="text-foreground font-medium">{container?.name}</span>
+            </span>
           </div>
-        </SheetContent>
-      </Sheet>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setFilePanelOpen(!filePanelOpen)}
+            >
+              {filePanelOpen ? (
+                <PanelLeftClose className="h-4 w-4 mr-2" />
+              ) : (
+                <PanelLeft className="h-4 w-4 mr-2" />
+              )}
+              Files
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => addNewTab()}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Terminal
+            </Button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50 flex-shrink-0">
+          <Tabs value={activeKey} onValueChange={setActiveKey} className="flex-1">
+            <TabsList className="h-8 bg-transparent p-0 gap-1">
+              {tabs.map((tab) => (
+                <TabsTrigger
+                  key={tab.key}
+                  value={tab.key}
+                  className="h-8 px-3 data-[state=active]:bg-secondary rounded-md gap-2"
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      tab.connected ? 'bg-green-500' : 'bg-red-500'
+                    }`}
+                  />
+                  {tab.label}
+                  {tab.historyLoading && (
+                    <span className="text-xs text-blue-400">{tab.historyProgress}%</span>
+                  )}
+                  {tabs.length > 1 && (
+                    <button
+                      className="ml-1 hover:bg-muted rounded p-0.5"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeTab(tab.key)
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          <Button variant="ghost" size="sm" onClick={() => addNewTab()}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Terminal Content */}
+        <div 
+          className="flex-1 relative bg-[#0a0a0a] min-h-0"
+          onDragEnter={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (e.dataTransfer.types.includes('text/plain')) {
+              setIsDraggingOver(true)
+            }
+          }}
+        >
+          {/* Drag overlay - captures drag events over terminal */}
+          {isDraggingOver && (
+            <div 
+              className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 border-2 border-dashed border-primary"
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                e.dataTransfer.dropEffect = 'copy'
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                // Only hide if leaving the overlay entirely
+                const rect = e.currentTarget.getBoundingClientRect()
+                const x = e.clientX
+                const y = e.clientY
+                if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+                  setIsDraggingOver(false)
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setIsDraggingOver(false)
+                const path = e.dataTransfer.getData('text/plain')
+                if (path && path.startsWith('/')) {
+                  handleFileDrop(path)
+                }
+              }}
+            >
+              <div className="text-center pointer-events-none">
+                <FolderOpen className="h-12 w-12 mx-auto mb-2 text-primary" />
+                <p className="text-sm text-muted-foreground">Drop to insert file path</p>
+              </div>
+            </div>
+          )}
+          {activeTab?.historyLoading && (
+            <div className="absolute top-0 left-0 right-0 z-10 bg-background/90 p-3 border-b">
+              <div className="text-sm text-muted-foreground mb-2">
+                Restoring session history...
+              </div>
+              <Progress value={activeTab.historyProgress} className="h-1" />
+            </div>
+          )}
+          {tabs.map((tab) => (
+            <div
+              key={tab.key}
+              ref={(el) => setTerminalRef(tab.key, el)}
+              className={`absolute inset-0 ${tab.key === activeKey ? 'block' : 'hidden'}`}
+              style={{ padding: '8px' }}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
