@@ -20,7 +20,7 @@ import (
 
 const (
 	TraefikContainerName = "cc-traefik"
-	TraefikImage         = "traefik:v3.0"
+	TraefikImage         = "traefik:v3.2"  // Use v3.2 for newer Docker API compatibility
 	TraefikNetworkName   = "traefik-net"
 )
 
