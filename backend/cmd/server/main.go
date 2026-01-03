@@ -152,9 +152,9 @@ func main() {
 	// WebSocket routes (with JWT query param auth)
 	router.GET("/api/ws/terminal/:id", terminalHandler.HandleWebSocket)
 
-	// Proxy routes (with JWT auth)
+	// Proxy routes (with flexible auth - supports header, cookie, or query param)
 	proxyGroup := router.Group("/api/proxy")
-	proxyGroup.Use(middleware.JWTAuth(authService))
+	proxyGroup.Use(middleware.FlexibleAuth(authService))
 	{
 		proxyGroup.Any("/:id/:port", proxyHandler.ProxyRequest)
 		proxyGroup.Any("/:id/:port/*path", proxyHandler.ProxyRequest)
