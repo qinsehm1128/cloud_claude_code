@@ -302,3 +302,14 @@ func (s *TerminalService) BroadcastToContainer(containerID string, msg TerminalM
 	_ = data // For future use if needed
 	_ = sessions
 }
+
+
+// CloseSessionsForContainer closes all terminal sessions for a container
+func (s *TerminalService) CloseSessionsForContainer(containerID uint) int {
+	return s.ptyManager.CloseSessionsForContainer(containerID)
+}
+
+// CloseSessionsForDockerID closes all terminal sessions for a Docker container
+func (s *TerminalService) CloseSessionsForDockerID(dockerID string) int {
+	return s.ptyManager.CloseSessionsForDockerID(dockerID)
+}

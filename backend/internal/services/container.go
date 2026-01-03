@@ -137,15 +137,55 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		portBindings[containerPort] = hostPort
 	}
 
-	// code-server is accessed via container IP through Docker network
-	// No direct port mapping or Traefik path routing needed
+	// code-server access method depends on configuration:
+	// 1. If CODE_SERVER_BASE_DOMAIN is set: use subdomain routing via Traefik
+	// 2. Otherwise: use direct port mapping
+	codeServerHostPort := 0
+	codeServerDomain := ""
+	useSubdomainRouting := s.config.CodeServerBaseDomain != "" && input.EnableCodeServer
+	
+	if input.EnableCodeServer {
+		if useSubdomainRouting {
+			// Subdomain routing: {container-name}.{base-domain}
+			codeServerDomain = fmt.Sprintf("%s.%s", input.Name, s.config.CodeServerBaseDomain)
+			log.Printf("code-server subdomain routing: %s -> container:%d", codeServerDomain, CodeServerInternalPort)
+		} else {
+			// Direct port mapping fallback
+			for port := 18443; port <= 18543; port++ {
+				if isPortFree(port) {
+					codeServerHostPort = port
+					break
+				}
+			}
+			if codeServerHostPort > 0 {
+				portBindings[fmt.Sprintf("%d/tcp", CodeServerInternalPort)] = fmt.Sprintf("%d", codeServerHostPort)
+				log.Printf("code-server port mapping: container:%d -> host:%d", CodeServerInternalPort, codeServerHostPort)
+			} else {
+				log.Printf("Warning: could not find free port for code-server")
+			}
+		}
+	}
 
-	// Build Traefik labels for user-defined proxy only
+	// Build Traefik labels
 	labels := make(map[string]string)
 	
-	// Connect to traefik-net if code-server or proxy is enabled
-	// This allows backend to access container via Docker network
-	useTraefikNet := input.Proxy.Enabled || input.EnableCodeServer
+	// Connect to traefik-net if proxy or subdomain routing is enabled
+	useTraefikNet := input.Proxy.Enabled || useSubdomainRouting
+	
+	// Add code-server subdomain routing labels
+	if useSubdomainRouting {
+		codeServiceName := fmt.Sprintf("cc-%s-code", input.Name)
+		labels["traefik.enable"] = "true"
+		
+		// Router for code-server subdomain
+		codeRouterName := fmt.Sprintf("%s-code", input.Name)
+		labels[fmt.Sprintf("traefik.http.routers.%s.rule", codeRouterName)] = fmt.Sprintf("Host(`%s`)", codeServerDomain)
+		labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", codeRouterName)] = "web"
+		labels[fmt.Sprintf("traefik.http.routers.%s.service", codeRouterName)] = codeServiceName
+		
+		// Service configuration - point to code-server port
+		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", codeServiceName)] = fmt.Sprintf("%d", CodeServerInternalPort)
+	}
 	
 	// Add user-defined proxy labels if enabled
 	if input.Proxy.Enabled && input.Proxy.ServicePort > 0 {
@@ -185,8 +225,8 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		NetworkMode:   "bridge", // Need network for cloning
 		PortBindings:  portBindings,
 		Labels:        labels,
-		UseTraefikNet: useTraefikNet,             // Connect to traefik-net if proxy or code-server enabled
-		UseCodeServer: input.EnableCodeServer,    // Use image with code-server if enabled
+		UseTraefikNet: useTraefikNet,
+		UseCodeServer: input.EnableCodeServer,
 	}
 
 	// Create Docker container
@@ -231,6 +271,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		ServicePort:      input.Proxy.ServicePort,
 		EnableCodeServer: input.EnableCodeServer,
 		CodeServerPort:   CodeServerInternalPort, // Store container internal port (8443)
+		CodeServerDomain: codeServerDomain,       // Subdomain for code-server (e.g., "mycontainer.code.example.com")
 	}
 
 	if err := s.db.Create(dbContainer).Error; err != nil {
@@ -262,8 +303,22 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 
 	// Log code-server if enabled
 	if input.EnableCodeServer {
-		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, 
-			fmt.Sprintf("code-server enabled on container port %d", CodeServerInternalPort))
+		if useSubdomainRouting {
+			// Add code-server port to ports table (using internal port for subdomain routing)
+			portService := NewPortService(s.db)
+			portService.AddPort(dbContainer.ID, CodeServerInternalPort, "VS Code", "http", true)
+			s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, 
+				fmt.Sprintf("code-server: http://%s (subdomain routing via Traefik)", codeServerDomain))
+		} else if codeServerHostPort > 0 {
+			// Add code-server port to ports table
+			portService := NewPortService(s.db)
+			portService.AddPort(dbContainer.ID, codeServerHostPort, "VS Code", "http", true)
+			s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, 
+				fmt.Sprintf("code-server: http://server-ip:%d", codeServerHostPort))
+		} else {
+			s.addLog(dbContainer.ID, models.LogLevelWarn, models.LogStageStartup, 
+				"code-server enabled but no free port available")
+		}
 	}
 
 	// Auto-start the container and begin initialization
@@ -567,6 +622,11 @@ func (s *ContainerService) StopContainer(ctx context.Context, id uint) error {
 
 	s.addLog(id, models.LogLevelInfo, models.LogStageStartup, "Container stopped")
 
+	// Clean up terminal sessions from database
+	s.db.Model(&models.TerminalSession{}).
+		Where("container_id = ?", id).
+		Update("active", false)
+
 	// Update status
 	now := time.Now()
 	return s.db.Model(container).Updates(map[string]interface{}{
@@ -591,6 +651,20 @@ func (s *ContainerService) DeleteContainer(ctx context.Context, id uint) error {
 	if err := s.dockerClient.RemoveContainer(ctx, container.DockerID, true); err != nil {
 		log.Printf("Warning: failed to remove Docker container: %v", err)
 	}
+
+	// Clean up related resources
+	// Delete port records
+	s.db.Where("container_id = ?", id).Delete(&models.ContainerPort{})
+	
+	// Delete terminal sessions
+	s.db.Where("container_id = ?", id).Delete(&models.TerminalSession{})
+	
+	// Delete terminal history
+	s.db.Where("session_id IN (SELECT session_id FROM terminal_sessions WHERE container_id = ?)", id).
+		Delete(&models.TerminalHistory{})
+	
+	// Delete container logs
+	s.db.Where("container_id = ?", id).Delete(&models.ContainerLog{})
 
 	// Remove from database
 	return s.db.Delete(&models.Container{}, id).Error
@@ -697,6 +771,7 @@ type ContainerInfo struct {
 	ServicePort      int        `json:"service_port,omitempty"`
 	EnableCodeServer bool       `json:"enable_code_server"`
 	CodeServerPort   int        `json:"code_server_port,omitempty"`
+	CodeServerDomain string     `json:"code_server_domain,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 	StoppedAt        *time.Time `json:"stopped_at,omitempty"`
@@ -724,6 +799,7 @@ func ToContainerInfo(c *models.Container) ContainerInfo {
 		ServicePort:      c.ServicePort,
 		EnableCodeServer: c.EnableCodeServer,
 		CodeServerPort:   c.CodeServerPort,
+		CodeServerDomain: c.CodeServerDomain,
 		CreatedAt:        c.CreatedAt,
 		StartedAt:        c.StartedAt,
 		StoppedAt:        c.StoppedAt,

@@ -107,12 +107,37 @@ func (h *ProxyHandler) proxyToContainer(c *gin.Context, container *models.Contai
 		if location := resp.Header.Get("Location"); location != "" {
 			locURL, err := url.Parse(location)
 			if err == nil {
-				// If it's a relative path or same host, prepend our base path
-				if locURL.Host == "" || locURL.Host == target.Host {
+				// Handle relative redirects like "./" or "../"
+				if locURL.Host == "" {
 					newPath := locURL.Path
+					
+					// Handle relative paths like "./" or "."
+					if strings.HasPrefix(newPath, "./") || newPath == "." {
+						// Remove the "./" or "." prefix
+						newPath = strings.TrimPrefix(newPath, ".")
+						if newPath == "" {
+							newPath = "/"
+						}
+					}
+					
 					// Don't double-prefix
 					if !strings.HasPrefix(newPath, basePath) && !strings.HasPrefix(newPath, "/api/proxy/") {
+						// For absolute paths starting with /
+						if strings.HasPrefix(newPath, "/") {
+							locURL.Path = basePath + newPath
+						} else {
+							// For relative paths, prepend basePath with /
+							locURL.Path = basePath + "/" + newPath
+						}
+					}
+					resp.Header.Set("Location", locURL.String())
+				} else if locURL.Host == target.Host {
+					// Same host, rewrite path
+					newPath := locURL.Path
+					if !strings.HasPrefix(newPath, basePath) && !strings.HasPrefix(newPath, "/api/proxy/") {
 						locURL.Path = basePath + newPath
+						locURL.Host = ""
+						locURL.Scheme = ""
 					}
 					resp.Header.Set("Location", locURL.String())
 				}

@@ -54,8 +54,9 @@ type Container struct {
 	ProxyPort      int        `json:"proxy_port,omitempty"`      // Direct port access (e.g., 9001)
 	ServicePort    int        `json:"service_port,omitempty"`    // Container internal service port (e.g., 3000)
 	// code-server configuration
-	EnableCodeServer bool     `json:"enable_code_server"`        // Enable code-server (Web VS Code)
-	CodeServerPort   int      `json:"code_server_port"`          // code-server port, default 8443
+	EnableCodeServer   bool   `json:"enable_code_server"`          // Enable code-server (Web VS Code)
+	CodeServerPort     int    `json:"code_server_port"`            // code-server port (host port for direct access, or internal port 8443)
+	CodeServerDomain   string `json:"code_server_domain,omitempty"` // code-server subdomain (e.g., "mycontainer.code.example.com")
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	StoppedAt      *time.Time `json:"stopped_at,omitempty"`
 	InitializedAt  *time.Time `json:"initialized_at,omitempty"`

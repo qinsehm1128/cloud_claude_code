@@ -28,14 +28,15 @@ func NewPortService(db *gorm.DB) *PortService {
 
 // PortInfo represents port information with container details
 type PortInfo struct {
-	ID            uint   `json:"id"`
-	ContainerID   uint   `json:"container_id"`
-	ContainerName string `json:"container_name"`
-	Port          int    `json:"port"`
-	Name          string `json:"name"`
-	Protocol      string `json:"protocol"`
-	AutoCreated   bool   `json:"auto_created"`
-	ProxyURL      string `json:"proxy_url"`
+	ID               uint   `json:"id"`
+	ContainerID      uint   `json:"container_id"`
+	ContainerName    string `json:"container_name"`
+	Port             int    `json:"port"`
+	Name             string `json:"name"`
+	Protocol         string `json:"protocol"`
+	AutoCreated      bool   `json:"auto_created"`
+	ProxyURL         string `json:"proxy_url"`
+	CodeServerDomain string `json:"code_server_domain,omitempty"` // Subdomain for code-server access
 }
 
 // ListPorts lists all ports for a container
@@ -95,28 +96,31 @@ func (s *PortService) ListAllPorts() ([]PortInfo, error) {
 		return nil, err
 	}
 
-	// Get container names
+	// Get container names and code-server domains
 	containerNames := make(map[uint]string)
+	containerCodeDomains := make(map[uint]string)
 	var containers []models.Container
-	if err := s.db.Select("id", "name").Find(&containers).Error; err != nil {
+	if err := s.db.Select("id", "name", "code_server_domain").Find(&containers).Error; err != nil {
 		return nil, err
 	}
 	for _, c := range containers {
 		containerNames[c.ID] = c.Name
+		containerCodeDomains[c.ID] = c.CodeServerDomain
 	}
 
 	// Build result
 	result := make([]PortInfo, len(ports))
 	for i, p := range ports {
 		result[i] = PortInfo{
-			ID:            p.ID,
-			ContainerID:   p.ContainerID,
-			ContainerName: containerNames[p.ContainerID],
-			Port:          p.Port,
-			Name:          p.Name,
-			Protocol:      p.Protocol,
-			AutoCreated:   p.AutoCreated,
-			ProxyURL:      "", // Will be set by frontend based on current host
+			ID:               p.ID,
+			ContainerID:      p.ContainerID,
+			ContainerName:    containerNames[p.ContainerID],
+			Port:             p.Port,
+			Name:             p.Name,
+			Protocol:         p.Protocol,
+			AutoCreated:      p.AutoCreated,
+			ProxyURL:         "", // Will be set by frontend based on current host
+			CodeServerDomain: containerCodeDomains[p.ContainerID],
 		}
 	}
 

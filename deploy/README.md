@@ -141,6 +141,29 @@ vim /www/server/panel/vhost/nginx/example.com.conf
 nginx -s reload
 ```
 
+### Code-Server 子域名路由
+
+如果要启用 code-server 子域名访问（类似 VS Code Codespaces），需要：
+
+1. **DNS 配置**: 添加泛域名 A 记录
+   ```
+   *.code.example.com -> 服务器IP
+   ```
+
+2. **Nginx 配置**: 添加子域名 server 块（参考 `deploy/nginx.conf` 中的第二个 server 块）
+
+3. **环境变量**: 在 `.env` 中设置
+   ```bash
+   CODE_SERVER_BASE_DOMAIN=code.example.com
+   ```
+
+4. **Traefik**: 确保 Traefik 已启动（容器会自动注册路由）
+   ```bash
+   AUTO_START_TRAEFIK=true
+   ```
+
+配置完成后，创建的容器将通过 `{容器名}.code.example.com` 访问 code-server。
+
 ## 配置文件
 
 编辑 `/opt/cc-platform/.env`:

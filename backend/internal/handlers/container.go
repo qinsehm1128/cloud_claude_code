@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"cc-platform/internal/services"
+	"cc-platform/internal/terminal"
 
 	"github.com/gin-gonic/gin"
 )
@@ -12,12 +13,14 @@ import (
 // ContainerHandler handles container endpoints
 type ContainerHandler struct {
 	containerService *services.ContainerService
+	terminalService  *terminal.TerminalService
 }
 
 // NewContainerHandler creates a new ContainerHandler
-func NewContainerHandler(containerService *services.ContainerService) *ContainerHandler {
+func NewContainerHandler(containerService *services.ContainerService, terminalService *terminal.TerminalService) *ContainerHandler {
 	return &ContainerHandler{
 		containerService: containerService,
+		terminalService:  terminalService,
 	}
 }
 
@@ -168,6 +171,15 @@ func (h *ContainerHandler) StopContainer(c *gin.Context) {
 		return
 	}
 
+	// Close active terminal sessions for this container
+	if h.terminalService != nil {
+		closedSessions := h.terminalService.CloseSessionsForContainer(id)
+		if closedSessions > 0 {
+			// Log closed sessions count (optional)
+			_ = closedSessions
+		}
+	}
+
 	if err := h.containerService.StopContainer(c.Request.Context(), id); err != nil {
 		if err == services.ErrContainerNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
@@ -186,6 +198,11 @@ func (h *ContainerHandler) DeleteContainer(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid container ID"})
 		return
+	}
+
+	// Close active terminal sessions for this container
+	if h.terminalService != nil {
+		h.terminalService.CloseSessionsForContainer(id)
 	}
 
 	if err := h.containerService.DeleteContainer(c.Request.Context(), id); err != nil {

@@ -28,6 +28,9 @@ type Config struct {
 	TraefikDashboardPort  int  // 0 = auto-assign
 	TraefikPortRangeStart int
 	TraefikPortRangeEnd   int
+	
+	// Code-server subdomain settings
+	CodeServerBaseDomain string // e.g., "code.example.com" - containers will be {name}.{base-domain}
 }
 
 // Load loads configuration from environment variables
@@ -54,6 +57,9 @@ func Load() *Config {
 		TraefikDashboardPort:  getEnvInt("TRAEFIK_DASHBOARD_PORT", 0),
 		TraefikPortRangeStart: getEnvInt("TRAEFIK_PORT_RANGE_START", 30001),
 		TraefikPortRangeEnd:   getEnvInt("TRAEFIK_PORT_RANGE_END", 30020),
+		
+		// Code-server subdomain (e.g., "code.example.com" -> {container}.code.example.com)
+		CodeServerBaseDomain:  getEnv("CODE_SERVER_BASE_DOMAIN", ""),
 	}
 
 	// Generate JWT secret if not provided

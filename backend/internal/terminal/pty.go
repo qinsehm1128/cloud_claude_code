@@ -508,3 +508,54 @@ func (s *PTYSession) GetInfo() SessionInfo {
 		Running:     s.IsRunning(),
 	}
 }
+
+// CloseSessionsForContainer closes all PTY sessions for a specific container
+func (m *PTYManager) CloseSessionsForContainer(containerID uint) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	containerIDStr := fmt.Sprintf("%d", containerID)
+	closedCount := 0
+
+	for id, session := range m.sessions {
+		if session.ContainerID == containerIDStr {
+			// Flush history
+			m.historyManager.FlushSession(id)
+			session.Close()
+			delete(m.sessions, id)
+			closedCount++
+		}
+	}
+
+	// Update database - mark all sessions for this container as inactive
+	m.db.Model(&models.TerminalSession{}).
+		Where("container_id = ?", containerID).
+		Update("active", false)
+
+	return closedCount
+}
+
+// CloseSessionsForDockerID closes all PTY sessions for a specific Docker container ID
+func (m *PTYManager) CloseSessionsForDockerID(dockerID string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	closedCount := 0
+
+	for id, session := range m.sessions {
+		if session.DockerID == dockerID {
+			// Flush history
+			m.historyManager.FlushSession(id)
+			session.Close()
+			delete(m.sessions, id)
+			closedCount++
+		}
+	}
+
+	// Update database
+	m.db.Model(&models.TerminalSession{}).
+		Where("docker_id = ?", dockerID).
+		Update("active", false)
+
+	return closedCount
+}

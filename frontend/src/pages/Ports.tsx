@@ -8,7 +8,11 @@ import {
   Globe,
   Code,
   Copy,
-  Check
+  Check,
+  Zap,
+  CheckCircle,
+  XCircle,
+  AlertCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,7 +25,17 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { portApi, containerApi } from '@/services/api'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { portApi } from '@/services/api'
 
 interface PortInfo {
   id: number
@@ -31,32 +45,22 @@ interface PortInfo {
   name: string
   protocol: string
   auto_created: boolean
+  code_server_domain?: string  // Subdomain for code-server access
 }
 
-interface ContainerInfo {
-  id: number
-  name: string
-  enable_code_server: boolean
-  code_server_port: number
-}
-
-// code-server internal port (inside container)
-const CODE_SERVER_INTERNAL_PORT = 8443
+type TestStatus = 'idle' | 'testing' | 'success' | 'error'
 
 export default function Ports() {
   const [ports, setPorts] = useState<PortInfo[]>([])
-  const [containers, setContainers] = useState<ContainerInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [testStatus, setTestStatus] = useState<Record<number, TestStatus>>({})
+  const [deleteTarget, setDeleteTarget] = useState<{ containerId: number; port: number; name: string } | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
-      const [portsRes, containersRes] = await Promise.all([
-        portApi.listAll(),
-        containerApi.list()
-      ])
+      const portsRes = await portApi.listAll()
       setPorts(portsRes.data || [])
-      setContainers(containersRes.data || [])
     } catch {
       console.error('Failed to fetch data')
     } finally {
@@ -68,62 +72,86 @@ export default function Ports() {
     fetchData()
   }, [fetchData])
 
-  const handleDelete = async (containerId: number, port: number) => {
+  const handleDelete = async () => {
+    if (!deleteTarget) return
     try {
-      await portApi.remove(containerId, port)
+      await portApi.remove(deleteTarget.containerId, deleteTarget.port)
       fetchData()
     } catch {
       console.error('Failed to delete port')
+    } finally {
+      setDeleteTarget(null)
     }
   }
 
-  // Get proxy URL - for code-server, use internal port 8443
-  const getProxyUrl = (containerId: number, port: number, serviceName: string) => {
+  // Get service URL - for VS Code, use subdomain if available, otherwise direct host port
+  const getServiceUrl = (port: number, serviceName: string, codeServerDomain?: string) => {
+    // For VS Code (code-server), prefer subdomain routing if available
+    if (serviceName === 'VS Code') {
+      if (codeServerDomain) {
+        // Use subdomain routing via Traefik
+        const protocol = window.location.protocol
+        return `${protocol}//${codeServerDomain}`
+      }
+      // Fallback to direct port access
+      const hostname = window.location.hostname
+      return `http://${hostname}:${port}`
+    }
+    // For other services, use proxy
     const baseUrl = window.location.origin
-    // For VS Code (code-server), always use internal port 8443
-    const targetPort = serviceName === 'VS Code' ? CODE_SERVER_INTERNAL_PORT : port
-    return `${baseUrl}/api/proxy/${containerId}/${targetPort}`
+    return `${baseUrl}/api/proxy/${port}`
   }
 
-  const handleCopy = async (containerId: number, port: number, id: number, serviceName: string) => {
-    const url = getProxyUrl(containerId, port, serviceName)
+  const handleCopy = async (_containerId: number, port: number, id: number, serviceName: string, codeServerDomain?: string) => {
+    const url = getServiceUrl(port, serviceName, codeServerDomain)
     await navigator.clipboard.writeText(url)
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 2000)
   }
 
-  const handleOpen = (containerId: number, port: number, serviceName: string) => {
-    const url = getProxyUrl(containerId, port, serviceName)
+  const handleOpen = (_containerId: number, port: number, serviceName: string, codeServerDomain?: string) => {
+    const url = getServiceUrl(port, serviceName, codeServerDomain)
     window.open(url, '_blank')
   }
 
-  // Build combined list: ports from DB + code-server from containers
+  const handleTest = async (_containerId: number, port: number, id: number, serviceName: string, codeServerDomain?: string) => {
+    setTestStatus(prev => ({ ...prev, [id]: 'testing' }))
+    const url = getServiceUrl(port, serviceName, codeServerDomain)
+    
+    try {
+      await fetch(url, { 
+        method: 'HEAD',
+        mode: 'no-cors' // Direct port access may have CORS issues
+      })
+      // With no-cors, we can't read the response, but if it doesn't throw, it's likely reachable
+      setTestStatus(prev => ({ ...prev, [id]: 'success' }))
+    } catch {
+      setTestStatus(prev => ({ ...prev, [id]: 'error' }))
+    }
+    
+    // Reset status after 3 seconds
+    setTimeout(() => {
+      setTestStatus(prev => ({ ...prev, [id]: 'idle' }))
+    }, 3000)
+  }
+
+  // Get all services from ports table (code-server ports are now stored in DB)
   const getAllServices = () => {
-    const services: Array<PortInfo & { isCodeServer?: boolean }> = [...ports]
-    
-    // Add code-server entries for containers that have it enabled
-    containers.forEach(container => {
-      if (container.enable_code_server) {
-        // Check if already in ports list
-        const exists = ports.some(
-          p => p.container_id === container.id && p.name === 'VS Code'
-        )
-        if (!exists) {
-          services.push({
-            id: -container.id, // Negative ID to distinguish
-            container_id: container.id,
-            container_name: container.name,
-            port: CODE_SERVER_INTERNAL_PORT,
-            name: 'VS Code',
-            protocol: 'http',
-            auto_created: true,
-            isCodeServer: true
-          })
-        }
-      }
-    })
-    
-    return services
+    return ports
+  }
+
+  const getTestIcon = (id: number) => {
+    const status = testStatus[id] || 'idle'
+    switch (status) {
+      case 'testing':
+        return <Loader2 className="h-4 w-4 animate-spin" />
+      case 'success':
+        return <CheckCircle className="h-4 w-4 text-green-500" />
+      case 'error':
+        return <XCircle className="h-4 w-4 text-red-500" />
+      default:
+        return <Zap className="h-4 w-4" />
+    }
   }
 
   const allServices = getAllServices()
@@ -204,8 +232,10 @@ export default function Ports() {
                   <TableHead>Container</TableHead>
                   <TableHead>Port</TableHead>
                   <TableHead>Service</TableHead>
+                  <TableHead>Access URL</TableHead>
                   <TableHead>Protocol</TableHead>
                   <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -213,7 +243,7 @@ export default function Ports() {
                 {allServices.map((service) => (
                   <TableRow key={service.id}>
                     <TableCell className="font-medium">
-                      {service.container_name}
+                      {service.container_name || <span className="text-muted-foreground italic">Unknown</span>}
                     </TableCell>
                     <TableCell>
                       <code className="bg-muted px-2 py-1 rounded text-sm">
@@ -227,6 +257,20 @@ export default function Ports() {
                       </div>
                     </TableCell>
                     <TableCell>
+                      {service.name === 'VS Code' && service.code_server_domain ? (
+                        <div className="flex items-center gap-1">
+                          <Globe className="h-3 w-3 text-green-500" />
+                          <code className="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 px-2 py-1 rounded text-xs">
+                            {service.code_server_domain}
+                          </code>
+                        </div>
+                      ) : (
+                        <code className="bg-muted px-2 py-1 rounded text-xs">
+                          :{service.port}
+                        </code>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       <Badge variant="outline">{service.protocol}</Badge>
                     </TableCell>
                     <TableCell>
@@ -236,12 +280,42 @@ export default function Ports() {
                         <Badge>Manual</Badge>
                       )}
                     </TableCell>
+                    <TableCell>
+                      {testStatus[service.id] === 'success' && (
+                        <Badge variant="outline" className="text-green-600 border-green-600">
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                          OK
+                        </Badge>
+                      )}
+                      {testStatus[service.id] === 'error' && (
+                        <Badge variant="outline" className="text-red-600 border-red-600">
+                          <AlertCircle className="h-3 w-3 mr-1" />
+                          Failed
+                        </Badge>
+                      )}
+                      {testStatus[service.id] === 'testing' && (
+                        <Badge variant="outline">
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          Testing
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleCopy(service.container_id, service.port, service.id, service.name)}
+                          title="Test connection"
+                          onClick={() => handleTest(service.container_id, service.port, service.id, service.name, service.code_server_domain)}
+                          disabled={testStatus[service.id] === 'testing'}
+                        >
+                          {getTestIcon(service.id)}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Copy URL"
+                          onClick={() => handleCopy(service.container_id, service.port, service.id, service.name, service.code_server_domain)}
                         >
                           {copiedId === service.id ? (
                             <Check className="h-4 w-4 text-green-500" />
@@ -252,16 +326,23 @@ export default function Ports() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleOpen(service.container_id, service.port, service.name)}
+                          title="Open in new tab"
+                          onClick={() => handleOpen(service.container_id, service.port, service.name, service.code_server_domain)}
                         >
                           <ExternalLink className="h-4 w-4" />
                         </Button>
-                        {!service.auto_created && (
+                        {/* Show delete for all DB ports (id > 0) */}
+                        {service.id > 0 && (
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-destructive"
-                            onClick={() => handleDelete(service.container_id, service.port)}
+                            title="Delete port"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget({ 
+                              containerId: service.container_id, 
+                              port: service.port,
+                              name: service.name 
+                            })}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -283,22 +364,41 @@ export default function Ports() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
           <p>
-            Services are proxied through Traefik. Click the external link icon to open a service in a new tab.
+            <strong>VS Code (code-server) - Subdomain Mode:</strong> When <code>CODE_SERVER_BASE_DOMAIN</code> is configured,
+            code-server is accessible via subdomain (e.g., <code>mycontainer.code.example.com</code>).
+            This requires DNS wildcard record and Nginx configuration.
           </p>
           <p>
-            <strong>VS Code (code-server):</strong> Automatically routed through Traefik using container internal port 8443.
+            <strong>VS Code (code-server) - Direct Port Mode:</strong> When subdomain is not configured,
+            code-server is accessed directly via host port (e.g., <code>http://server:18443</code>).
           </p>
           <p>
-            <strong>Proxy URL format:</strong>{' '}
-            <code className="bg-muted px-2 py-1 rounded">
-              {window.location.origin}/api/proxy/&#123;container_id&#125;/8443
-            </code>
+            <strong>Test Connection:</strong> Click the lightning bolt icon to test if the service is reachable.
           </p>
           <p>
-            <strong>Note:</strong> Make sure the container is running and connected to the Traefik network.
+            <strong>Note:</strong> Make sure the container is running and the service is started inside the container.
           </p>
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Port Record</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the port record for "{deleteTarget?.name}" (port {deleteTarget?.port})?
+              This only removes the record from the database, it does not stop any running service.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

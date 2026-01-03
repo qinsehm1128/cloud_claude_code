@@ -95,7 +95,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(authService)
 	settingsHandler := handlers.NewSettingsHandler(githubService, claudeConfigService)
 	repoHandler := handlers.NewRepositoryHandler(githubService)
-	containerHandler := handlers.NewContainerHandler(containerService)
+	containerHandler := handlers.NewContainerHandler(containerService, terminalService)
 	fileHandler := handlers.NewFileHandler(fileService)
 	terminalHandler := handlers.NewTerminalHandler(terminalService, containerService, authService)
 	portHandler := handlers.NewPortHandler(portService)
