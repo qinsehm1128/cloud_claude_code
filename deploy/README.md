@@ -1,123 +1,144 @@
-# 部署指南
+# 📦 Deployment Guide
 
-## 快速开始
-
-### 开发模式
-```bash
-# 启动前端开发服务器 + 后端
-./start-dev.sh
-
-# 仅启动后端
-./start-dev.sh --backend
-
-# 仅启动前端
-./start-dev.sh --frontend
-```
-
-### 生产模式（打包前端 + 运行后端）
-```bash
-# 打包前端到指定目录，然后运行后端
-./start-dev.sh --prod --deploy-dir /var/www/example.com
-```
-
-这种模式会：
-1. 构建前端生产版本
-2. 复制到指定目录
-3. 直接运行后端（go run，非二进制）
-
-适合在服务器上快速测试，nginx 指向前端目录即可。
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a>
+</p>
 
 ---
 
-## 目录结构
+## ⚡ Quick Start
 
-部署支持前后端分离：
-- **前端目录**: nginx 静态文件目录 (默认: `/var/www/example.com`)
-- **后端目录**: 后端程序和配置 (默认: `/opt/cc-platform`)
+### 🛠️ Development Mode
+
+```bash
+# Start frontend dev server + backend
+./start-dev.sh
+
+# Backend only
+./start-dev.sh --backend
+
+# Frontend only
+./start-dev.sh --frontend
+```
+
+### 🚀 Production Mode
+
+```bash
+# Build frontend to specified directory, then run backend
+./start-dev.sh --prod --deploy-dir /var/www/example.com
+```
+
+This mode will:
+1. Build frontend production version
+2. Copy to specified directory
+3. Run backend directly (go run, not binary)
+
+Ideal for quick server testing with nginx pointing to frontend directory.
+
+---
+
+## 📁 Directory Structure
+
+Supports frontend/backend separation:
+
+| Directory | Purpose | Default |
+|-----------|---------|---------|
+| 🎨 Frontend | Nginx static files | `/var/www/example.com` |
+| 🔧 Backend | Backend program & config | `/opt/cc-platform` |
 
 ```
-/var/www/example.com/   # 前端
+/var/www/example.com/        # Frontend
 ├── index.html
 ├── assets/
 └── ...
 
-/opt/cc-platform/                   # 后端
-├── cc-server                       # 可执行文件
-├── .env                            # 配置文件
-├── data/                           # 数据目录
+/opt/cc-platform/            # Backend
+├── cc-server                # Executable
+├── .env                     # Configuration
+├── data/                    # Data directory
 │   └── cc-platform.db
-├── logs/                           # 日志目录
+├── logs/                    # Log directory
 │   └── backend.log
-└── docker/                         # Docker 相关
+└── docker/                  # Docker related
     └── build-base.sh
 ```
 
-## 快速部署
+---
 
-### 一键完整部署
+## 🚀 Quick Deployment
+
+### 🎯 One-Command Full Deployment
 
 ```bash
-# 构建 + 安装 + 配置服务 + 启用 + 启动
+# Build + Install + Configure service + Enable + Start
 ./deploy.sh --full-deploy
 
-# 使用自定义目录
+# With custom directories
 ./deploy.sh --full-deploy \
     --frontend-dir /var/www/mysite.com \
     --backend-dir /opt/myapp
 ```
 
-### 分步部署
+### 📋 Step-by-Step Deployment
 
 ```bash
-# 1. 构建
+# 1. Build
 ./deploy.sh --build
 
-# 2. 安装文件
+# 2. Install files
 ./deploy.sh --install
 
-# 3. 配置 systemd 服务
+# 3. Configure systemd service
 ./deploy.sh --setup-service
 
-# 4. 启用并启动服务
+# 4. Enable and start service
 ./deploy.sh --enable-service --start-service
 ```
 
-## 命令参考
+---
 
-### 构建选项
-```bash
-./deploy.sh --build              # 构建前端和后端
-./deploy.sh --frontend           # 仅构建前端
-./deploy.sh --backend            # 仅构建后端
-./deploy.sh --clean              # 清理构建产物
-```
+## 📚 Command Reference
 
-### 部署选项
-```bash
-./deploy.sh --install                        # 安装到默认目录
-./deploy.sh --frontend-dir /path --install   # 指定前端目录
-./deploy.sh --backend-dir /path --install    # 指定后端目录
-```
+### 🔨 Build Options
 
-### 服务管理
-```bash
-./deploy.sh --setup-service      # 生成 systemd service 文件
-./deploy.sh --enable-service     # 设置开机自启
-./deploy.sh --start-service      # 启动服务
-./deploy.sh --stop-service       # 停止服务
-./deploy.sh --restart-service    # 重启服务
-./deploy.sh --status             # 查看服务状态
-```
+| Command | Description |
+|---------|-------------|
+| `./deploy.sh --build` | Build frontend and backend |
+| `./deploy.sh --frontend` | Build frontend only |
+| `./deploy.sh --backend` | Build backend only |
+| `./deploy.sh --clean` | Clean build artifacts |
 
-### 组合命令
-```bash
-./deploy.sh --deploy             # 构建 + 安装 + 配置服务
-./deploy.sh --full-deploy        # 构建 + 安装 + 配置 + 启用 + 启动
-```
+### 📥 Deploy Options
 
-## 环境变量
+| Command | Description |
+|---------|-------------|
+| `./deploy.sh --install` | Install to default directories |
+| `./deploy.sh --frontend-dir /path --install` | Specify frontend directory |
+| `./deploy.sh --backend-dir /path --install` | Specify backend directory |
 
-可以通过环境变量预设目录：
+### ⚙️ Service Management
+
+| Command | Description |
+|---------|-------------|
+| `./deploy.sh --setup-service` | Generate systemd service file |
+| `./deploy.sh --enable-service` | Enable auto-start on boot |
+| `./deploy.sh --start-service` | Start service |
+| `./deploy.sh --stop-service` | Stop service |
+| `./deploy.sh --restart-service` | Restart service |
+| `./deploy.sh --status` | View service status |
+
+### 🔗 Combined Commands
+
+| Command | Description |
+|---------|-------------|
+| `./deploy.sh --deploy` | Build + Install + Configure service |
+| `./deploy.sh --full-deploy` | All of the above + Enable + Start |
+
+---
+
+## 🌍 Environment Variables
+
+Preset directories via environment variables:
 
 ```bash
 export FRONTEND_DIR=/var/www/mysite.com
@@ -125,133 +146,168 @@ export BACKEND_DIR=/opt/myapp
 ./deploy.sh --deploy
 ```
 
-## Nginx 配置
+---
 
-将 `deploy/nginx.conf` 内容添加到你的 nginx 配置中。
+## 🌐 Nginx Configuration
 
-关键配置：
-- 前端静态文件: `root /var/www/example.com;`
-- 后端代理: `proxy_pass http://127.0.0.1:8080;`
+Add `deploy/nginx.conf` content to your nginx configuration.
+
+### 📝 Key Settings
+
+| Setting | Value |
+|---------|-------|
+| Frontend static files | `root /var/www/example.com;` |
+| Backend proxy | `proxy_pass http://127.0.0.1:8080;` |
 
 ```bash
-# 编辑 nginx 配置
+# Edit nginx config
 vim /etc/nginx/sites-available/example.com.conf
 
-# 重载 nginx
+# Reload nginx
 nginx -s reload
 ```
 
-### Code-Server 子域名路由
+### 💻 Code-Server Subdomain Routing
 
-如果要启用 code-server 子域名访问（类似 VS Code Codespaces），需要：
+To enable code-server subdomain access (like VS Code Codespaces):
 
-1. **DNS 配置**: 添加泛域名 A 记录
-   ```
-   *.code.example.com -> 服务器IP
-   ```
+#### 1️⃣ DNS Configuration
 
-2. **Nginx 配置**: 添加子域名 server 块（参考 `deploy/nginx.conf` 中的第二个 server 块）
+Add wildcard A record:
+```
+*.code.example.com -> Server IP
+```
 
-3. **环境变量**: 在 `.env` 中设置
-   ```bash
-   CODE_SERVER_BASE_DOMAIN=code.example.com
-   ```
+#### 2️⃣ Nginx Configuration
 
-4. **Traefik**: 确保 Traefik 已启动（容器会自动注册路由）
-   ```bash
-   AUTO_START_TRAEFIK=true
-   ```
+Add subdomain server block (see second server block in `deploy/nginx.conf`)
 
-配置完成后，创建的容器将通过 `{容器名}.code.example.com` 访问 code-server。
+#### 3️⃣ Environment Variables
 
-## 配置文件
+Set in `.env`:
+```bash
+CODE_SERVER_BASE_DOMAIN=code.example.com
+```
 
-编辑 `/opt/cc-platform/.env`:
+#### 4️⃣ Traefik
+
+Ensure Traefik is running (containers auto-register routes):
+```bash
+AUTO_START_TRAEFIK=true
+```
+
+After setup, created containers are accessible via `{container-name}.code.example.com`.
+
+---
+
+## ⚙️ Configuration
+
+Edit `/opt/cc-platform/.env`:
 
 ```bash
-# 必须配置
+# Required
 PORT=8080
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your_secure_password
 JWT_SECRET=your_jwt_secret_key
 
-# 可选配置
+# Optional
 AUTO_START_TRAEFIK=false
+CODE_SERVER_BASE_DOMAIN=code.example.com
 ```
 
-生成安全密钥：
+### 🔐 Generate Secure Key
+
 ```bash
 openssl rand -hex 32
 ```
 
-## 服务管理
+---
 
-### 使用 systemctl
+## 🔧 Service Management
+
+### Using systemctl
 
 ```bash
-# 查看状态
+# Check status
 sudo systemctl status cc-platform
 
-# 启动/停止/重启
+# Start/Stop/Restart
 sudo systemctl start cc-platform
 sudo systemctl stop cc-platform
 sudo systemctl restart cc-platform
 
-# 查看日志
+# View logs
 sudo journalctl -u cc-platform -f
-# 或
+# Or
 tail -f /opt/cc-platform/logs/backend.log
 ```
 
-### 手动运行（调试用）
+### Manual Run (Debug)
 
 ```bash
 cd /opt/cc-platform
 ./cc-server
 ```
 
-## Docker 基础镜像
+---
 
-首次部署需要构建 Docker 基础镜像：
+## 🐳 Docker Base Image
+
+Build Docker base image on first deployment:
 
 ```bash
 cd /opt/cc-platform/docker
 ./build-base.sh
 ```
 
-这会创建：
-- `cc-base:latest` - 基础镜像
-- `cc-base:with-code-server` - 包含 code-server 的镜像
+This creates:
+- `cc-base:latest` - Base image
+- `cc-base:with-code-server` - Image with code-server
 
-## 常见问题
+---
 
-### 1. 502 Bad Gateway
-- 检查后端是否运行: `systemctl status cc-platform`
-- 检查端口配置是否一致
+## ❓ Troubleshooting
 
-### 2. WebSocket 连接失败
-- 确保 nginx 配置包含 WebSocket 支持
-- 检查 `proxy_set_header Upgrade` 设置
+### 🔴 502 Bad Gateway
 
-### 3. 权限问题
-- 后端需要访问 Docker: 确保运行用户在 docker 组
-- 或使用 root 用户运行
+- Check if backend is running: `systemctl status cc-platform`
+- Verify port configuration consistency
 
-### 4. 服务启动失败
+### 🔴 WebSocket Connection Failed
+
+- Ensure nginx config includes WebSocket support
+- Check `proxy_set_header Upgrade` settings
+
+### 🔴 Permission Issues
+
+- Backend needs Docker access: ensure user is in docker group
+- Or run as root user
+
+### 🔴 Service Start Failed
+
 ```bash
-# 查看详细日志
+# View detailed logs
 journalctl -u cc-platform -n 100 --no-pager
 
-# 手动运行查看错误
+# Run manually to see errors
 cd /opt/cc-platform && ./cc-server
 ```
 
-## 更新部署
+---
+
+## 🔄 Update Deployment
 
 ```bash
-# 拉取最新代码
+# Pull latest code
 git pull
 
-# 重新部署
+# Redeploy
 ./deploy.sh --deploy --restart-service
 ```
+
+---
+
+<p align="center">
+  <a href="../README.md">← Back to Main README</a>
+</p>

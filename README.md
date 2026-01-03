@@ -1,4 +1,4 @@
-# Claude Code Container Platform
+# 🚀 Claude Code Container Platform
 
 <p align="center">
   <b>Web-based Docker container management platform for Claude Code development environments</b>
@@ -8,51 +8,58 @@
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react" alt="React">
   <img src="https://img.shields.io/badge/Docker-Required-2496ED?style=flat-square&logo=docker" alt="Docker">
+  <img src="https://img.shields.io/badge/Traefik-v3-24A1C1?style=flat-square&logo=traefikproxy" alt="Traefik">
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License">
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a>
 </p>
 
 ---
 
-## Features
+## ✨ Features
 
 | Feature | Description |
 |---------|-------------|
-| **User Auth** | JWT authentication with configurable admin credentials |
-| **GitHub Integration** | Browse and clone repositories directly into containers |
-| **Claude Code Init** | Auto-initialize projects with Claude Code (optional) |
-| **Container Management** | Create, start, stop, delete Docker containers |
-| **Web Terminal** | Real-time terminal via WebSocket with session persistence |
-| **File Manager** | Browse, upload, download files with drag-and-drop support |
-| **Service Proxy** | Expose container services via Traefik (domain or port access) |
-| **Code-Server** | Access VS Code in browser via subdomain routing |
-| **Resource Control** | Custom CPU and memory limits per container |
-| **Security** | Container isolation, capability dropping, seccomp profiles |
+| 🔐 **Authentication** | JWT-based auth with configurable admin credentials |
+| 🐙 **GitHub Integration** | Browse and clone repositories directly into containers |
+| 🤖 **Claude Code Init** | Auto-initialize projects with Claude Code CLI (optional) |
+| 🐳 **Container Management** | Create, start, stop, delete Docker containers with ease |
+| 💻 **Web Terminal** | Real-time terminal via WebSocket with session persistence |
+| 📁 **File Manager** | Browse, upload, download files with drag-and-drop support |
+| 🌐 **Service Proxy** | Expose container services via Traefik reverse proxy |
+| 💻 **Code-Server** | Access VS Code in browser via subdomain routing |
+| ⚙️ **Resource Control** | Custom CPU and memory limits per container |
+| 🔒 **Security** | Container isolation, capability dropping, seccomp profiles |
 
-## Architecture
+---
+
+## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Browser                                      │
+│                         🌐 Browser                                   │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     Nginx (Reverse Proxy)                            │
+│                     📡 Nginx (Reverse Proxy)                         │
 │  ┌─────────────────────┐    ┌─────────────────────────────────────┐ │
-│  │   Main Site (80)    │    │  *.code.example.com (Subdomain)     │ │
+│  │   Main Site (:80)   │    │  *.code.example.com (Subdomain)     │ │
 │  │   example.com       │    │  → Traefik → Container:8080         │ │
 │  └──────────┬──────────┘    └──────────────┬──────────────────────┘ │
 └─────────────┼──────────────────────────────┼────────────────────────┘
               │                              │
               ▼                              ▼
 ┌─────────────────────────┐    ┌─────────────────────────────────────┐
-│   Backend (Go:8080)     │    │         Traefik (38080)             │
+│  🔧 Backend (Go:8080)   │    │       🔀 Traefik (38080)            │
 │  ┌───────────────────┐  │    │  Auto-routing by container name     │
 │  │ REST API          │  │    └──────────────┬──────────────────────┘
 │  │ WebSocket Terminal│  │                   │
 │  │ Container Manager │  │                   ▼
 │  └───────────────────┘  │    ┌─────────────────────────────────────┐
-└─────────────┬───────────┘    │         Docker Containers           │
+└─────────────┬───────────┘    │       🐳 Docker Containers          │
               │                │  ┌─────────┐ ┌─────────┐ ┌─────────┐│
               └───────────────▶│  │ dev-1   │ │ dev-2   │ │ dev-N   ││
                                │  │ :8080   │ │ :8080   │ │ :8080   ││
@@ -60,13 +67,15 @@
                                └─────────────────────────────────────┘
 ```
 
-## Tech Stack
+---
+
+## 🛠️ Tech Stack
 
 <table>
 <tr>
 <td width="50%">
 
-### Backend
+### 🔧 Backend
 - **Go 1.21+** - Core language
 - **Gin** - Web framework
 - **GORM + SQLite** - Database
@@ -76,34 +85,36 @@
 </td>
 <td width="50%">
 
-### Frontend
+### 🎨 Frontend
 - **React 18 + TypeScript**
 - **Vite** - Build tool
-- **shadcn/ui + Tailwind CSS** - UI
+- **shadcn/ui + Tailwind CSS** - UI components
 - **xterm.js** - Terminal emulator
 
 </td>
 </tr>
 </table>
 
-## Quick Start
+---
 
-### Prerequisites
+## 🚀 Quick Start
 
-- Docker (for running dev containers)
-- Node.js 20+
-- Go 1.21+
+### 📋 Prerequisites
 
-### 1. Build Base Image
+- 🐳 Docker (for running dev containers)
+- 📦 Node.js 20+
+- 🔧 Go 1.21+
+
+### 1️⃣ Build Base Image
 
 ```bash
 cd docker
 ./build-base.sh
 ```
 
-This creates `cc-base:latest` with Node.js 20, Git, and Claude Code CLI.
+> This creates `cc-base:latest` with Node.js 20, Git, and Claude Code CLI.
 
-### 2. Configure Environment
+### 2️⃣ Configure Environment
 
 ```bash
 cp .env.example .env
@@ -115,83 +126,83 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your-secure-password
 ```
 
-### 3. Start Development Server
+### 3️⃣ Start Development Server
 
-**Linux/macOS:**
+**🐧 Linux/macOS:**
 ```bash
 ./start-dev.sh
 ```
 
-**Windows:**
+**🪟 Windows:**
 ```cmd
 start-dev.bat
 ```
 
-### 4. Access Application
+### 4️⃣ Access Application
 
 | Service | URL |
 |---------|-----|
-| Frontend | http://localhost:5173 |
-| Backend API | http://localhost:8080 |
-| Traefik Dashboard | http://localhost:8081/dashboard/ |
+| 🎨 Frontend | http://localhost:5173 |
+| 🔧 Backend API | http://localhost:8080 |
+| 📊 Traefik Dashboard | http://localhost:8081/dashboard/ |
 
-> If `ADMIN_PASSWORD` is not set, a random password will be generated and shown in backend logs.
+> 💡 If `ADMIN_PASSWORD` is not set, a random password will be generated and shown in backend logs.
 
 ---
 
-## Deployment
+## 📦 Deployment
 
-For production deployment, see the **[Deployment Guide](deploy/README.md)**.
+> 📖 **For production deployment, see the [Deployment Guide](deploy/README.md)**
 
-### Quick Deploy
+### ⚡ Quick Deploy
 
 ```bash
-# One-command full deployment
+# 🚀 One-command full deployment
 ./deploy.sh --full-deploy
 
-# Custom directories
+# 📁 Custom directories
 ./deploy.sh --full-deploy \
     --frontend-dir /var/www/mysite.com \
     --backend-dir /opt/myapp
 ```
 
-### Deployment Options
+### 📋 Deployment Commands
 
 | Command | Description |
 |---------|-------------|
-| `./deploy.sh --build` | Build frontend and backend |
-| `./deploy.sh --install` | Install to deploy directories |
-| `./deploy.sh --setup-service` | Create systemd service |
-| `./deploy.sh --full-deploy` | All of the above + start |
+| `./deploy.sh --build` | 🔨 Build frontend and backend |
+| `./deploy.sh --install` | 📥 Install to deploy directories |
+| `./deploy.sh --setup-service` | ⚙️ Create systemd service |
+| `./deploy.sh --full-deploy` | 🚀 All of the above + start |
 
-> **[View Full Deployment Guide →](deploy/README.md)**
+> 📖 **[View Full Deployment Guide →](deploy/README.md)**
 
 ---
 
-## Service Proxy
+## 🌐 Service Proxy
 
-### Option 1: Subdomain Access (Recommended)
+### 🔗 Option 1: Subdomain Access (Recommended)
 
 Access container services via `{container-name}.code.example.com`
 
 ```
-User → Nginx → Traefik → Container:8080
+👤 User → 📡 Nginx → 🔀 Traefik → 🐳 Container:8080
 ```
 
 **Setup:**
-1. DNS: Add `*.code.example.com → Server IP`
-2. Nginx: Configure subdomain routing (see [nginx.conf](deploy/nginx.conf))
-3. Environment: Set `CODE_SERVER_BASE_DOMAIN=code.example.com`
+1. 🌍 **DNS**: Add `*.code.example.com → Server IP`
+2. 📝 **Nginx**: Configure subdomain routing (see [nginx.conf](deploy/nginx.conf))
+3. ⚙️ **Environment**: Set `CODE_SERVER_BASE_DOMAIN=code.example.com`
 
-### Option 2: Direct Port Access
+### 🔌 Option 2: Direct Port Access
 
 Access via `http://server-ip:30001`
 
-Available ports: `30001-30020`
+📌 Available ports: `30001-30020`
 
 ---
 
-## Environment Variables
+## ⚙️ Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -206,10 +217,10 @@ Available ports: `30001-30020`
 
 ---
 
-## API Reference
+## 📚 API Reference
 
 <details>
-<summary><b>Authentication</b></summary>
+<summary>🔐 <b>Authentication</b></summary>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -220,7 +231,7 @@ Available ports: `30001-30020`
 </details>
 
 <details>
-<summary><b>Settings</b></summary>
+<summary>⚙️ <b>Settings</b></summary>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -232,7 +243,7 @@ Available ports: `30001-30020`
 </details>
 
 <details>
-<summary><b>Repositories</b></summary>
+<summary>📂 <b>Repositories</b></summary>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -244,7 +255,7 @@ Available ports: `30001-30020`
 </details>
 
 <details>
-<summary><b>Containers</b></summary>
+<summary>🐳 <b>Containers</b></summary>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -258,7 +269,7 @@ Available ports: `30001-30020`
 </details>
 
 <details>
-<summary><b>Terminal & Files</b></summary>
+<summary>💻 <b>Terminal & Files</b></summary>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -271,11 +282,11 @@ Available ports: `30001-30020`
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 .
-├── backend/                 # Go backend
+├── 🔧 backend/              # Go backend
 │   ├── cmd/server/          # Entry point
 │   ├── internal/            # Internal packages
 │   │   ├── config/          # Configuration
@@ -284,18 +295,19 @@ Available ports: `30001-30020`
 │   │   └── terminal/        # Terminal management
 │   └── pkg/                 # Public packages
 │
-├── frontend/                # React frontend
+├── 🎨 frontend/             # React frontend
 │   └── src/
 │       ├── components/      # UI components
 │       ├── pages/           # Pages
 │       └── services/        # API services
 │
-├── docker/                  # Docker configs
+├── 🐳 docker/               # Docker configs
 │   ├── Dockerfile.base      # Base image
 │   └── traefik/             # Traefik proxy config
 │
-├── deploy/                  # Deployment configs
-│   ├── README.md            # Deployment guide
+├── 📦 deploy/               # Deployment configs
+│   ├── README.md            # Deployment guide (EN)
+│   ├── README.zh-CN.md      # Deployment guide (CN)
 │   └── nginx.conf           # Nginx config
 │
 ├── .env.example             # Environment template
@@ -306,17 +318,25 @@ Available ports: `30001-30020`
 
 ---
 
-## Security
+## 🔒 Security
 
-- Containers run as non-root user
-- All unnecessary Linux capabilities dropped
-- Seccomp security profile applied
-- CPU and memory limits enforced
-- Docker socket access disabled
-- Path traversal protection
+| Feature | Description |
+|---------|-------------|
+| 👤 Non-root | Containers run as non-root user |
+| 🔐 Capabilities | All unnecessary Linux capabilities dropped |
+| 🛡️ Seccomp | Security profile applied |
+| 📊 Resources | CPU and memory limits enforced |
+| 🚫 Docker Socket | Access disabled in containers |
+| 🛤️ Path Protection | Path traversal protection enabled |
 
 ---
 
-## License
+## 📄 License
 
 MIT License
+
+---
+
+<p align="center">
+  Made with ❤️ for Claude Code developers
+</p>
