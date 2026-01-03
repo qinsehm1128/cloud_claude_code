@@ -137,6 +137,25 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		portBindings[containerPort] = hostPort
 	}
 
+	// Add code-server port mapping if enabled
+	codeServerPort := 8443
+	codeServerHostPort := 0
+	if input.EnableCodeServer {
+		// Find a free port for code-server (range 18443-18543)
+		for port := 18443; port <= 18543; port++ {
+			if isPortFree(port) {
+				codeServerHostPort = port
+				break
+			}
+		}
+		if codeServerHostPort > 0 {
+			portBindings[fmt.Sprintf("%d/tcp", codeServerPort)] = fmt.Sprintf("%d", codeServerHostPort)
+			log.Printf("code-server port mapping: container:%d -> host:%d", codeServerPort, codeServerHostPort)
+		} else {
+			log.Printf("Warning: could not find free port for code-server")
+		}
+	}
+
 	// Build Traefik labels if proxy is enabled
 	labels := make(map[string]string)
 	if input.Proxy.Enabled && input.Proxy.ServicePort > 0 {
@@ -204,7 +223,6 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	}
 
 	// Save to database
-	codeServerPort := 8443 // Default code-server port
 	dbContainer := &models.Container{
 		DockerID:         dockerID,
 		Name:             input.Name,
@@ -222,7 +240,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		ProxyPort:        input.Proxy.Port,
 		ServicePort:      input.Proxy.ServicePort,
 		EnableCodeServer: input.EnableCodeServer,
-		CodeServerPort:   codeServerPort,
+		CodeServerPort:   codeServerHostPort, // Use the actual host port
 	}
 
 	if err := s.db.Create(dbContainer).Error; err != nil {

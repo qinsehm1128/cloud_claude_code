@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="containerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="codeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f97316"/>
+      <stop offset="100%" style="stop-color:#fb923c"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#6366f1" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="url(#containerGrad)" filter="url(#shadow)"/>
+  
+  <!-- Container shape (stylized box) -->
+  <path d="M18 22 L32 14 L46 22 L46 38 L32 46 L18 38 Z" 
+        fill="none" stroke="white" stroke-width="2" stroke-linejoin="round" opacity="0.9"/>
+  
+  <!-- Container top face -->
+  <path d="M18 22 L32 30 L46 22 L32 14 Z" 
+        fill="white" opacity="0.3"/>
+  
+  <!-- Container left face -->
+  <path d="M18 22 L18 38 L32 46 L32 30 Z" 
+        fill="white" opacity="0.15"/>
+  
+  <!-- Code brackets < > -->
+  <path d="M24 28 L20 32 L24 36" 
+        stroke="url(#codeGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M40 28 L44 32 L40 36" 
+        stroke="url(#codeGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  
+  <!-- Center dot (Claude-inspired) -->
+  <circle cx="32" cy="32" r="3" fill="white"/>
+  
+  <!-- Decorative particles -->
+  <circle cx="14" cy="18" r="1.5" fill="white" opacity="0.6"/>
+  <circle cx="50" cy="46" r="1.5" fill="white" opacity="0.6"/>
+  <circle cx="52" cy="16" r="1" fill="white" opacity="0.4"/>
+</svg>
