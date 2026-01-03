@@ -219,7 +219,7 @@
     - 验证超出允许目录的路径被拒绝
     - **Validates: Requirements 7.4, 7.6**
 
-  - [ ] 11.5 编写目录列表属性测试
+  - [x] 11.5 编写目录列表属性测试
     - **Property 10: Directory Listing Completeness**
     - 验证返回的文件信息包含所有必需字段
     - **Validates: Requirements 7.5**
@@ -299,51 +299,51 @@
     - 实现状态自动刷新
     - _Requirements: 10.3_
 
-- [ ] 17. 前端 - 终端组件
-  - [ ] 17.1 实现 xterm.js 终端组件
+- [x] 17. 前端 - 终端组件
+  - [x] 17.1 实现 xterm.js 终端组件
     - 创建 `src/components/Terminal/XTerminal.tsx`
     - 初始化 xterm.js 实例
     - 配置终端样式和字体
     - _Requirements: 10.6_
 
-  - [ ] 17.2 实现 WebSocket 连接管理
+  - [x] 17.2 实现 WebSocket 连接管理
     - 创建 `src/services/websocket.ts`
     - 实现 WebSocket 连接和重连
     - 实现消息发送和接收
     - _Requirements: 6.4, 10.6_
 
-  - [ ] 17.3 整合终端与 WebSocket
+  - [x] 17.3 整合终端与 WebSocket
     - 连接 xterm.js 输入到 WebSocket
     - 连接 WebSocket 输出到 xterm.js
     - 实现终端大小调整事件
     - _Requirements: 6.2, 6.3, 6.6, 10.6_
 
-- [ ] 18. 前端 - 文件管理
-  - [ ] 18.1 实现文件浏览器组件
+- [x] 18. 前端 - 文件管理
+  - [x] 18.1 实现文件浏览器组件
     - 创建 `src/components/FileManager/FileBrowser.tsx`
     - 显示目录树和文件列表
     - 实现目录导航
     - _Requirements: 10.7_
 
-  - [ ] 18.2 实现文件上传组件
+  - [x] 18.2 实现文件上传组件
     - 创建 `src/components/FileManager/FileUpload.tsx`
     - 实现拖拽上传
     - 显示上传进度
     - _Requirements: 10.7_
 
-  - [ ] 18.3 实现文件下载功能
+  - [x] 18.3 实现文件下载功能
     - 在文件浏览器中添加下载按钮
     - 实现文件下载
     - _Requirements: 10.7_
 
-- [ ] 19. 前端 - 错误处理与优化
-  - [ ] 19.1 实现全局错误处理
+- [x] 19. 前端 - 错误处理与优化
+  - [x] 19.1 实现全局错误处理
     - 创建 `src/utils/errorHandler.ts`
     - 实现 API 错误拦截
     - 显示用户友好的错误消息
     - _Requirements: 10.8_
 
-  - [ ] 19.2 实现加载状态
+  - [x] 19.2 实现加载状态
     - 添加全局加载指示器
     - 添加按钮加载状态
     - _Requirements: 10.1_
@@ -351,20 +351,20 @@
 - [ ] 20. Checkpoint - 前端功能完成
   - 确保前后端集成正常，如有问题请询问用户
 
-- [ ] 21. 集成与部署
-  - [ ] 21.1 创建 docker-compose.yml
+- [x] 21. 集成与部署
+  - [x] 21.1 创建 docker-compose.yml
     - 定义后端服务
     - 定义前端服务（或静态文件服务）
     - 配置网络和卷
     - _Requirements: 4.7_
 
-  - [ ] 21.2 创建生产构建脚本
+  - [x] 21.2 创建生产构建脚本
     - 前端生产构建
     - 后端二进制构建
     - 基础镜像构建
     - _Requirements: 4.7_
 
-  - [ ] 21.3 编写 README 文档
+  - [x] 21.3 编写 README 文档
     - 项目介绍
     - 安装和运行说明
     - 配置说明
