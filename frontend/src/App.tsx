@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Settings from './pages/Settings'
 import Repositories from './pages/Repositories'
 import ContainerTerminal from './pages/ContainerTerminal'
+import Ports from './pages/Ports'
 import { Loader2 } from 'lucide-react'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -38,6 +39,7 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="settings" element={<Settings />} />
           <Route path="repositories" element={<Repositories />} />
+          <Route path="ports" element={<Ports />} />
           <Route path="terminal/:containerId" element={<ContainerTerminal />} />
         </Route>
       </Routes>

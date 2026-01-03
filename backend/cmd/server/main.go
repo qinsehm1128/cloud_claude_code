@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
+	"time"
 
 	"cc-platform/internal/config"
 	"cc-platform/internal/database"
@@ -18,6 +20,25 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
+	// Auto-start Traefik if configured
+	if cfg.AutoStartTraefik {
+		traefikService, err := services.NewTraefikService(cfg)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize Traefik service: %v", err)
+		} else {
+			defer traefikService.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			if err := traefikService.EnsureTraefik(ctx); err != nil {
+				log.Printf("Warning: Failed to ensure Traefik is running: %v", err)
+			} else if traefikService.HTTPPort > 0 {
+				log.Printf("Traefik HTTP port: %d", traefikService.HTTPPort)
+				log.Printf("Traefik Dashboard: http://localhost:%d/dashboard/", traefikService.DashboardPort)
+				log.Printf("Traefik direct ports: %d-%d", cfg.TraefikPortRangeStart, cfg.TraefikPortRangeEnd)
+			}
+			cancel()
+		}
+	}
+
 	// Initialize database
 	db, err := database.Initialize(cfg.DatabasePath)
 	if err != nil {
@@ -28,6 +49,7 @@ func main() {
 	authService := services.NewAuthService(db, cfg)
 	githubService := services.NewGitHubService(db, cfg)
 	claudeConfigService := services.NewClaudeConfigService(db, cfg)
+	portService := services.NewPortService(db)
 	
 	containerService, err := services.NewContainerService(db, cfg, claudeConfigService, githubService)
 	if err != nil {
@@ -69,6 +91,8 @@ func main() {
 	containerHandler := handlers.NewContainerHandler(containerService)
 	fileHandler := handlers.NewFileHandler(fileService)
 	terminalHandler := handlers.NewTerminalHandler(terminalService, containerService, authService)
+	portHandler := handlers.NewPortHandler(portService)
+	proxyHandler := handlers.NewProxyHandler(containerService)
 
 	// Public routes
 	router.POST("/api/auth/login", authHandler.Login)
@@ -103,6 +127,12 @@ func main() {
 		protected.POST("/containers/:id/stop", containerHandler.StopContainer)
 		protected.DELETE("/containers/:id", containerHandler.DeleteContainer)
 
+		// Port management routes
+		protected.GET("/containers/:id/ports", portHandler.ListPorts)
+		protected.POST("/containers/:id/ports", portHandler.AddPort)
+		protected.DELETE("/containers/:id/ports/:port", portHandler.RemovePort)
+		protected.GET("/ports", portHandler.ListAllPorts)
+
 		// File routes
 		protected.GET("/files/:id/list", fileHandler.ListDirectory)
 		protected.GET("/files/:id/download", fileHandler.DownloadFile)
@@ -116,6 +146,14 @@ func main() {
 
 	// WebSocket routes (with JWT query param auth)
 	router.GET("/api/ws/terminal/:id", terminalHandler.HandleWebSocket)
+
+	// Proxy routes (with JWT auth)
+	proxyGroup := router.Group("/api/proxy")
+	proxyGroup.Use(middleware.JWTAuth(authService))
+	{
+		proxyGroup.Any("/:id/:port", proxyHandler.ProxyRequest)
+		proxyGroup.Any("/:id/:port/*path", proxyHandler.ProxyRequest)
+	}
 
 	// Start server
 	port := os.Getenv("PORT")

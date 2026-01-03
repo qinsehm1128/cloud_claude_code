@@ -71,13 +71,14 @@ type ProxyConfig struct {
 
 // CreateContainerInput represents input for creating a container
 type CreateContainerInput struct {
-	Name           string        `json:"name" binding:"required"`
-	GitRepoURL     string        `json:"git_repo_url" binding:"required"` // GitHub repo URL
-	GitRepoName    string        `json:"git_repo_name,omitempty"`         // Optional: repo name, extracted from URL if not provided
-	SkipClaudeInit bool          `json:"skip_claude_init,omitempty"`      // Skip Claude Code initialization
-	MemoryLimit    int64         `json:"memory_limit,omitempty"`          // Memory limit in MB (0 = default 2048MB)
-	CPULimit       float64       `json:"cpu_limit,omitempty"`             // CPU limit in cores (0 = default 1)
-	PortMappings   []PortMapping `json:"port_mappings,omitempty"`         // Legacy port mappings
+	Name             string        `json:"name" binding:"required"`
+	GitRepoURL       string        `json:"git_repo_url" binding:"required"` // GitHub repo URL
+	GitRepoName      string        `json:"git_repo_name,omitempty"`         // Optional: repo name, extracted from URL if not provided
+	SkipClaudeInit   bool          `json:"skip_claude_init,omitempty"`      // Skip Claude Code initialization
+	MemoryLimit      int64         `json:"memory_limit,omitempty"`          // Memory limit in MB (0 = default 2048MB)
+	CPULimit         float64       `json:"cpu_limit,omitempty"`             // CPU limit in cores (0 = default 1)
+	PortMappings     []PortMapping `json:"port_mappings,omitempty"`         // Legacy port mappings
+	EnableCodeServer bool          `json:"enable_code_server,omitempty"`    // Enable code-server (Web VS Code)
 	Proxy          ProxyConfig   `json:"proxy,omitempty"`                 // Traefik proxy configuration
 }
 
@@ -165,16 +166,18 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 
 	// Create container config - no volume mounts, project will be cloned inside
 	containerConfig := &docker.ContainerConfig{
-		Name:         input.Name,
-		EnvVars:      envSlice,
-		Binds:        []string{}, // No external mounts
-		SecurityOpt:  securityConfig.SecurityOpt,
-		CapDrop:      securityConfig.CapDrop,
-		CapAdd:       securityConfig.CapAdd,
-		Resources:    securityConfig.Resources,
-		NetworkMode:  "bridge", // Need network for cloning
-		PortBindings: portBindings,
-		Labels:       labels,
+		Name:          input.Name,
+		EnvVars:       envSlice,
+		Binds:         []string{}, // No external mounts
+		SecurityOpt:   securityConfig.SecurityOpt,
+		CapDrop:       securityConfig.CapDrop,
+		CapAdd:        securityConfig.CapAdd,
+		Resources:     securityConfig.Resources,
+		NetworkMode:   "bridge", // Need network for cloning
+		PortBindings:  portBindings,
+		Labels:        labels,
+		UseTraefikNet: input.Proxy.Enabled,       // Only connect to traefik-net if proxy is enabled
+		UseCodeServer: input.EnableCodeServer,    // Use image with code-server if enabled
 	}
 
 	// Create Docker container
@@ -201,22 +204,25 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	}
 
 	// Save to database
+	codeServerPort := 8443 // Default code-server port
 	dbContainer := &models.Container{
-		DockerID:       dockerID,
-		Name:           input.Name,
-		Status:         models.ContainerStatusCreated,
-		InitStatus:     models.InitStatusPending,
-		GitRepoURL:     input.GitRepoURL,
-		GitRepoName:    repoName,
-		WorkDir:        fmt.Sprintf("/workspace/%s", repoName),
-		SkipClaudeInit: input.SkipClaudeInit,
-		MemoryLimit:    memoryLimit * 1024 * 1024, // Store in bytes
-		CPULimit:       cpuLimit,
-		ExposedPorts:   portMappingsJSON,
-		ProxyEnabled:   input.Proxy.Enabled,
-		ProxyDomain:    input.Proxy.Domain,
-		ProxyPort:      input.Proxy.Port,
-		ServicePort:    input.Proxy.ServicePort,
+		DockerID:         dockerID,
+		Name:             input.Name,
+		Status:           models.ContainerStatusCreated,
+		InitStatus:       models.InitStatusPending,
+		GitRepoURL:       input.GitRepoURL,
+		GitRepoName:      repoName,
+		WorkDir:          fmt.Sprintf("/workspace/%s", repoName),
+		SkipClaudeInit:   input.SkipClaudeInit,
+		MemoryLimit:      memoryLimit * 1024 * 1024, // Store in bytes
+		CPULimit:         cpuLimit,
+		ExposedPorts:     portMappingsJSON,
+		ProxyEnabled:     input.Proxy.Enabled,
+		ProxyDomain:      input.Proxy.Domain,
+		ProxyPort:        input.Proxy.Port,
+		ServicePort:      input.Proxy.ServicePort,
+		EnableCodeServer: input.EnableCodeServer,
+		CodeServerPort:   codeServerPort,
 	}
 
 	if err := s.db.Create(dbContainer).Error; err != nil {
@@ -330,6 +336,19 @@ func (s *ContainerService) runInitialization(containerID uint) {
 		}
 	} else {
 		s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, "Skipping Claude Code initialization (user requested)")
+	}
+
+	// Step 3: Start code-server if enabled
+	if container.EnableCodeServer {
+		s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, "Starting code-server...")
+		if err := s.StartCodeServer(ctx, containerID); err != nil {
+			s.addLog(containerID, models.LogLevelWarn, models.LogStageInit, fmt.Sprintf("code-server failed to start: %v", err))
+			// Don't fail initialization if code-server fails
+		} else {
+			// Add code-server port to exposed ports
+			portService := NewPortService(s.db)
+			portService.AddPort(containerID, container.CodeServerPort, "VS Code", "http", true)
+		}
 	}
 
 	// Success
@@ -647,51 +666,55 @@ func (s *ContainerService) GetStartupCommand() string {
 
 // ContainerInfo represents container information for API response
 type ContainerInfo struct {
-	ID            uint       `json:"id"`
-	DockerID      string     `json:"docker_id"`
-	Name          string     `json:"name"`
-	Status        string     `json:"status"`
-	InitStatus    string     `json:"init_status"`
-	InitMessage   string     `json:"init_message,omitempty"`
-	GitRepoURL    string     `json:"git_repo_url,omitempty"`
-	GitRepoName   string     `json:"git_repo_name,omitempty"`
-	WorkDir       string     `json:"work_dir,omitempty"`
-	MemoryLimit   int64      `json:"memory_limit,omitempty"`
-	CPULimit      float64    `json:"cpu_limit,omitempty"`
-	ExposedPorts  string     `json:"exposed_ports,omitempty"`
-	ProxyEnabled  bool       `json:"proxy_enabled"`
-	ProxyDomain   string     `json:"proxy_domain,omitempty"`
-	ProxyPort     int        `json:"proxy_port,omitempty"`
-	ServicePort   int        `json:"service_port,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	StoppedAt     *time.Time `json:"stopped_at,omitempty"`
-	InitializedAt *time.Time `json:"initialized_at,omitempty"`
+	ID               uint       `json:"id"`
+	DockerID         string     `json:"docker_id"`
+	Name             string     `json:"name"`
+	Status           string     `json:"status"`
+	InitStatus       string     `json:"init_status"`
+	InitMessage      string     `json:"init_message,omitempty"`
+	GitRepoURL       string     `json:"git_repo_url,omitempty"`
+	GitRepoName      string     `json:"git_repo_name,omitempty"`
+	WorkDir          string     `json:"work_dir,omitempty"`
+	MemoryLimit      int64      `json:"memory_limit,omitempty"`
+	CPULimit         float64    `json:"cpu_limit,omitempty"`
+	ExposedPorts     string     `json:"exposed_ports,omitempty"`
+	ProxyEnabled     bool       `json:"proxy_enabled"`
+	ProxyDomain      string     `json:"proxy_domain,omitempty"`
+	ProxyPort        int        `json:"proxy_port,omitempty"`
+	ServicePort      int        `json:"service_port,omitempty"`
+	EnableCodeServer bool       `json:"enable_code_server"`
+	CodeServerPort   int        `json:"code_server_port,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	StoppedAt        *time.Time `json:"stopped_at,omitempty"`
+	InitializedAt    *time.Time `json:"initialized_at,omitempty"`
 }
 
 // ToContainerInfo converts a Container model to ContainerInfo
 func ToContainerInfo(c *models.Container) ContainerInfo {
 	return ContainerInfo{
-		ID:            c.ID,
-		DockerID:      c.DockerID,
-		Name:          c.Name,
-		Status:        c.Status,
-		InitStatus:    c.InitStatus,
-		InitMessage:   c.InitMessage,
-		GitRepoURL:    c.GitRepoURL,
-		GitRepoName:   c.GitRepoName,
-		WorkDir:       c.WorkDir,
-		MemoryLimit:   c.MemoryLimit,
-		CPULimit:      c.CPULimit,
-		ExposedPorts:  c.ExposedPorts,
-		ProxyEnabled:  c.ProxyEnabled,
-		ProxyDomain:   c.ProxyDomain,
-		ProxyPort:     c.ProxyPort,
-		ServicePort:   c.ServicePort,
-		CreatedAt:     c.CreatedAt,
-		StartedAt:     c.StartedAt,
-		StoppedAt:     c.StoppedAt,
-		InitializedAt: c.InitializedAt,
+		ID:               c.ID,
+		DockerID:         c.DockerID,
+		Name:             c.Name,
+		Status:           c.Status,
+		InitStatus:       c.InitStatus,
+		InitMessage:      c.InitMessage,
+		GitRepoURL:       c.GitRepoURL,
+		GitRepoName:      c.GitRepoName,
+		WorkDir:          c.WorkDir,
+		MemoryLimit:      c.MemoryLimit,
+		CPULimit:         c.CPULimit,
+		ExposedPorts:     c.ExposedPorts,
+		ProxyEnabled:     c.ProxyEnabled,
+		ProxyDomain:      c.ProxyDomain,
+		ProxyPort:        c.ProxyPort,
+		ServicePort:      c.ServicePort,
+		EnableCodeServer: c.EnableCodeServer,
+		CodeServerPort:   c.CodeServerPort,
+		CreatedAt:        c.CreatedAt,
+		StartedAt:        c.StartedAt,
+		StoppedAt:        c.StoppedAt,
+		InitializedAt:    c.InitializedAt,
 	}
 }
 
@@ -706,4 +729,42 @@ func extractRepoName(url string) string {
 		return parts[len(parts)-1]
 	}
 	return "project"
+}
+
+// GetContainerIP gets the IP address of a container
+func (s *ContainerService) GetContainerIP(ctx context.Context, id uint) (string, error) {
+	container, err := s.GetContainer(id)
+	if err != nil {
+		return "", err
+	}
+	
+	return s.dockerClient.GetContainerIP(ctx, container.DockerID)
+}
+
+// StartCodeServer starts code-server in the container
+func (s *ContainerService) StartCodeServer(ctx context.Context, containerID uint) error {
+	container, err := s.GetContainer(containerID)
+	if err != nil {
+		return err
+	}
+	
+	if !container.EnableCodeServer {
+		return nil
+	}
+	
+	// Start code-server in background
+	cmd := []string{
+		"bash", "-c",
+		fmt.Sprintf("nohup code-server --bind-addr 0.0.0.0:%d --auth none %s > /tmp/code-server.log 2>&1 &",
+			container.CodeServerPort, container.WorkDir),
+	}
+	
+	_, err = s.dockerClient.ExecInContainer(ctx, container.DockerID, cmd)
+	if err != nil {
+		s.addLog(containerID, models.LogLevelError, models.LogStageInit, fmt.Sprintf("Failed to start code-server: %v", err))
+		return err
+	}
+	
+	s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, fmt.Sprintf("code-server started on port %d", container.CodeServerPort))
+	return nil
 }

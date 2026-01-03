@@ -37,14 +37,15 @@ type ProxyConfigRequest struct {
 
 // CreateContainerRequest represents the request to create a container
 type CreateContainerRequest struct {
-	Name           string               `json:"name" binding:"required"`
-	GitRepoURL     string               `json:"git_repo_url" binding:"required"`
-	GitRepoName    string               `json:"git_repo_name,omitempty"`
-	SkipClaudeInit bool                 `json:"skip_claude_init,omitempty"`  // Skip Claude Code initialization
-	MemoryLimit    int64                `json:"memory_limit,omitempty"`      // Memory limit in MB (0 = default 2048MB)
-	CPULimit       float64              `json:"cpu_limit,omitempty"`         // CPU limit in cores (0 = default 1)
-	PortMappings   []PortMappingRequest `json:"port_mappings,omitempty"`     // Legacy port mappings
-	Proxy          ProxyConfigRequest   `json:"proxy,omitempty"`             // Traefik proxy configuration
+	Name             string               `json:"name" binding:"required"`
+	GitRepoURL       string               `json:"git_repo_url" binding:"required"`
+	GitRepoName      string               `json:"git_repo_name,omitempty"`
+	SkipClaudeInit   bool                 `json:"skip_claude_init,omitempty"`   // Skip Claude Code initialization
+	MemoryLimit      int64                `json:"memory_limit,omitempty"`       // Memory limit in MB (0 = default 2048MB)
+	CPULimit         float64              `json:"cpu_limit,omitempty"`          // CPU limit in cores (0 = default 1)
+	PortMappings     []PortMappingRequest `json:"port_mappings,omitempty"`      // Legacy port mappings
+	Proxy            ProxyConfigRequest   `json:"proxy,omitempty"`              // Traefik proxy configuration
+	EnableCodeServer bool                 `json:"enable_code_server,omitempty"` // Enable code-server (Web VS Code)
 }
 
 // ListContainers lists all containers
@@ -82,13 +83,14 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 	}
 
 	input := services.CreateContainerInput{
-		Name:           req.Name,
-		GitRepoURL:     req.GitRepoURL,
-		GitRepoName:    req.GitRepoName,
-		SkipClaudeInit: req.SkipClaudeInit,
-		MemoryLimit:    req.MemoryLimit,
-		CPULimit:       req.CPULimit,
-		PortMappings:   portMappings,
+		Name:             req.Name,
+		GitRepoURL:       req.GitRepoURL,
+		GitRepoName:      req.GitRepoName,
+		SkipClaudeInit:   req.SkipClaudeInit,
+		MemoryLimit:      req.MemoryLimit,
+		CPULimit:         req.CPULimit,
+		PortMappings:     portMappings,
+		EnableCodeServer: req.EnableCodeServer,
 		Proxy: services.ProxyConfig{
 			Enabled:     req.Proxy.Enabled,
 			Domain:      req.Proxy.Domain,

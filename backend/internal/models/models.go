@@ -53,6 +53,9 @@ type Container struct {
 	ProxyDomain    string     `json:"proxy_domain,omitempty"`    // Subdomain for domain-based access (e.g., "myapp" -> myapp.containers.domain.com)
 	ProxyPort      int        `json:"proxy_port,omitempty"`      // Direct port access (e.g., 9001)
 	ServicePort    int        `json:"service_port,omitempty"`    // Container internal service port (e.g., 3000)
+	// code-server configuration
+	EnableCodeServer bool     `json:"enable_code_server"`        // Enable code-server (Web VS Code)
+	CodeServerPort   int      `json:"code_server_port"`          // code-server port, default 8443
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	StoppedAt      *time.Time `json:"stopped_at,omitempty"`
 	InitializedAt  *time.Time `json:"initialized_at,omitempty"`
@@ -89,6 +92,16 @@ type ContainerLog struct {
 	Level       string `json:"level"` // info, warn, error
 	Stage       string `json:"stage"` // startup, clone, init, ready
 	Message     string `gorm:"type:text" json:"message"`
+}
+
+// ContainerPort represents an exposed port for a container
+type ContainerPort struct {
+	gorm.Model
+	ContainerID uint   `gorm:"index" json:"container_id"`
+	Port        int    `json:"port"`                       // Container internal port
+	Name        string `json:"name"`                       // Service name (e.g., "App", "VS Code")
+	Protocol    string `json:"protocol" gorm:"default:http"` // http/https/tcp
+	AutoCreated bool   `json:"auto_created"`               // Auto-created by system (e.g., code-server)
 }
 
 // TerminalSession represents a persistent terminal session

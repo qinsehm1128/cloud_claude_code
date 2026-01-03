@@ -8,7 +8,8 @@ import {
   Terminal,
   LogOut,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Network
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,6 +22,7 @@ import {
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Repositories', href: '/repositories', icon: FolderGit2 },
+  { name: 'Ports', href: '/ports', icon: Network },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 

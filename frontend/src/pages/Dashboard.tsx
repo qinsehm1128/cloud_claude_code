@@ -18,7 +18,8 @@ import {
   HardDrive,
   Network,
   Globe,
-  Link
+  Link,
+  Code
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -99,6 +100,7 @@ export default function Dashboard() {
       port: 0,
       service_port: 3000,
     } as ProxyConfig,
+    enableCodeServer: false,
   })
   const [newPortMapping, setNewPortMapping] = useState({ container_port: 0, host_port: 0 })
   const navigate = useNavigate()
@@ -177,7 +179,8 @@ export default function Dashboard() {
         formData.memoryLimit,
         formData.cpuLimit,
         formData.portMappings,
-        formData.proxy.enabled ? formData.proxy : undefined
+        formData.proxy.enabled ? formData.proxy : undefined,
+        formData.enableCodeServer
       )
       setCreateDialogOpen(false)
       setFormData({ 
@@ -188,7 +191,8 @@ export default function Dashboard() {
         memoryLimit: 2048,
         cpuLimit: 1,
         portMappings: [],
-        proxy: { enabled: false, domain: '', port: 0, service_port: 3000 }
+        proxy: { enabled: false, domain: '', port: 0, service_port: 3000 },
+        enableCodeServer: false
       })
       setNewPortMapping({ container_port: 0, host_port: 0 })
       fetchContainers()
@@ -529,6 +533,29 @@ export default function Dashboard() {
             {formData.skipClaudeInit && (
               <p className="text-xs text-muted-foreground">
                 The container will only clone the repository without running Claude Code to set up the environment.
+              </p>
+            )}
+
+            {/* code-server Option */}
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="enableCodeServer"
+                checked={formData.enableCodeServer}
+                onCheckedChange={(checked) => 
+                  setFormData({ ...formData, enableCodeServer: checked === true })
+                }
+              />
+              <label
+                htmlFor="enableCodeServer"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-2"
+              >
+                <Code className="h-4 w-4 text-muted-foreground" />
+                Enable Web VS Code (code-server)
+              </label>
+            </div>
+            {formData.enableCodeServer && (
+              <p className="text-xs text-muted-foreground">
+                code-server will be started on port 8443. Access it via the Ports page after initialization.
               </p>
             )}
 

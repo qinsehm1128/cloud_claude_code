@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,13 @@ type Config struct {
 	AdminUsername string
 	AdminPassword string
 	DataDirectory string
+	
+	// Traefik settings
+	AutoStartTraefik      bool
+	TraefikHTTPPort       int  // 0 = auto-assign
+	TraefikDashboardPort  int  // 0 = auto-assign
+	TraefikPortRangeStart int
+	TraefikPortRangeEnd   int
 }
 
 // Load loads configuration from environment variables
@@ -33,6 +41,13 @@ func Load() *Config {
 		AdminUsername: getEnv("ADMIN_USERNAME", ""),
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
 		DataDirectory: getEnv("DATA_DIR", "./data"),
+		
+		// Traefik settings (0 means auto-assign)
+		AutoStartTraefik:      getEnvBool("AUTO_START_TRAEFIK", false),
+		TraefikHTTPPort:       getEnvInt("TRAEFIK_HTTP_PORT", 0),
+		TraefikDashboardPort:  getEnvInt("TRAEFIK_DASHBOARD_PORT", 0),
+		TraefikPortRangeStart: getEnvInt("TRAEFIK_PORT_RANGE_START", 30001),
+		TraefikPortRangeEnd:   getEnvInt("TRAEFIK_PORT_RANGE_END", 30020),
 	}
 
 	// Generate JWT secret if not provided
@@ -123,6 +138,22 @@ func loadEnvFromFile(path string) error {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		return strings.ToLower(value) == "true" || value == "1"
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if i, err := strconv.Atoi(value); err == nil {
+			return i
+		}
 	}
 	return defaultValue
 }

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	BaseImageName = "cc-base"
-	BaseImageTag  = "latest"
+	BaseImageName           = "cc-base"
+	BaseImageTag            = "latest"
+	BaseImageWithCodeServer = "with-code-server"
 )
 
 // Client wraps the Docker SDK client
@@ -110,7 +111,12 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 
 // CreateContainer creates a new container
 func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
-	imageName := fmt.Sprintf("%s:%s", BaseImageName, BaseImageTag)
+	// Select image based on code-server requirement
+	imageTag := BaseImageTag
+	if config.UseCodeServer {
+		imageTag = BaseImageWithCodeServer
+	}
+	imageName := fmt.Sprintf("%s:%s", BaseImageName, imageTag)
 
 	// Build exposed ports and port bindings
 	exposedPorts := nat.PortSet{}
@@ -152,9 +158,9 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		PortBindings: portBindings,
 	}
 
-	// Network config - connect to traefik network if labels are set
+	// Network config - connect to traefik network only if explicitly requested
 	var networkingConfig *network.NetworkingConfig
-	if len(config.Labels) > 0 {
+	if config.UseTraefikNet {
 		networkingConfig = &network.NetworkingConfig{
 			EndpointsConfig: map[string]*network.EndpointSettings{
 				"traefik-net": {},
@@ -202,6 +208,33 @@ func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (st
 	return info.State.Status, nil
 }
 
+// GetContainerIP gets the IP address of a container in the bridge network
+func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string, error) {
+	info, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", err
+	}
+	
+	// Try traefik-net first
+	if network, ok := info.NetworkSettings.Networks["traefik-net"]; ok && network.IPAddress != "" {
+		return network.IPAddress, nil
+	}
+	
+	// Fall back to bridge network
+	if network, ok := info.NetworkSettings.Networks["bridge"]; ok && network.IPAddress != "" {
+		return network.IPAddress, nil
+	}
+	
+	// Try any available network
+	for _, network := range info.NetworkSettings.Networks {
+		if network.IPAddress != "" {
+			return network.IPAddress, nil
+		}
+	}
+	
+	return "", fmt.Errorf("no IP address found for container")
+}
+
 // ListContainers lists all containers with the base image
 func (c *Client) ListContainers(ctx context.Context) ([]types.Container, error) {
 	return c.cli.ContainerList(ctx, container.ListOptions{
@@ -238,16 +271,18 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, cmd []
 
 // ContainerConfig holds configuration for creating a container
 type ContainerConfig struct {
-	Name         string
-	EnvVars      []string
-	Binds        []string
-	SecurityOpt  []string
-	CapDrop      []string
-	CapAdd       []string
-	Resources    container.Resources
-	NetworkMode  string
-	PortBindings map[string]string // containerPort -> hostPort, e.g., "3000/tcp" -> "13000"
-	Labels       map[string]string // Container labels (for Traefik routing)
+	Name            string
+	EnvVars         []string
+	Binds           []string
+	SecurityOpt     []string
+	CapDrop         []string
+	CapAdd          []string
+	Resources       container.Resources
+	NetworkMode     string
+	PortBindings    map[string]string // containerPort -> hostPort, e.g., "3000/tcp" -> "13000"
+	Labels          map[string]string // Container labels (for Traefik routing)
+	UseTraefikNet   bool              // Connect to traefik-net network
+	UseCodeServer   bool              // Use image with code-server
 }
 
 // createBuildContext creates a tar archive of the build context

@@ -1,7 +1,11 @@
 # Base image for Claude Code containers
 # Ubuntu 22.04 + Node.js 20 + Claude Code + Git
+# Optional: code-server (Web VS Code)
 
 FROM ubuntu:22.04
+
+# Build argument for code-server installation
+ARG INSTALL_CODE_SERVER=false
 
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -28,6 +32,14 @@ RUN node --version && npm --version
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
+
+# Install code-server (Web VS Code) - only if INSTALL_CODE_SERVER=true
+RUN if [ "$INSTALL_CODE_SERVER" = "true" ]; then \
+        echo "Installing code-server..." && \
+        curl -fsSL https://code-server.dev/install.sh | sh; \
+    else \
+        echo "Skipping code-server installation"; \
+    fi
 
 # Create non-root user 'developer' with sudo privileges
 RUN useradd -m -s /bin/bash -G sudo developer \

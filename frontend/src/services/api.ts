@@ -72,6 +72,18 @@ export interface ProxyConfig {
   service_port?: number
 }
 
+// Container port info
+export interface ContainerPortInfo {
+  id: number
+  container_id: number
+  container_name: string
+  port: number
+  name: string
+  protocol: string
+  auto_created: boolean
+  proxy_url: string
+}
+
 // Container API
 export const containerApi = {
   list: () => api.get('/containers'),
@@ -87,7 +99,8 @@ export const containerApi = {
     memoryLimit?: number,
     cpuLimit?: number,
     portMappings?: PortMapping[],
-    proxy?: ProxyConfig
+    proxy?: ProxyConfig,
+    enableCodeServer?: boolean
   ) =>
     api.post('/containers', { 
       name, 
@@ -97,11 +110,22 @@ export const containerApi = {
       memory_limit: memoryLimit || 0,
       cpu_limit: cpuLimit || 0,
       port_mappings: portMappings || [],
-      proxy: proxy || { enabled: false }
+      proxy: proxy || { enabled: false },
+      enable_code_server: enableCodeServer || false
     }),
   start: (id: number) => api.post(`/containers/${id}/start`),
   stop: (id: number) => api.post(`/containers/${id}/stop`),
   delete: (id: number) => api.delete(`/containers/${id}`),
+}
+
+// Port management API
+export const portApi = {
+  list: (containerId: number) => api.get(`/containers/${containerId}/ports`),
+  add: (containerId: number, port: number, name?: string, protocol?: string) =>
+    api.post(`/containers/${containerId}/ports`, { port, name, protocol }),
+  remove: (containerId: number, port: number) =>
+    api.delete(`/containers/${containerId}/ports/${port}`),
+  listAll: () => api.get('/ports'),
 }
 
 // File API
