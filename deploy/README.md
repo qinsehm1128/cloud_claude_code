@@ -134,8 +134,8 @@ export BACKEND_DIR=/opt/myapp
 - 后端代理: `proxy_pass http://127.0.0.1:8080;`
 
 ```bash
-# 宝塔面板
-vim /www/server/panel/vhost/nginx/example.com.conf
+# 编辑 nginx 配置
+vim /etc/nginx/sites-available/example.com.conf
 
 # 重载 nginx
 nginx -s reload
