@@ -247,14 +247,14 @@
     - 实现错误提示
     - _Requirements: 10.2_
 
-- [ ] 14. 前端 - 设置页面
-  - [ ] 14.1 实现 GitHub 设置组件
+- [x] 14. 前端 - 设置页面
+  - [x] 14.1 实现 GitHub 设置组件
     - 创建 `src/components/Settings/GitHubSettings.tsx`
     - 实现 token 输入和保存
     - 实现保存状态反馈
     - _Requirements: 10.4_
 
-  - [ ] 14.2 实现 Claude Code 设置组件
+  - [x] 14.2 实现 Claude Code 设置组件
     - 创建 `src/components/Settings/ClaudeSettings.tsx`
     - 实现 API Key, URL 输入
     - 实现环境变量编辑器（支持多行 VAR=value 格式）
@@ -262,38 +262,38 @@
     - 显示默认启动命令模板
     - _Requirements: 3.10, 3.11, 10.4_
 
-  - [ ] 14.3 实现设置页面
+  - [x] 14.3 实现设置页面
     - 创建 `src/pages/Settings.tsx`
     - 整合 GitHub 和 Claude Code 设置组件
     - _Requirements: 10.4_
 
-- [ ] 15. 前端 - 仓库管理
-  - [ ] 15.1 实现仓库列表组件
+- [x] 15. 前端 - 仓库管理
+  - [x] 15.1 实现仓库列表组件
     - 创建 `src/components/Repository/RepoList.tsx`
     - 显示本地仓库列表
     - 实现删除功能
     - _Requirements: 10.5_
 
-  - [ ] 15.2 实现克隆仓库模态框
+  - [x] 15.2 实现克隆仓库模态框
     - 创建 `src/components/Repository/CloneRepoModal.tsx`
     - 显示远程仓库列表
     - 实现选择和克隆功能
     - _Requirements: 10.5_
 
-- [ ] 16. 前端 - 容器管理
-  - [ ] 16.1 实现容器卡片组件
+- [x] 16. 前端 - 容器管理
+  - [x] 16.1 实现容器卡片组件
     - 创建 `src/components/Dashboard/ContainerCard.tsx`
     - 显示容器状态、仓库信息
     - 实现启动/停止/删除按钮
     - _Requirements: 10.3_
 
-  - [ ] 16.2 实现创建容器模态框
+  - [x] 16.2 实现创建容器模态框
     - 创建 `src/components/Dashboard/CreateContainerModal.tsx`
     - 选择仓库创建容器
     - 显示创建进度
     - _Requirements: 10.3_
 
-  - [ ] 16.3 实现仪表板页面
+  - [x] 16.3 实现仪表板页面
     - 创建 `src/pages/Dashboard.tsx`
     - 整合容器列表和创建功能
     - 实现状态自动刷新
