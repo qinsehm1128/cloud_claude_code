@@ -43,18 +43,18 @@ func NewAuthService(db *gorm.DB, cfg *config.Config) *AuthService {
 	return svc
 }
 
-// ensureAdminUser creates the admin user if it doesn't exist
+// ensureAdminUser creates or updates the admin user
 func (s *AuthService) ensureAdminUser() {
 	var user models.User
 	result := s.db.Where("username = ?", s.config.AdminUsername).First(&user)
 	
+	hashedPassword, err := crypto.HashPassword(s.config.AdminPassword)
+	if err != nil {
+		panic("Failed to hash admin password: " + err.Error())
+	}
+
 	if result.Error == gorm.ErrRecordNotFound {
 		// Create admin user
-		hashedPassword, err := crypto.HashPassword(s.config.AdminPassword)
-		if err != nil {
-			panic("Failed to hash admin password: " + err.Error())
-		}
-
 		user = models.User{
 			Username:     s.config.AdminUsername,
 			PasswordHash: hashedPassword,
@@ -62,6 +62,11 @@ func (s *AuthService) ensureAdminUser() {
 		
 		if err := s.db.Create(&user).Error; err != nil {
 			panic("Failed to create admin user: " + err.Error())
+		}
+	} else {
+		// Update password if it changed (always update to ensure consistency)
+		if err := s.db.Model(&user).Update("password_hash", hashedPassword).Error; err != nil {
+			panic("Failed to update admin password: " + err.Error())
 		}
 	}
 }
