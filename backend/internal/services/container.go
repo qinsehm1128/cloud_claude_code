@@ -594,10 +594,31 @@ func (s *ContainerService) StartContainer(ctx context.Context, id uint) error {
 
 	// Update status
 	now := time.Now()
-	return s.db.Model(container).Updates(map[string]interface{}{
+	if err := s.db.Model(container).Updates(map[string]interface{}{
 		"status":     models.ContainerStatusRunning,
 		"started_at": &now,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+
+	// Start code-server if enabled (runs in background)
+	if container.EnableCodeServer {
+		go func() {
+			// Wait a moment for container to fully start
+			time.Sleep(2 * time.Second)
+			
+			startCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			
+			if err := s.StartCodeServer(startCtx, id); err != nil {
+				s.addLog(id, models.LogLevelWarn, models.LogStageStartup, fmt.Sprintf("Failed to start code-server: %v", err))
+			} else {
+				s.addLog(id, models.LogLevelInfo, models.LogStageStartup, "code-server started")
+			}
+		}()
+	}
+
+	return nil
 }
 
 // StopContainer stops a container
