@@ -75,6 +75,7 @@ export default function ContainerTerminal() {
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeKey, setActiveKey] = useState<string>('')
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
   const initializedRef = useRef(false)
 
   useEffect(() => {
@@ -311,6 +312,43 @@ export default function ContainerTerminal() {
     }
   }, [])
 
+  // Handle file path drop from FileBrowser
+  const handleFileDrop = useCallback((path: string) => {
+    const activeTab = tabs.find(t => t.key === activeKey)
+    if (activeTab?.ws && activeTab.connected) {
+      // Escape spaces and special characters in path
+      const escapedPath = path.replace(/ /g, '\\ ')
+      activeTab.ws.send(escapedPath)
+    }
+  }, [tabs, activeKey])
+
+  // Handle drag events for terminal area
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Check if it's a file path from our FileBrowser
+    if (e.dataTransfer.types.includes('text/plain')) {
+      setIsDraggingOver(true)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOver(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOver(false)
+    
+    const path = e.dataTransfer.getData('text/plain')
+    if (path && path.startsWith('/')) {
+      handleFileDrop(path)
+    }
+  }, [handleFileDrop])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -401,7 +439,22 @@ export default function ContainerTerminal() {
       </div>
 
       {/* Terminal Content */}
-      <div className="flex-1 relative bg-[#0a0a0a]">
+      <div 
+        className={`flex-1 relative bg-[#0a0a0a] transition-all ${
+          isDraggingOver ? 'ring-2 ring-primary ring-inset' : ''
+        }`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {isDraggingOver && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 pointer-events-none">
+            <div className="text-center">
+              <FolderOpen className="h-12 w-12 mx-auto mb-2 text-primary" />
+              <p className="text-sm text-muted-foreground">Drop to insert file path</p>
+            </div>
+          </div>
+        )}
         {activeTab?.historyLoading && (
           <div className="absolute top-0 left-0 right-0 z-10 bg-background/90 p-3 border-b">
             <div className="text-sm text-muted-foreground mb-2">

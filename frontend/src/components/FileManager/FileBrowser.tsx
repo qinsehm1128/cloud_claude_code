@@ -9,6 +9,7 @@ import {
   Home,
   ChevronRight,
   Loader2,
+  GripVertical,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,6 +41,7 @@ interface FileInfo {
 
 interface FileBrowserProps {
   containerId: number
+  onFileDrag?: (path: string) => void
 }
 
 export default function FileBrowser({ containerId }: FileBrowserProps) {
@@ -209,6 +211,11 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
         </Button>
       </div>
 
+      {/* Drag hint */}
+      <p className="text-xs text-muted-foreground">
+        💡 Drag files to terminal to insert path
+      </p>
+
       {/* File List */}
       {loading ? (
         <div className="flex items-center justify-center py-8">
@@ -229,23 +236,32 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
           </TableHeader>
           <TableBody>
             {files.map((file) => (
-              <TableRow key={file.path}>
+              <TableRow 
+                key={file.path}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', file.path)
+                  e.dataTransfer.effectAllowed = 'copy'
+                }}
+                className="cursor-grab active:cursor-grabbing"
+              >
                 <TableCell>
                   <div className="flex items-center gap-2">
+                    <GripVertical className="h-3 w-3 text-muted-foreground/50 flex-shrink-0" />
                     {file.is_directory ? (
-                      <Folder className="h-4 w-4 text-blue-400" />
+                      <Folder className="h-4 w-4 text-blue-400 flex-shrink-0" />
                     ) : (
-                      <File className="h-4 w-4 text-muted-foreground" />
+                      <File className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                     )}
                     {file.is_directory ? (
                       <button
                         onClick={() => handleNavigate(file.path)}
-                        className="hover:text-blue-400 hover:underline"
+                        className="hover:text-blue-400 hover:underline truncate"
                       >
                         {file.name}
                       </button>
                     ) : (
-                      <span>{file.name}</span>
+                      <span className="truncate">{file.name}</span>
                     )}
                   </div>
                 </TableCell>

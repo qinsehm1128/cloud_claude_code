@@ -23,9 +23,10 @@ func NewContainerHandler(containerService *services.ContainerService) *Container
 
 // CreateContainerRequest represents the request to create a container
 type CreateContainerRequest struct {
-	Name        string `json:"name" binding:"required"`
-	GitRepoURL  string `json:"git_repo_url" binding:"required"`
-	GitRepoName string `json:"git_repo_name,omitempty"`
+	Name           string `json:"name" binding:"required"`
+	GitRepoURL     string `json:"git_repo_url" binding:"required"`
+	GitRepoName    string `json:"git_repo_name,omitempty"`
+	SkipClaudeInit bool   `json:"skip_claude_init,omitempty"` // Skip Claude Code initialization
 }
 
 // ListContainers lists all containers
@@ -54,9 +55,10 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 	}
 
 	input := services.CreateContainerInput{
-		Name:        req.Name,
-		GitRepoURL:  req.GitRepoURL,
-		GitRepoName: req.GitRepoName,
+		Name:           req.Name,
+		GitRepoURL:     req.GitRepoURL,
+		GitRepoName:    req.GitRepoName,
+		SkipClaudeInit: req.SkipClaudeInit,
 	}
 
 	container, err := h.containerService.CreateContainer(c.Request.Context(), input)

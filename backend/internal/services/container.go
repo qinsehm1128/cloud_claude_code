@@ -56,9 +56,10 @@ func (s *ContainerService) Close() error {
 
 // CreateContainerInput represents input for creating a container
 type CreateContainerInput struct {
-	Name       string `json:"name" binding:"required"`
-	GitRepoURL string `json:"git_repo_url" binding:"required"` // GitHub repo URL
-	GitRepoName string `json:"git_repo_name,omitempty"`        // Optional: repo name, extracted from URL if not provided
+	Name           string `json:"name" binding:"required"`
+	GitRepoURL     string `json:"git_repo_url" binding:"required"` // GitHub repo URL
+	GitRepoName    string `json:"git_repo_name,omitempty"`         // Optional: repo name, extracted from URL if not provided
+	SkipClaudeInit bool   `json:"skip_claude_init,omitempty"`      // Skip Claude Code initialization
 }
 
 // CreateContainer creates a new container and automatically starts initialization
@@ -116,13 +117,14 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 
 	// Save to database
 	container := &models.Container{
-		DockerID:    dockerID,
-		Name:        input.Name,
-		Status:      models.ContainerStatusCreated,
-		InitStatus:  models.InitStatusPending,
-		GitRepoURL:  input.GitRepoURL,
-		GitRepoName: repoName,
-		WorkDir:     fmt.Sprintf("/workspace/%s", repoName),
+		DockerID:       dockerID,
+		Name:           input.Name,
+		Status:         models.ContainerStatusCreated,
+		InitStatus:     models.InitStatusPending,
+		GitRepoURL:     input.GitRepoURL,
+		GitRepoName:    repoName,
+		WorkDir:        fmt.Sprintf("/workspace/%s", repoName),
+		SkipClaudeInit: input.SkipClaudeInit,
 	}
 
 	if err := s.db.Create(container).Error; err != nil {
@@ -206,14 +208,18 @@ func (s *ContainerService) runInitialization(containerID uint) {
 	}
 	s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, "Repository cloned successfully")
 
-	// Step 2: Run Claude Code initialization
-	s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, "Starting Claude Code initialization...")
-	s.updateInitStatus(containerID, models.InitStatusInitializing, "Initializing project environment...")
-	
-	if err := s.runClaudeInit(ctx, container); err != nil {
-		s.addLog(containerID, models.LogLevelError, models.LogStageInit, fmt.Sprintf("Initialization failed: %v", err))
-		s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Initialization failed: %v", err))
-		return
+	// Step 2: Run Claude Code initialization (if not skipped)
+	if !container.SkipClaudeInit {
+		s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, "Starting Claude Code initialization...")
+		s.updateInitStatus(containerID, models.InitStatusInitializing, "Initializing project environment...")
+		
+		if err := s.runClaudeInit(ctx, container); err != nil {
+			s.addLog(containerID, models.LogLevelError, models.LogStageInit, fmt.Sprintf("Initialization failed: %v", err))
+			s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Initialization failed: %v", err))
+			return
+		}
+	} else {
+		s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, "Skipping Claude Code initialization (user requested)")
 	}
 
 	// Success

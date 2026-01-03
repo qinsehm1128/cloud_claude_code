@@ -12,12 +12,14 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  GitBranch
+  GitBranch,
+  Sparkles
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -82,6 +84,7 @@ export default function Dashboard() {
     name: '',
     selectedRepo: '',
     gitRepoUrl: '',
+    skipClaudeInit: false,
   })
   const navigate = useNavigate()
 
@@ -151,9 +154,9 @@ export default function Dashboard() {
         return
       }
 
-      await containerApi.create(formData.name, gitRepoUrl, gitRepoName)
+      await containerApi.create(formData.name, gitRepoUrl, gitRepoName, formData.skipClaudeInit)
       setCreateDialogOpen(false)
-      setFormData({ name: '', selectedRepo: '', gitRepoUrl: '' })
+      setFormData({ name: '', selectedRepo: '', gitRepoUrl: '', skipClaudeInit: false })
       fetchContainers()
     } catch (err) {
       console.error('Failed to create container', err)
@@ -469,10 +472,31 @@ export default function Dashboard() {
               <ol className="list-decimal list-inside space-y-1 text-xs">
                 <li>Container will be created and started</li>
                 <li>Repository will be cloned inside</li>
-                <li>Claude Code will set up the environment</li>
+                {!formData.skipClaudeInit && <li>Claude Code will set up the environment</li>}
                 <li>Once ready, you can access the terminal</li>
               </ol>
             </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="skipClaudeInit"
+                checked={formData.skipClaudeInit}
+                onCheckedChange={(checked) => 
+                  setFormData({ ...formData, skipClaudeInit: checked === true })
+                }
+              />
+              <label
+                htmlFor="skipClaudeInit"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-2"
+              >
+                <Sparkles className="h-4 w-4 text-muted-foreground" />
+                Skip Claude Code initialization
+              </label>
+            </div>
+            {formData.skipClaudeInit && (
+              <p className="text-xs text-muted-foreground">
+                The container will only clone the repository without running Claude Code to set up the environment.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>

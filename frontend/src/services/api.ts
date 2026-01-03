@@ -65,8 +65,13 @@ export const containerApi = {
   getStatus: (id: number) => api.get(`/containers/${id}/status`),
   getLogs: (id: number, limit?: number) => 
     api.get(`/containers/${id}/logs`, { params: { limit: limit || 100 } }),
-  create: (name: string, gitRepoUrl: string, gitRepoName?: string) =>
-    api.post('/containers', { name, git_repo_url: gitRepoUrl, git_repo_name: gitRepoName }),
+  create: (name: string, gitRepoUrl: string, gitRepoName?: string, skipClaudeInit?: boolean) =>
+    api.post('/containers', { 
+      name, 
+      git_repo_url: gitRepoUrl, 
+      git_repo_name: gitRepoName,
+      skip_claude_init: skipClaudeInit 
+    }),
   start: (id: number) => api.post(`/containers/${id}/start`),
   stop: (id: number) => api.post(`/containers/${id}/stop`),
   delete: (id: number) => api.delete(`/containers/${id}`),
