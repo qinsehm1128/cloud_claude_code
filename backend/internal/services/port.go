@@ -1,7 +1,10 @@
 package services
 
 import (
+	"context"
 	"errors"
+	"log"
+	"time"
 
 	"cc-platform/internal/models"
 
@@ -130,4 +133,67 @@ func (s *PortService) GetPort(containerID uint, port int) (*models.ContainerPort
 		return nil, err
 	}
 	return &containerPort, nil
+}
+
+// CleanupOrphanedPorts removes ports for containers that no longer exist
+func (s *PortService) CleanupOrphanedPorts() (int, error) {
+	// Get all container IDs that exist
+	var containers []models.Container
+	if err := s.db.Select("id").Find(&containers).Error; err != nil {
+		return 0, err
+	}
+	
+	existingIDs := make(map[uint]bool)
+	for _, c := range containers {
+		existingIDs[c.ID] = true
+	}
+	
+	// Get all ports
+	var ports []models.ContainerPort
+	if err := s.db.Find(&ports).Error; err != nil {
+		return 0, err
+	}
+	
+	// Find orphaned ports
+	var orphanedIDs []uint
+	for _, p := range ports {
+		if !existingIDs[p.ContainerID] {
+			orphanedIDs = append(orphanedIDs, p.ID)
+		}
+	}
+	
+	if len(orphanedIDs) == 0 {
+		return 0, nil
+	}
+	
+	// Delete orphaned ports
+	result := s.db.Delete(&models.ContainerPort{}, orphanedIDs)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	
+	return int(result.RowsAffected), nil
+}
+
+// StartCleanupRoutine starts a background routine to periodically clean up orphaned ports
+func (s *PortService) StartCleanupRoutine(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Port cleanup routine stopped")
+				return
+			case <-ticker.C:
+				count, err := s.CleanupOrphanedPorts()
+				if err != nil {
+					log.Printf("Port cleanup error: %v", err)
+				} else if count > 0 {
+					log.Printf("Cleaned up %d orphaned port records", count)
+				}
+			}
+		}
+	}()
 }

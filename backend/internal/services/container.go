@@ -137,27 +137,37 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		portBindings[containerPort] = hostPort
 	}
 
-	// Add code-server port mapping if enabled
-	codeServerPort := 8443
-	codeServerHostPort := 0
-	if input.EnableCodeServer {
-		// Find a free port for code-server (range 18443-18543)
-		for port := 18443; port <= 18543; port++ {
-			if isPortFree(port) {
-				codeServerHostPort = port
-				break
-			}
-		}
-		if codeServerHostPort > 0 {
-			portBindings[fmt.Sprintf("%d/tcp", codeServerPort)] = fmt.Sprintf("%d", codeServerHostPort)
-			log.Printf("code-server port mapping: container:%d -> host:%d", codeServerPort, codeServerHostPort)
-		} else {
-			log.Printf("Warning: could not find free port for code-server")
-		}
-	}
+	// code-server uses Traefik routing, no direct port mapping needed
+	// This allows multiple containers to use the same internal port (8443)
 
-	// Build Traefik labels if proxy is enabled
+	// Build Traefik labels
 	labels := make(map[string]string)
+	
+	// Always connect to traefik-net if code-server is enabled (for Traefik routing)
+	useTraefikNet := input.Proxy.Enabled || input.EnableCodeServer
+	
+	// Add code-server Traefik labels if enabled
+	if input.EnableCodeServer {
+		codeServerServiceName := fmt.Sprintf("cc-%s-code", input.Name)
+		labels["traefik.enable"] = "true"
+		
+		// Router for code-server - use path prefix based on container ID (will be updated after creation)
+		// For now, use container name as identifier
+		codeServerRouterName := fmt.Sprintf("%s-code", input.Name)
+		labels[fmt.Sprintf("traefik.http.routers.%s.rule", codeServerRouterName)] = fmt.Sprintf("PathPrefix(`/code/%s`)", input.Name)
+		labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", codeServerRouterName)] = "web"
+		labels[fmt.Sprintf("traefik.http.routers.%s.service", codeServerRouterName)] = codeServerServiceName
+		// Strip the path prefix before forwarding to code-server
+		labels[fmt.Sprintf("traefik.http.routers.%s.middlewares", codeServerRouterName)] = fmt.Sprintf("%s-strip", codeServerRouterName)
+		labels[fmt.Sprintf("traefik.http.middlewares.%s-strip.stripprefix.prefixes", codeServerRouterName)] = fmt.Sprintf("/code/%s", input.Name)
+		
+		// Service configuration - point to code-server port
+		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", codeServerServiceName)] = fmt.Sprintf("%d", CodeServerInternalPort)
+		
+		log.Printf("code-server Traefik routing: /code/%s -> container:%d", input.Name, CodeServerInternalPort)
+	}
+	
+	// Add user-defined proxy labels if enabled
 	if input.Proxy.Enabled && input.Proxy.ServicePort > 0 {
 		serviceName := fmt.Sprintf("cc-%s", input.Name)
 		labels["traefik.enable"] = "true"
@@ -195,7 +205,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		NetworkMode:   "bridge", // Need network for cloning
 		PortBindings:  portBindings,
 		Labels:        labels,
-		UseTraefikNet: input.Proxy.Enabled,       // Only connect to traefik-net if proxy is enabled
+		UseTraefikNet: useTraefikNet,             // Connect to traefik-net if proxy or code-server enabled
 		UseCodeServer: input.EnableCodeServer,    // Use image with code-server if enabled
 	}
 
@@ -240,7 +250,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		ProxyPort:        input.Proxy.Port,
 		ServicePort:      input.Proxy.ServicePort,
 		EnableCodeServer: input.EnableCodeServer,
-		CodeServerPort:   codeServerHostPort, // Use the actual host port
+		CodeServerPort:   CodeServerInternalPort, // Store container internal port (8443)
 	}
 
 	if err := s.db.Create(dbContainer).Error; err != nil {
@@ -269,6 +279,12 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, proxyInfo)
 	}
 	s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Resources: Memory=%dMB, CPU=%.1f cores", memoryLimit, cpuLimit))
+
+	// Log code-server Traefik routing if enabled
+	if input.EnableCodeServer {
+		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, 
+			fmt.Sprintf("code-server: Traefik route /code/%s -> container:%d", input.Name, CodeServerInternalPort))
+	}
 
 	// Auto-start the container and begin initialization
 	go func() {
@@ -363,9 +379,8 @@ func (s *ContainerService) runInitialization(containerID uint) {
 			s.addLog(containerID, models.LogLevelWarn, models.LogStageInit, fmt.Sprintf("code-server failed to start: %v", err))
 			// Don't fail initialization if code-server fails
 		} else {
-			// Add code-server port to exposed ports
-			portService := NewPortService(s.db)
-			portService.AddPort(containerID, container.CodeServerPort, "VS Code", "http", true)
+			s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, 
+				fmt.Sprintf("code-server started on container port %d", container.CodeServerPort))
 		}
 	}
 
@@ -759,6 +774,9 @@ func (s *ContainerService) GetContainerIP(ctx context.Context, id uint) (string,
 	return s.dockerClient.GetContainerIP(ctx, container.DockerID)
 }
 
+// CodeServerInternalPort is the fixed port code-server listens on inside the container
+const CodeServerInternalPort = 8443
+
 // StartCodeServer starts code-server in the container
 func (s *ContainerService) StartCodeServer(ctx context.Context, containerID uint) error {
 	container, err := s.GetContainer(containerID)
@@ -770,11 +788,12 @@ func (s *ContainerService) StartCodeServer(ctx context.Context, containerID uint
 		return nil
 	}
 	
-	// Start code-server in background
+	// Always use the fixed internal port (8443), not the host port stored in DB
+	// The host port mapping is handled by Docker port bindings
 	cmd := []string{
 		"bash", "-c",
 		fmt.Sprintf("nohup code-server --bind-addr 0.0.0.0:%d --auth none %s > /tmp/code-server.log 2>&1 &",
-			container.CodeServerPort, container.WorkDir),
+			CodeServerInternalPort, container.WorkDir),
 	}
 	
 	_, err = s.dockerClient.ExecInContainer(ctx, container.DockerID, cmd)
@@ -783,7 +802,7 @@ func (s *ContainerService) StartCodeServer(ctx context.Context, containerID uint
 		return err
 	}
 	
-	s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, fmt.Sprintf("code-server started on port %d", container.CodeServerPort))
+	s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, fmt.Sprintf("code-server started on container port %d", CodeServerInternalPort))
 	return nil
 }
 

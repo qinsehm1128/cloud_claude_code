@@ -20,9 +20,11 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
-	// Auto-start Traefik if configured
+	// Initialize Traefik service (needed for proxy routing)
+	var traefikService *services.TraefikService
 	if cfg.AutoStartTraefik {
-		traefikService, err := services.NewTraefikService(cfg)
+		var err error
+		traefikService, err = services.NewTraefikService(cfg)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize Traefik service: %v", err)
 		} else {
@@ -50,6 +52,11 @@ func main() {
 	githubService := services.NewGitHubService(db, cfg)
 	claudeConfigService := services.NewClaudeConfigService(db, cfg)
 	portService := services.NewPortService(db)
+	
+	// Start port cleanup routine (every 5 minutes)
+	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	defer cleanupCancel()
+	portService.StartCleanupRoutine(cleanupCtx, 5*time.Minute)
 	
 	containerService, err := services.NewContainerService(db, cfg, claudeConfigService, githubService)
 	if err != nil {
@@ -92,7 +99,7 @@ func main() {
 	fileHandler := handlers.NewFileHandler(fileService)
 	terminalHandler := handlers.NewTerminalHandler(terminalService, containerService, authService)
 	portHandler := handlers.NewPortHandler(portService)
-	proxyHandler := handlers.NewProxyHandler(containerService)
+	proxyHandler := handlers.NewProxyHandler(containerService, db, traefikService)
 
 	// Public routes
 	router.POST("/api/auth/login", authHandler.Login)

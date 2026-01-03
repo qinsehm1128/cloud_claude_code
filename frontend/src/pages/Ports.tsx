@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { portApi } from '@/services/api'
+import { portApi, containerApi } from '@/services/api'
 
 interface PortInfo {
   id: number
@@ -33,51 +33,100 @@ interface PortInfo {
   auto_created: boolean
 }
 
+interface ContainerInfo {
+  id: number
+  name: string
+  enable_code_server: boolean
+  code_server_port: number
+}
+
+// code-server internal port (inside container)
+const CODE_SERVER_INTERNAL_PORT = 8443
+
 export default function Ports() {
   const [ports, setPorts] = useState<PortInfo[]>([])
+  const [containers, setContainers] = useState<ContainerInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<number | null>(null)
 
-  const fetchPorts = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const response = await portApi.listAll()
-      setPorts(response.data || [])
+      const [portsRes, containersRes] = await Promise.all([
+        portApi.listAll(),
+        containerApi.list()
+      ])
+      setPorts(portsRes.data || [])
+      setContainers(containersRes.data || [])
     } catch {
-      console.error('Failed to fetch ports')
+      console.error('Failed to fetch data')
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchPorts()
-  }, [fetchPorts])
+    fetchData()
+  }, [fetchData])
 
   const handleDelete = async (containerId: number, port: number) => {
     try {
       await portApi.remove(containerId, port)
-      fetchPorts()
+      fetchData()
     } catch {
       console.error('Failed to delete port')
     }
   }
 
-  const getProxyUrl = (containerId: number, port: number) => {
+  // Get proxy URL - for code-server, use internal port 8443
+  const getProxyUrl = (containerId: number, port: number, serviceName: string) => {
     const baseUrl = window.location.origin
-    return `${baseUrl}/api/proxy/${containerId}/${port}`
+    // For VS Code (code-server), always use internal port 8443
+    const targetPort = serviceName === 'VS Code' ? CODE_SERVER_INTERNAL_PORT : port
+    return `${baseUrl}/api/proxy/${containerId}/${targetPort}`
   }
 
-  const handleCopy = async (containerId: number, port: number, id: number) => {
-    const url = getProxyUrl(containerId, port)
+  const handleCopy = async (containerId: number, port: number, id: number, serviceName: string) => {
+    const url = getProxyUrl(containerId, port, serviceName)
     await navigator.clipboard.writeText(url)
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 2000)
   }
 
-  const handleOpen = (containerId: number, port: number) => {
-    const url = getProxyUrl(containerId, port)
+  const handleOpen = (containerId: number, port: number, serviceName: string) => {
+    const url = getProxyUrl(containerId, port, serviceName)
     window.open(url, '_blank')
   }
+
+  // Build combined list: ports from DB + code-server from containers
+  const getAllServices = () => {
+    const services: Array<PortInfo & { isCodeServer?: boolean }> = [...ports]
+    
+    // Add code-server entries for containers that have it enabled
+    containers.forEach(container => {
+      if (container.enable_code_server) {
+        // Check if already in ports list
+        const exists = ports.some(
+          p => p.container_id === container.id && p.name === 'VS Code'
+        )
+        if (!exists) {
+          services.push({
+            id: -container.id, // Negative ID to distinguish
+            container_id: container.id,
+            container_name: container.name,
+            port: CODE_SERVER_INTERNAL_PORT,
+            name: 'VS Code',
+            protocol: 'http',
+            auto_created: true,
+            isCodeServer: true
+          })
+        }
+      }
+    })
+    
+    return services
+  }
+
+  const allServices = getAllServices()
 
   if (loading) {
     return (
@@ -95,7 +144,7 @@ export default function Ports() {
           <h1 className="text-2xl font-semibold">Exposed Ports</h1>
           <p className="text-muted-foreground">View and manage all exposed container services</p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchPorts}>
+        <Button variant="outline" size="sm" onClick={fetchData}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
@@ -105,11 +154,11 @@ export default function Ports() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Ports</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Services</CardTitle>
             <Network className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{ports.length}</div>
+            <div className="text-2xl font-bold">{allServices.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -119,7 +168,7 @@ export default function Ports() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {ports.filter(p => p.name === 'VS Code').length}
+              {allServices.filter(p => p.name === 'VS Code').length}
             </div>
           </CardContent>
         </Card>
@@ -130,7 +179,7 @@ export default function Ports() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {ports.filter(p => !p.auto_created).length}
+              {allServices.filter(p => !p.auto_created).length}
             </div>
           </CardContent>
         </Card>
@@ -139,14 +188,14 @@ export default function Ports() {
       {/* Ports Table */}
       <Card>
         <CardHeader>
-          <CardTitle>All Exposed Ports</CardTitle>
+          <CardTitle>All Exposed Services</CardTitle>
         </CardHeader>
         <CardContent>
-          {ports.length === 0 ? (
+          {allServices.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Network className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No exposed ports yet</p>
-              <p className="text-sm">Ports will appear here when you add them to containers</p>
+              <p>No exposed services yet</p>
+              <p className="text-sm">Services will appear here when you create containers with code-server enabled</p>
             </div>
           ) : (
             <Table>
@@ -161,27 +210,27 @@ export default function Ports() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {ports.map((port) => (
-                  <TableRow key={port.id}>
+                {allServices.map((service) => (
+                  <TableRow key={service.id}>
                     <TableCell className="font-medium">
-                      {port.container_name}
+                      {service.container_name}
                     </TableCell>
                     <TableCell>
                       <code className="bg-muted px-2 py-1 rounded text-sm">
-                        {port.port}
+                        {service.port}
                       </code>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {port.name === 'VS Code' && <Code className="h-4 w-4" />}
-                        {port.name || '-'}
+                        {service.name === 'VS Code' && <Code className="h-4 w-4" />}
+                        {service.name || '-'}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{port.protocol}</Badge>
+                      <Badge variant="outline">{service.protocol}</Badge>
                     </TableCell>
                     <TableCell>
-                      {port.auto_created ? (
+                      {service.auto_created ? (
                         <Badge variant="secondary">Auto</Badge>
                       ) : (
                         <Badge>Manual</Badge>
@@ -192,9 +241,9 @@ export default function Ports() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleCopy(port.container_id, port.port, port.id)}
+                          onClick={() => handleCopy(service.container_id, service.port, service.id, service.name)}
                         >
-                          {copiedId === port.id ? (
+                          {copiedId === service.id ? (
                             <Check className="h-4 w-4 text-green-500" />
                           ) : (
                             <Copy className="h-4 w-4" />
@@ -203,16 +252,16 @@ export default function Ports() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleOpen(port.container_id, port.port)}
+                          onClick={() => handleOpen(service.container_id, service.port, service.name)}
                         >
                           <ExternalLink className="h-4 w-4" />
                         </Button>
-                        {!port.auto_created && (
+                        {!service.auto_created && (
                           <Button
                             variant="ghost"
                             size="sm"
                             className="text-destructive"
-                            onClick={() => handleDelete(port.container_id, port.port)}
+                            onClick={() => handleDelete(service.container_id, service.port)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -234,16 +283,19 @@ export default function Ports() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
           <p>
-            Services are proxied through the backend API. Click the external link icon to open a service in a new tab.
+            Services are proxied through Traefik. Click the external link icon to open a service in a new tab.
+          </p>
+          <p>
+            <strong>VS Code (code-server):</strong> Automatically routed through Traefik using container internal port 8443.
           </p>
           <p>
             <strong>Proxy URL format:</strong>{' '}
             <code className="bg-muted px-2 py-1 rounded">
-              {window.location.origin}/api/proxy/&#123;container_id&#125;/&#123;port&#125;
+              {window.location.origin}/api/proxy/&#123;container_id&#125;/8443
             </code>
           </p>
           <p>
-            <strong>Note:</strong> Make sure the service is running inside the container before accessing it.
+            <strong>Note:</strong> Make sure the container is running and connected to the Traefik network.
           </p>
         </CardContent>
       </Card>
