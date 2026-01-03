@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"cc-platform/internal/config"
@@ -161,13 +161,10 @@ func main() {
 	}
 
 	// Start server
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	port := cfg.Port
 	
-	log.Printf("Server starting on port %s", port)
-	if err := router.Run(":" + port); err != nil {
+	log.Printf("Server starting on port %d", port)
+	if err := router.Run(fmt.Sprintf(":%d", port)); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/rand"
 	"encoding/hex"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 // Config holds all configuration for the application
 type Config struct {
 	Environment   string
+	Port          int    // Server port
 	DatabasePath  string
 	JWTSecret     string
 	EncryptionKey string
@@ -31,10 +33,14 @@ type Config struct {
 // Load loads configuration from environment variables
 func Load() *Config {
 	// Load .env file first
-	loadEnvFile()
+	envPath := loadEnvFile()
+	if envPath != "" {
+		log.Printf("Loaded configuration from: %s", envPath)
+	}
 	
 	cfg := &Config{
 		Environment:   getEnv("ENVIRONMENT", "development"),
+		Port:          getEnvInt("PORT", 8080),
 		DatabasePath:  getEnv("DATABASE_PATH", "./data/cc-platform.db"),
 		JWTSecret:     getEnv("JWT_SECRET", ""),
 		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
@@ -72,9 +78,15 @@ func Load() *Config {
 }
 
 // loadEnvFile loads environment variables from .env file
-func loadEnvFile() {
+// Returns the path of the loaded file, or empty string if not found
+func loadEnvFile() string {
+	// Get current working directory
+	cwd, _ := os.Getwd()
+	
 	// Try multiple locations for .env file
 	locations := []string{
+		filepath.Join(cwd, ".env"),
+		filepath.Join(cwd, "../.env"),
 		".env",
 		"../.env",
 		filepath.Join(getExecutableDir(), ".env"),
@@ -82,10 +94,17 @@ func loadEnvFile() {
 	}
 	
 	for _, path := range locations {
-		if err := loadEnvFromFile(path); err == nil {
-			return
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(absPath); err == nil {
+			if err := loadEnvFromFile(absPath); err == nil {
+				return absPath
+			}
 		}
 	}
+	return ""
 }
 
 // getExecutableDir returns the directory of the executable
@@ -126,10 +145,8 @@ func loadEnvFromFile(path string) error {
 		// Remove quotes if present
 		value = strings.Trim(value, `"'`)
 		
-		// Only set if not already set in environment
-		if os.Getenv(key) == "" {
-			os.Setenv(key, value)
-		}
+		// Always set from .env file (override existing)
+		os.Setenv(key, value)
 	}
 	
 	return scanner.Err()

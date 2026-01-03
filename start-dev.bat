@@ -9,9 +9,22 @@ set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
 REM Configuration
+set "LOG_DIR=%SCRIPT_DIR%logs"
+
+REM Default ports
 set "BACKEND_PORT=8080"
 set "FRONTEND_PORT=3000"
-set "LOG_DIR=%SCRIPT_DIR%logs"
+
+REM Load from .env file if exists
+if exist "%SCRIPT_DIR%.env" (
+    for /f "usebackq tokens=1,* delims==" %%a in ("%SCRIPT_DIR%.env") do (
+        set "line=%%a"
+        if "!line:~0,1!" neq "#" (
+            if "%%a"=="PORT" set "BACKEND_PORT=%%b"
+            if "%%a"=="FRONTEND_PORT" set "FRONTEND_PORT=%%b"
+        )
+    )
+)
 
 REM Parse arguments
 set "SKIP_DEPS=0"

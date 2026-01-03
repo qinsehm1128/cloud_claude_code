@@ -26,9 +26,32 @@ BACKEND_PID=""
 FRONTEND_PID=""
 
 # Configuration
+LOG_DIR="$SCRIPT_DIR/logs"
+
+# Load configuration from .env file
+load_env_config() {
+    local env_file="$SCRIPT_DIR/.env"
+    
+    if [ -f "$env_file" ]; then
+        log_info "Loading configuration from .env..."
+        
+        # Read PORT
+        local port=$(grep -E "^PORT=" "$env_file" | cut -d'=' -f2 | tr -d '"' | tr -d "'" | tr -d ' ')
+        if [ -n "$port" ]; then
+            BACKEND_PORT=$port
+        fi
+        
+        # Read FRONTEND_PORT
+        local frontend_port=$(grep -E "^FRONTEND_PORT=" "$env_file" | cut -d'=' -f2 | tr -d '"' | tr -d "'" | tr -d ' ')
+        if [ -n "$frontend_port" ]; then
+            FRONTEND_PORT=$frontend_port
+        fi
+    fi
+}
+
+# Default ports (can be overridden by .env or environment variables)
 BACKEND_PORT=${BACKEND_PORT:-8080}
 FRONTEND_PORT=${FRONTEND_PORT:-3000}
-LOG_DIR="$SCRIPT_DIR/logs"
 
 # Parse command line arguments
 SKIP_DEPS=false
@@ -628,6 +651,7 @@ trap cleanup SIGINT SIGTERM
 
 # Main execution
 main() {
+    load_env_config
     check_requirements
     setup_env
     setup_logs
