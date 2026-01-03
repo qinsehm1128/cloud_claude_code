@@ -76,15 +76,29 @@ func (s *TraefikService) EnsureTraefik(ctx context.Context) error {
 	}
 
 	if exists {
-		// Container exists but not running, start it
-		log.Println("Starting existing Traefik container...")
-		if err := s.cli.ContainerStart(ctx, TraefikContainerName, container.StartOptions{}); err != nil {
-			return fmt.Errorf("failed to start Traefik: %w", err)
+		// Container exists but not running
+		// Check if ports conflict with current backend port
+		if ports.httpPort == s.config.Port || ports.httpPort == 0 {
+			// Port conflict or invalid ports, remove and recreate
+			log.Printf("Traefik container has port conflict (HTTP: %d, Backend: %d), recreating...", ports.httpPort, s.config.Port)
+			if err := s.cli.ContainerRemove(ctx, TraefikContainerName, container.RemoveOptions{Force: true}); err != nil {
+				log.Printf("Warning: failed to remove old Traefik container: %v", err)
+			}
+			// Fall through to create new container
+		} else {
+			// Start existing container
+			log.Println("Starting existing Traefik container...")
+			if err := s.cli.ContainerStart(ctx, TraefikContainerName, container.StartOptions{}); err != nil {
+				// If start fails, try to recreate
+				log.Printf("Failed to start Traefik, recreating: %v", err)
+				s.cli.ContainerRemove(ctx, TraefikContainerName, container.RemoveOptions{Force: true})
+			} else {
+				s.HTTPPort = ports.httpPort
+				s.DashboardPort = ports.dashboardPort
+				log.Printf("Traefik started (HTTP: %d, Dashboard: %d)", s.HTTPPort, s.DashboardPort)
+				return nil
+			}
 		}
-		s.HTTPPort = ports.httpPort
-		s.DashboardPort = ports.dashboardPort
-		log.Printf("Traefik started (HTTP: %d, Dashboard: %d)", s.HTTPPort, s.DashboardPort)
-		return nil
 	}
 
 	// Container doesn't exist, create it with auto-assigned ports
@@ -119,11 +133,12 @@ func (s *TraefikService) getTraefikStatus(ctx context.Context) (exists bool, run
 	}
 
 	// Extract ports from existing container
+	// Traefik internal ports: 8080 (web), 8081 (dashboard)
 	for _, p := range containers[0].Ports {
-		if p.PrivatePort == 8080 {
+		if p.PrivatePort == 8080 && p.PublicPort > 0 {
 			ports.httpPort = int(p.PublicPort)
 		}
-		if p.PrivatePort == 8081 {
+		if p.PrivatePort == 8081 && p.PublicPort > 0 {
 			ports.dashboardPort = int(p.PublicPort)
 		}
 	}
@@ -143,12 +158,12 @@ func (s *TraefikService) createTraefik(ctx context.Context) error {
 		return err
 	}
 
-	// Auto-assign ports if not specified
+	// Auto-assign ports if not specified, avoiding backend port
 	s.HTTPPort = s.config.TraefikHTTPPort
 	s.DashboardPort = s.config.TraefikDashboardPort
 	
 	if s.HTTPPort == 0 {
-		port, err := findFreePort(38000, 39000)
+		port, err := findFreePortExcluding(38000, 39000, s.config.Port)
 		if err != nil {
 			return fmt.Errorf("failed to find free port for HTTP: %w", err)
 		}
@@ -156,14 +171,20 @@ func (s *TraefikService) createTraefik(ctx context.Context) error {
 	}
 	
 	if s.DashboardPort == 0 {
-		port, err := findFreePort(39000, 40000)
+		port, err := findFreePortExcluding(39000, 40000, s.config.Port)
 		if err != nil {
 			return fmt.Errorf("failed to find free port for dashboard: %w", err)
 		}
 		s.DashboardPort = port
 	}
+	
+	// Verify ports don't conflict with backend
+	if s.HTTPPort == s.config.Port {
+		return fmt.Errorf("Traefik HTTP port %d conflicts with backend port", s.HTTPPort)
+	}
 
-	// Build port bindings
+	// Build port bindings - map container internal ports to host ports
+	// Container uses 8080 internally for web, 8081 for dashboard
 	portBindings := nat.PortMap{
 		nat.Port("8080/tcp"): []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", s.HTTPPort)}},
 		nat.Port("8081/tcp"): []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", s.DashboardPort)}},
@@ -223,18 +244,23 @@ func (s *TraefikService) createTraefik(ctx context.Context) error {
 
 // findFreePort finds a free port in the given range
 func findFreePort(start, end int) (int, error) {
+	return findFreePortExcluding(start, end, 0)
+}
+
+// findFreePortExcluding finds a free port in the given range, excluding specific port
+func findFreePortExcluding(start, end, exclude int) (int, error) {
 	// Try random ports first for better distribution
 	rand.Seed(time.Now().UnixNano())
 	for i := 0; i < 10; i++ {
 		port := start + rand.Intn(end-start)
-		if isPortFree(port) {
+		if port != exclude && isPortFree(port) {
 			return port, nil
 		}
 	}
 	
 	// Fall back to sequential search
 	for port := start; port < end; port++ {
-		if isPortFree(port) {
+		if port != exclude && isPortFree(port) {
 			return port, nil
 		}
 	}
