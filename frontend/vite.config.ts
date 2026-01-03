@@ -32,9 +32,16 @@ export default defineConfig(({ mode }) => {
   // Load env from parent directory
   const parentEnv = loadParentEnv(mode)
   
-  // Get ports from env
+  // Get configuration from env
   const backendPort = parseInt(parentEnv.PORT || '8080')
   const frontendPort = parseInt(parentEnv.FRONTEND_PORT || '3000')
+  // Backend host: default to 127.0.0.1, can be set to specific IP or 0.0.0.0
+  const backendHost = parentEnv.BACKEND_HOST || '127.0.0.1'
+  
+  const proxyTarget = `http://${backendHost}:${backendPort}`
+  
+  console.log(`[Vite] Frontend: http://0.0.0.0:${frontendPort}`)
+  console.log(`[Vite] Proxy /api -> ${proxyTarget}`)
   
   return {
     plugins: [react()],
@@ -48,7 +55,7 @@ export default defineConfig(({ mode }) => {
       port: frontendPort,
       proxy: {
         '/api': {
-          target: `http://localhost:${backendPort}`,
+          target: proxyTarget,
           changeOrigin: true,
           ws: true,
         },
