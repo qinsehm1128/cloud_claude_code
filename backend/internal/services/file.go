@@ -145,7 +145,7 @@ func (s *FileService) UploadFile(ctx context.Context, containerID uint, path str
 
 	// Copy to container
 	destDir := filepath.Dir(safePath)
-	err = s.dockerClient.CopyToContainer(ctx, cont.DockerID, destDir, tarBuf, container.CopyToContainerOptions{})
+	err = s.dockerClient.CopyToContainer(ctx, cont.DockerID, destDir, tarBuf, types.CopyToContainerOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to copy to container: %w", err)
 	}
@@ -291,7 +291,7 @@ func (s *FileService) validatePath(path string) (string, error) {
 
 // execInContainer executes a command in a container
 func (s *FileService) execInContainer(ctx context.Context, dockerID string, cmd []string) (string, error) {
-	execConfig := container.ExecOptions{
+	execConfig := types.ExecConfig{
 		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
@@ -302,7 +302,7 @@ func (s *FileService) execInContainer(ctx context.Context, dockerID string, cmd 
 		return "", err
 	}
 
-	resp, err := s.dockerClient.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
+	resp, err := s.dockerClient.ContainerExecAttach(ctx, execID.ID, types.ExecStartCheck{})
 	if err != nil {
 		return "", err
 	}
