@@ -331,6 +331,31 @@ Access via `http://server-ip:30001`
 
 ---
 
+## 🙏 Acknowledgements
+
+This project is built with the following amazing open source projects:
+
+### Backend
+- [Go](https://github.com/golang/go) - The Go programming language
+- [Gin](https://github.com/gin-gonic/gin) - HTTP web framework
+- [GORM](https://github.com/go-gorm/gorm) - ORM library for Go
+- [gorilla/websocket](https://github.com/gorilla/websocket) - WebSocket implementation
+- [Docker Engine API](https://github.com/moby/moby) - Container management
+
+### Frontend
+- [React](https://github.com/facebook/react) - UI library
+- [Vite](https://github.com/vitejs/vite) - Next generation frontend tooling
+- [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) - Utility-first CSS framework
+- [shadcn/ui](https://github.com/shadcn-ui/ui) - Re-usable UI components
+- [xterm.js](https://github.com/xtermjs/xterm.js) - Terminal emulator
+
+### Infrastructure
+- [Traefik](https://github.com/traefik/traefik) - Cloud native reverse proxy
+- [code-server](https://github.com/coder/code-server) - VS Code in the browser
+- [SQLite](https://sqlite.org/) - Embedded database engine
+
+---
+
 ## 📄 License
 
 MIT License

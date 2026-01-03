@@ -331,6 +331,31 @@ start-dev.bat
 
 ---
 
+## 🙏 鸣谢
+
+本项目基于以下优秀的开源项目构建：
+
+### 后端
+- [Go](https://github.com/golang/go) - Go 编程语言
+- [Gin](https://github.com/gin-gonic/gin) - HTTP Web 框架
+- [GORM](https://github.com/go-gorm/gorm) - Go 语言 ORM 库
+- [gorilla/websocket](https://github.com/gorilla/websocket) - WebSocket 实现
+- [Docker Engine API](https://github.com/moby/moby) - 容器管理
+
+### 前端
+- [React](https://github.com/facebook/react) - UI 库
+- [Vite](https://github.com/vitejs/vite) - 下一代前端构建工具
+- [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) - 原子化 CSS 框架
+- [shadcn/ui](https://github.com/shadcn-ui/ui) - 可复用 UI 组件
+- [xterm.js](https://github.com/xtermjs/xterm.js) - 终端模拟器
+
+### 基础设施
+- [Traefik](https://github.com/traefik/traefik) - 云原生反向代理
+- [code-server](https://github.com/coder/code-server) - 浏览器中的 VS Code
+- [SQLite](https://sqlite.org/) - 嵌入式数据库引擎
+
+---
+
 ## 📄 许可证
 
 MIT License
