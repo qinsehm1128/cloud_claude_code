@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # HTTP entry (Nginx proxies to this)
+      - "8081:8081"   # Dashboard
+      # Direct port access range (30001-30020)
+      - "30001-30020:30001-30020"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+    networks:
+      - traefik-net
+
+networks:
+  traefik-net:
+    name: traefik-net
+    driver: bridge

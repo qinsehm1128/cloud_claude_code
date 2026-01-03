@@ -10,7 +10,9 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 )
 
 const (
@@ -110,6 +112,21 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
 	imageName := fmt.Sprintf("%s:%s", BaseImageName, BaseImageTag)
 
+	// Build exposed ports and port bindings
+	exposedPorts := nat.PortSet{}
+	portBindings := nat.PortMap{}
+	
+	for containerPort, hostPort := range config.PortBindings {
+		port := nat.Port(containerPort)
+		exposedPorts[port] = struct{}{}
+		portBindings[port] = []nat.PortBinding{
+			{
+				HostIP:   "0.0.0.0",
+				HostPort: hostPort,
+			},
+		}
+	}
+
 	// Build container config
 	containerConfig := &container.Config{
 		Image:        imageName,
@@ -120,20 +137,33 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		AttachStdout: true,
 		AttachStderr: true,
 		WorkingDir:   "/workspace",
+		ExposedPorts: exposedPorts,
+		Labels:       config.Labels,
 	}
 
 	// Build host config with security settings
 	hostConfig := &container.HostConfig{
-		Binds:       config.Binds,
-		SecurityOpt: config.SecurityOpt,
-		CapDrop:     config.CapDrop,
-		CapAdd:      config.CapAdd,
-		Resources:   config.Resources,
-		NetworkMode: container.NetworkMode(config.NetworkMode),
+		Binds:        config.Binds,
+		SecurityOpt:  config.SecurityOpt,
+		CapDrop:      config.CapDrop,
+		CapAdd:       config.CapAdd,
+		Resources:    config.Resources,
+		NetworkMode:  container.NetworkMode(config.NetworkMode),
+		PortBindings: portBindings,
+	}
+
+	// Network config - connect to traefik network if labels are set
+	var networkingConfig *network.NetworkingConfig
+	if len(config.Labels) > 0 {
+		networkingConfig = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				"traefik-net": {},
+			},
+		}
 	}
 
 	// Create container
-	resp, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, config.Name)
+	resp, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, networkingConfig, nil, config.Name)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
@@ -208,14 +238,16 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, cmd []
 
 // ContainerConfig holds configuration for creating a container
 type ContainerConfig struct {
-	Name        string
-	EnvVars     []string
-	Binds       []string
-	SecurityOpt []string
-	CapDrop     []string
-	CapAdd      []string
-	Resources   container.Resources
-	NetworkMode string
+	Name         string
+	EnvVars      []string
+	Binds        []string
+	SecurityOpt  []string
+	CapDrop      []string
+	CapAdd       []string
+	Resources    container.Resources
+	NetworkMode  string
+	PortBindings map[string]string // containerPort -> hostPort, e.g., "3000/tcp" -> "13000"
+	Labels       map[string]string // Container labels (for Traefik routing)
 }
 
 // createBuildContext creates a tar archive of the build context

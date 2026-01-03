@@ -58,6 +58,20 @@ export const repoApi = {
   delete: (id: number) => api.delete(`/repos/${id}`),
 }
 
+// Port mapping type
+export interface PortMapping {
+  container_port: number
+  host_port: number
+}
+
+// Proxy configuration type
+export interface ProxyConfig {
+  enabled: boolean
+  domain?: string
+  port?: number
+  service_port?: number
+}
+
 // Container API
 export const containerApi = {
   list: () => api.get('/containers'),
@@ -65,12 +79,25 @@ export const containerApi = {
   getStatus: (id: number) => api.get(`/containers/${id}/status`),
   getLogs: (id: number, limit?: number) => 
     api.get(`/containers/${id}/logs`, { params: { limit: limit || 100 } }),
-  create: (name: string, gitRepoUrl: string, gitRepoName?: string, skipClaudeInit?: boolean) =>
+  create: (
+    name: string, 
+    gitRepoUrl: string, 
+    gitRepoName?: string, 
+    skipClaudeInit?: boolean,
+    memoryLimit?: number,
+    cpuLimit?: number,
+    portMappings?: PortMapping[],
+    proxy?: ProxyConfig
+  ) =>
     api.post('/containers', { 
       name, 
       git_repo_url: gitRepoUrl, 
       git_repo_name: gitRepoName,
-      skip_claude_init: skipClaudeInit 
+      skip_claude_init: skipClaudeInit,
+      memory_limit: memoryLimit || 0,
+      cpu_limit: cpuLimit || 0,
+      port_mappings: portMappings || [],
+      proxy: proxy || { enabled: false }
     }),
   start: (id: number) => api.post(`/containers/${id}/start`),
   stop: (id: number) => api.post(`/containers/${id}/stop`),

@@ -43,6 +43,16 @@ type Container struct {
 	GitRepoName    string     `json:"git_repo_name,omitempty"` // GitHub repo name
 	WorkDir        string     `json:"work_dir,omitempty"`      // Working directory inside container
 	SkipClaudeInit bool       `json:"skip_claude_init"`        // Skip Claude Code initialization
+	// Resource configuration
+	MemoryLimit    int64      `json:"memory_limit,omitempty"`    // Memory limit in bytes (0 = default 2GB)
+	CPULimit       float64    `json:"cpu_limit,omitempty"`       // CPU limit (0 = default 1 core)
+	// Port mapping (legacy direct port binding)
+	ExposedPorts   string     `json:"exposed_ports,omitempty"`   // JSON array of port mappings
+	// Traefik proxy configuration
+	ProxyEnabled   bool       `json:"proxy_enabled"`             // Enable Traefik proxy
+	ProxyDomain    string     `json:"proxy_domain,omitempty"`    // Subdomain for domain-based access (e.g., "myapp" -> myapp.containers.domain.com)
+	ProxyPort      int        `json:"proxy_port,omitempty"`      // Direct port access (e.g., 9001)
+	ServicePort    int        `json:"service_port,omitempty"`    // Container internal service port (e.g., 3000)
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	StoppedAt      *time.Time `json:"stopped_at,omitempty"`
 	InitializedAt  *time.Time `json:"initialized_at,omitempty"`

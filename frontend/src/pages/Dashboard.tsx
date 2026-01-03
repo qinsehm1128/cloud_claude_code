@@ -13,7 +13,12 @@ import {
   XCircle,
   Clock,
   GitBranch,
-  Sparkles
+  Sparkles,
+  Cpu,
+  HardDrive,
+  Network,
+  Globe,
+  Link
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -38,7 +43,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { containerApi, repoApi } from '@/services/api'
+import { containerApi, repoApi, PortMapping, ProxyConfig } from '@/services/api'
 
 interface Container {
   id: number
@@ -85,7 +90,17 @@ export default function Dashboard() {
     selectedRepo: '',
     gitRepoUrl: '',
     skipClaudeInit: false,
+    memoryLimit: 2048,
+    cpuLimit: 1,
+    portMappings: [] as PortMapping[],
+    proxy: {
+      enabled: false,
+      domain: '',
+      port: 0,
+      service_port: 3000,
+    } as ProxyConfig,
   })
+  const [newPortMapping, setNewPortMapping] = useState({ container_port: 0, host_port: 0 })
   const navigate = useNavigate()
 
   const fetchContainers = useCallback(async () => {
@@ -154,9 +169,28 @@ export default function Dashboard() {
         return
       }
 
-      await containerApi.create(formData.name, gitRepoUrl, gitRepoName, formData.skipClaudeInit)
+      await containerApi.create(
+        formData.name, 
+        gitRepoUrl, 
+        gitRepoName, 
+        formData.skipClaudeInit,
+        formData.memoryLimit,
+        formData.cpuLimit,
+        formData.portMappings,
+        formData.proxy.enabled ? formData.proxy : undefined
+      )
       setCreateDialogOpen(false)
-      setFormData({ name: '', selectedRepo: '', gitRepoUrl: '', skipClaudeInit: false })
+      setFormData({ 
+        name: '', 
+        selectedRepo: '', 
+        gitRepoUrl: '', 
+        skipClaudeInit: false,
+        memoryLimit: 2048,
+        cpuLimit: 1,
+        portMappings: [],
+        proxy: { enabled: false, domain: '', port: 0, service_port: 3000 }
+      })
+      setNewPortMapping({ container_port: 0, host_port: 0 })
       fetchContainers()
     } catch (err) {
       console.error('Failed to create container', err)
@@ -497,6 +531,206 @@ export default function Dashboard() {
                 The container will only clone the repository without running Claude Code to set up the environment.
               </p>
             )}
+
+            {/* Resource Configuration */}
+            <div className="space-y-3 pt-2 border-t">
+              <Label className="flex items-center gap-2">
+                <Cpu className="h-4 w-4" />
+                Resource Limits
+              </Label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="memory" className="text-xs text-muted-foreground flex items-center gap-1">
+                    <HardDrive className="h-3 w-3" />
+                    Memory (MB)
+                  </Label>
+                  <Input
+                    id="memory"
+                    type="number"
+                    min={512}
+                    max={16384}
+                    value={formData.memoryLimit}
+                    onChange={(e) => setFormData({ ...formData, memoryLimit: parseInt(e.target.value) || 2048 })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cpu" className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Cpu className="h-3 w-3" />
+                    CPU (cores)
+                  </Label>
+                  <Input
+                    id="cpu"
+                    type="number"
+                    min={0.5}
+                    max={8}
+                    step={0.5}
+                    value={formData.cpuLimit}
+                    onChange={(e) => setFormData({ ...formData, cpuLimit: parseFloat(e.target.value) || 1 })}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Port Mappings (Legacy) */}
+            <div className="space-y-3 pt-2 border-t">
+              <Label className="flex items-center gap-2">
+                <Network className="h-4 w-4" />
+                Port Mappings (Legacy)
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Direct port mapping (alternative to Traefik proxy)
+              </p>
+              {formData.portMappings.length > 0 && (
+                <div className="space-y-2">
+                  {formData.portMappings.map((pm, index) => (
+                    <div key={index} className="flex items-center gap-2 text-sm bg-muted rounded px-2 py-1">
+                      <span>{pm.container_port}</span>
+                      <span className="text-muted-foreground">→</span>
+                      <span>{pm.host_port}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 ml-auto text-destructive"
+                        onClick={() => {
+                          const newMappings = [...formData.portMappings]
+                          newMappings.splice(index, 1)
+                          setFormData({ ...formData, portMappings: newMappings })
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  placeholder="Container"
+                  className="w-24"
+                  min={1}
+                  max={65535}
+                  value={newPortMapping.container_port || ''}
+                  onChange={(e) => setNewPortMapping({ ...newPortMapping, container_port: parseInt(e.target.value) || 0 })}
+                />
+                <span className="text-muted-foreground">→</span>
+                <Input
+                  type="number"
+                  placeholder="Host"
+                  className="w-24"
+                  min={1}
+                  max={65535}
+                  value={newPortMapping.host_port || ''}
+                  onChange={(e) => setNewPortMapping({ ...newPortMapping, host_port: parseInt(e.target.value) || 0 })}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (newPortMapping.container_port > 0 && newPortMapping.host_port > 0) {
+                      setFormData({
+                        ...formData,
+                        portMappings: [...formData.portMappings, newPortMapping]
+                      })
+                      setNewPortMapping({ container_port: 0, host_port: 0 })
+                    }
+                  }}
+                  disabled={!newPortMapping.container_port || !newPortMapping.host_port}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Add
+                </Button>
+              </div>
+            </div>
+
+            {/* Traefik Proxy Configuration */}
+            <div className="space-y-3 pt-2 border-t">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="proxyEnabled"
+                  checked={formData.proxy.enabled}
+                  onCheckedChange={(checked) => 
+                    setFormData({ 
+                      ...formData, 
+                      proxy: { ...formData.proxy, enabled: checked === true }
+                    })
+                  }
+                />
+                <label
+                  htmlFor="proxyEnabled"
+                  className="text-sm font-medium leading-none flex items-center gap-2"
+                >
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  Enable Traefik Proxy
+                </label>
+              </div>
+              {formData.proxy.enabled && (
+                <div className="space-y-3 pl-6">
+                  <p className="text-xs text-muted-foreground">
+                    Expose container service via Traefik reverse proxy
+                  </p>
+                  <div className="space-y-2">
+                    <Label htmlFor="servicePort" className="text-xs">Container Service Port</Label>
+                    <Input
+                      id="servicePort"
+                      type="number"
+                      placeholder="3000"
+                      min={1}
+                      max={65535}
+                      value={formData.proxy.service_port || ''}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        proxy: { ...formData.proxy, service_port: parseInt(e.target.value) || 0 }
+                      })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="proxyDomain" className="text-xs flex items-center gap-1">
+                      <Globe className="h-3 w-3" />
+                      Domain (optional)
+                    </Label>
+                    <Input
+                      id="proxyDomain"
+                      placeholder="myapp.containers.example.com"
+                      value={formData.proxy.domain || ''}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        proxy: { ...formData.proxy, domain: e.target.value }
+                      })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Access via domain (requires Nginx → Traefik:8080)
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="proxyPort" className="text-xs flex items-center gap-1">
+                      <Link className="h-3 w-3" />
+                      Direct Port (optional)
+                    </Label>
+                    <Select
+                      value={formData.proxy.port?.toString() || '0'}
+                      onValueChange={(v) => setFormData({ 
+                        ...formData, 
+                        proxy: { ...formData.proxy, port: parseInt(v) || 0 }
+                      })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select port" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">None</SelectItem>
+                        {Array.from({ length: 20 }, (_, i) => 30001 + i).map(p => (
+                          <SelectItem key={p} value={p.toString()}>{p}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Access via IP:port directly
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>

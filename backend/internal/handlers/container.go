@@ -21,12 +21,30 @@ func NewContainerHandler(containerService *services.ContainerService) *Container
 	}
 }
 
+// PortMappingRequest represents a port mapping in the request
+type PortMappingRequest struct {
+	ContainerPort int `json:"container_port"`
+	HostPort      int `json:"host_port"`
+}
+
+// ProxyConfigRequest represents Traefik proxy configuration in the request
+type ProxyConfigRequest struct {
+	Enabled     bool   `json:"enabled"`                // Enable Traefik proxy
+	Domain      string `json:"domain,omitempty"`       // Subdomain for domain-based access
+	Port        int    `json:"port,omitempty"`         // Direct port access (9001-9010)
+	ServicePort int    `json:"service_port,omitempty"` // Container internal service port
+}
+
 // CreateContainerRequest represents the request to create a container
 type CreateContainerRequest struct {
-	Name           string `json:"name" binding:"required"`
-	GitRepoURL     string `json:"git_repo_url" binding:"required"`
-	GitRepoName    string `json:"git_repo_name,omitempty"`
-	SkipClaudeInit bool   `json:"skip_claude_init,omitempty"` // Skip Claude Code initialization
+	Name           string               `json:"name" binding:"required"`
+	GitRepoURL     string               `json:"git_repo_url" binding:"required"`
+	GitRepoName    string               `json:"git_repo_name,omitempty"`
+	SkipClaudeInit bool                 `json:"skip_claude_init,omitempty"`  // Skip Claude Code initialization
+	MemoryLimit    int64                `json:"memory_limit,omitempty"`      // Memory limit in MB (0 = default 2048MB)
+	CPULimit       float64              `json:"cpu_limit,omitempty"`         // CPU limit in cores (0 = default 1)
+	PortMappings   []PortMappingRequest `json:"port_mappings,omitempty"`     // Legacy port mappings
+	Proxy          ProxyConfigRequest   `json:"proxy,omitempty"`             // Traefik proxy configuration
 }
 
 // ListContainers lists all containers
@@ -54,11 +72,29 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 		return
 	}
 
+	// Convert port mappings
+	portMappings := make([]services.PortMapping, len(req.PortMappings))
+	for i, pm := range req.PortMappings {
+		portMappings[i] = services.PortMapping{
+			ContainerPort: pm.ContainerPort,
+			HostPort:      pm.HostPort,
+		}
+	}
+
 	input := services.CreateContainerInput{
 		Name:           req.Name,
 		GitRepoURL:     req.GitRepoURL,
 		GitRepoName:    req.GitRepoName,
 		SkipClaudeInit: req.SkipClaudeInit,
+		MemoryLimit:    req.MemoryLimit,
+		CPULimit:       req.CPULimit,
+		PortMappings:   portMappings,
+		Proxy: services.ProxyConfig{
+			Enabled:     req.Proxy.Enabled,
+			Domain:      req.Proxy.Domain,
+			Port:        req.Proxy.Port,
+			ServicePort: req.Proxy.ServicePort,
+		},
 	}
 
 	container, err := h.containerService.CreateContainer(c.Request.Context(), input)

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -54,12 +55,30 @@ func (s *ContainerService) Close() error {
 	return s.dockerClient.Close()
 }
 
+// PortMapping represents a port mapping configuration
+type PortMapping struct {
+	ContainerPort int `json:"container_port"`
+	HostPort      int `json:"host_port"`
+}
+
+// ProxyConfig represents Traefik proxy configuration
+type ProxyConfig struct {
+	Enabled     bool   `json:"enabled"`                // Enable Traefik proxy
+	Domain      string `json:"domain,omitempty"`       // Subdomain for domain-based access
+	Port        int    `json:"port,omitempty"`         // Direct port access (9001-9010)
+	ServicePort int    `json:"service_port,omitempty"` // Container internal service port
+}
+
 // CreateContainerInput represents input for creating a container
 type CreateContainerInput struct {
-	Name           string `json:"name" binding:"required"`
-	GitRepoURL     string `json:"git_repo_url" binding:"required"` // GitHub repo URL
-	GitRepoName    string `json:"git_repo_name,omitempty"`         // Optional: repo name, extracted from URL if not provided
-	SkipClaudeInit bool   `json:"skip_claude_init,omitempty"`      // Skip Claude Code initialization
+	Name           string        `json:"name" binding:"required"`
+	GitRepoURL     string        `json:"git_repo_url" binding:"required"` // GitHub repo URL
+	GitRepoName    string        `json:"git_repo_name,omitempty"`         // Optional: repo name, extracted from URL if not provided
+	SkipClaudeInit bool          `json:"skip_claude_init,omitempty"`      // Skip Claude Code initialization
+	MemoryLimit    int64         `json:"memory_limit,omitempty"`          // Memory limit in MB (0 = default 2048MB)
+	CPULimit       float64       `json:"cpu_limit,omitempty"`             // CPU limit in cores (0 = default 1)
+	PortMappings   []PortMapping `json:"port_mappings,omitempty"`         // Legacy port mappings
+	Proxy          ProxyConfig   `json:"proxy,omitempty"`                 // Traefik proxy configuration
 }
 
 // CreateContainer creates a new container and automatically starts initialization
@@ -97,16 +116,65 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	// Get security config
 	securityConfig := docker.DefaultSecurityConfig()
 
+	// Apply custom resource limits if provided
+	if input.MemoryLimit > 0 {
+		memoryBytes := input.MemoryLimit * 1024 * 1024 // Convert MB to bytes
+		securityConfig.Resources.Memory = memoryBytes
+		securityConfig.Resources.MemorySwap = memoryBytes // No swap
+	}
+	if input.CPULimit > 0 {
+		// CPUQuota is in microseconds per CPUPeriod (100000)
+		// So 1 CPU = 100000, 0.5 CPU = 50000, 2 CPU = 200000
+		securityConfig.Resources.CPUQuota = int64(input.CPULimit * 100000)
+	}
+
+	// Build port bindings (legacy direct port mapping)
+	portBindings := make(map[string]string)
+	for _, pm := range input.PortMappings {
+		containerPort := fmt.Sprintf("%d/tcp", pm.ContainerPort)
+		hostPort := fmt.Sprintf("%d", pm.HostPort)
+		portBindings[containerPort] = hostPort
+	}
+
+	// Build Traefik labels if proxy is enabled
+	labels := make(map[string]string)
+	if input.Proxy.Enabled && input.Proxy.ServicePort > 0 {
+		serviceName := fmt.Sprintf("cc-%s", input.Name)
+		labels["traefik.enable"] = "true"
+		
+		// Domain-based routing (via Nginx -> Traefik:8080)
+		if input.Proxy.Domain != "" {
+			routerName := fmt.Sprintf("%s-domain", serviceName)
+			labels[fmt.Sprintf("traefik.http.routers.%s.rule", routerName)] = fmt.Sprintf("Host(`%s`)", input.Proxy.Domain)
+			labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", routerName)] = "web"
+			labels[fmt.Sprintf("traefik.http.routers.%s.service", routerName)] = serviceName
+		}
+		
+		// Direct port access (IP:port)
+		if input.Proxy.Port >= 30001 && input.Proxy.Port <= 30020 {
+			routerName := fmt.Sprintf("%s-direct", serviceName)
+			entrypoint := fmt.Sprintf("direct-%d", input.Proxy.Port)
+			labels[fmt.Sprintf("traefik.http.routers.%s.rule", routerName)] = "PathPrefix(`/`)"
+			labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", routerName)] = entrypoint
+			labels[fmt.Sprintf("traefik.http.routers.%s.service", routerName)] = serviceName
+		}
+		
+		// Service configuration - point to container's internal port
+		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", serviceName)] = fmt.Sprintf("%d", input.Proxy.ServicePort)
+	}
+
 	// Create container config - no volume mounts, project will be cloned inside
 	containerConfig := &docker.ContainerConfig{
-		Name:        input.Name,
-		EnvVars:     envSlice,
-		Binds:       []string{}, // No external mounts
-		SecurityOpt: securityConfig.SecurityOpt,
-		CapDrop:     securityConfig.CapDrop,
-		CapAdd:      securityConfig.CapAdd,
-		Resources:   securityConfig.Resources,
-		NetworkMode: "bridge", // Need network for cloning
+		Name:         input.Name,
+		EnvVars:      envSlice,
+		Binds:        []string{}, // No external mounts
+		SecurityOpt:  securityConfig.SecurityOpt,
+		CapDrop:      securityConfig.CapDrop,
+		CapAdd:       securityConfig.CapAdd,
+		Resources:    securityConfig.Resources,
+		NetworkMode:  "bridge", // Need network for cloning
+		PortBindings: portBindings,
+		Labels:       labels,
 	}
 
 	// Create Docker container
@@ -115,8 +183,25 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		return nil, err
 	}
 
+	// Serialize port mappings to JSON for storage
+	portMappingsJSON := ""
+	if len(input.PortMappings) > 0 {
+		jsonBytes, _ := json.Marshal(input.PortMappings)
+		portMappingsJSON = string(jsonBytes)
+	}
+
+	// Calculate actual memory and CPU values for storage
+	memoryLimit := input.MemoryLimit
+	if memoryLimit == 0 {
+		memoryLimit = 2048 // Default 2GB
+	}
+	cpuLimit := input.CPULimit
+	if cpuLimit == 0 {
+		cpuLimit = 1.0 // Default 1 core
+	}
+
 	// Save to database
-	container := &models.Container{
+	dbContainer := &models.Container{
 		DockerID:       dockerID,
 		Name:           input.Name,
 		Status:         models.ContainerStatusCreated,
@@ -125,25 +210,50 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		GitRepoName:    repoName,
 		WorkDir:        fmt.Sprintf("/workspace/%s", repoName),
 		SkipClaudeInit: input.SkipClaudeInit,
+		MemoryLimit:    memoryLimit * 1024 * 1024, // Store in bytes
+		CPULimit:       cpuLimit,
+		ExposedPorts:   portMappingsJSON,
+		ProxyEnabled:   input.Proxy.Enabled,
+		ProxyDomain:    input.Proxy.Domain,
+		ProxyPort:      input.Proxy.Port,
+		ServicePort:    input.Proxy.ServicePort,
 	}
 
-	if err := s.db.Create(container).Error; err != nil {
+	if err := s.db.Create(dbContainer).Error; err != nil {
 		// Cleanup Docker container on DB error
 		s.dockerClient.RemoveContainer(ctx, dockerID, true)
 		return nil, err
 	}
 
 	// Add initial log
-	s.addLog(container.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Container created for repository: %s", input.GitRepoURL))
+	s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Container created for repository: %s", input.GitRepoURL))
+	if len(input.PortMappings) > 0 {
+		portInfo := make([]string, len(input.PortMappings))
+		for i, pm := range input.PortMappings {
+			portInfo[i] = fmt.Sprintf("%d->%d", pm.ContainerPort, pm.HostPort)
+		}
+		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Port mappings: %s", strings.Join(portInfo, ", ")))
+	}
+	if input.Proxy.Enabled {
+		proxyInfo := fmt.Sprintf("Proxy enabled: service port %d", input.Proxy.ServicePort)
+		if input.Proxy.Domain != "" {
+			proxyInfo += fmt.Sprintf(", domain: %s", input.Proxy.Domain)
+		}
+		if input.Proxy.Port > 0 {
+			proxyInfo += fmt.Sprintf(", direct port: %d", input.Proxy.Port)
+		}
+		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, proxyInfo)
+	}
+	s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Resources: Memory=%dMB, CPU=%.1f cores", memoryLimit, cpuLimit))
 
 	// Auto-start the container and begin initialization
 	go func() {
-		if err := s.startAndInitialize(container.ID); err != nil {
-			log.Printf("Failed to auto-start container %d: %v", container.ID, err)
+		if err := s.startAndInitialize(dbContainer.ID); err != nil {
+			log.Printf("Failed to auto-start container %d: %v", dbContainer.ID, err)
 		}
 	}()
 
-	return container, nil
+	return dbContainer, nil
 }
 
 // startAndInitialize starts the container and runs initialization
@@ -546,6 +656,13 @@ type ContainerInfo struct {
 	GitRepoURL    string     `json:"git_repo_url,omitempty"`
 	GitRepoName   string     `json:"git_repo_name,omitempty"`
 	WorkDir       string     `json:"work_dir,omitempty"`
+	MemoryLimit   int64      `json:"memory_limit,omitempty"`
+	CPULimit      float64    `json:"cpu_limit,omitempty"`
+	ExposedPorts  string     `json:"exposed_ports,omitempty"`
+	ProxyEnabled  bool       `json:"proxy_enabled"`
+	ProxyDomain   string     `json:"proxy_domain,omitempty"`
+	ProxyPort     int        `json:"proxy_port,omitempty"`
+	ServicePort   int        `json:"service_port,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	StartedAt     *time.Time `json:"started_at,omitempty"`
 	StoppedAt     *time.Time `json:"stopped_at,omitempty"`
@@ -564,6 +681,13 @@ func ToContainerInfo(c *models.Container) ContainerInfo {
 		GitRepoURL:    c.GitRepoURL,
 		GitRepoName:   c.GitRepoName,
 		WorkDir:       c.WorkDir,
+		MemoryLimit:   c.MemoryLimit,
+		CPULimit:      c.CPULimit,
+		ExposedPorts:  c.ExposedPorts,
+		ProxyEnabled:  c.ProxyEnabled,
+		ProxyDomain:   c.ProxyDomain,
+		ProxyPort:     c.ProxyPort,
+		ServicePort:   c.ServicePort,
 		CreatedAt:     c.CreatedAt,
 		StartedAt:     c.StartedAt,
 		StoppedAt:     c.StoppedAt,
