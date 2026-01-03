@@ -118,6 +118,25 @@ export const containerApi = {
   delete: (id: number) => api.delete(`/containers/${id}`),
 }
 
+// Docker container info type
+export interface DockerContainerInfo {
+  id: string
+  name: string
+  image: string
+  status: string
+  state: string
+  created: number
+  ports: string[]
+  is_managed: boolean
+}
+
+// Docker API (direct Docker container management)
+export const dockerApi = {
+  listContainers: () => api.get<DockerContainerInfo[]>('/docker/containers'),
+  stopContainer: (dockerId: string) => api.post(`/docker/containers/${dockerId}/stop`),
+  removeContainer: (dockerId: string) => api.delete(`/docker/containers/${dockerId}`),
+}
+
 // Port management API
 export const portApi = {
   list: (containerId: number) => api.get(`/containers/${containerId}/ports`),

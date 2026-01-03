@@ -127,6 +127,11 @@ func main() {
 		protected.POST("/containers/:id/stop", containerHandler.StopContainer)
 		protected.DELETE("/containers/:id", containerHandler.DeleteContainer)
 
+		// Docker container management (all containers including orphaned)
+		protected.GET("/docker/containers", containerHandler.ListDockerContainers)
+		protected.POST("/docker/containers/:dockerId/stop", containerHandler.StopDockerContainer)
+		protected.DELETE("/docker/containers/:dockerId", containerHandler.RemoveDockerContainer)
+
 		// Port management routes
 		protected.GET("/containers/:id/ports", portHandler.ListPorts)
 		protected.POST("/containers/:id/ports", portHandler.AddPort)

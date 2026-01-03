@@ -768,3 +768,78 @@ func (s *ContainerService) StartCodeServer(ctx context.Context, containerID uint
 	s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, fmt.Sprintf("code-server started on port %d", container.CodeServerPort))
 	return nil
 }
+
+// DockerContainerInfo represents a Docker container for API response
+type DockerContainerInfo struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Image     string   `json:"image"`
+	Status    string   `json:"status"`
+	State     string   `json:"state"`
+	Created   int64    `json:"created"`
+	Ports     []string `json:"ports"`
+	IsManaged bool     `json:"is_managed"` // true if managed by this platform
+}
+
+// ListDockerContainers lists all Docker containers
+func (s *ContainerService) ListDockerContainers(ctx context.Context) ([]DockerContainerInfo, error) {
+	containers, err := s.dockerClient.ListContainers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list Docker containers: %w", err)
+	}
+
+	// Get managed container IDs from database
+	managedIDs := make(map[string]bool)
+	dbContainers, _ := s.ListContainers()
+	for _, c := range dbContainers {
+		managedIDs[c.DockerID] = true
+	}
+
+	result := make([]DockerContainerInfo, 0, len(containers))
+	for _, c := range containers {
+		// Format ports
+		ports := make([]string, 0)
+		for _, p := range c.Ports {
+			if p.PublicPort > 0 {
+				ports = append(ports, fmt.Sprintf("%d:%d/%s", p.PublicPort, p.PrivatePort, p.Type))
+			} else {
+				ports = append(ports, fmt.Sprintf("%d/%s", p.PrivatePort, p.Type))
+			}
+		}
+
+		// Get container name (remove leading /)
+		name := ""
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+
+		result = append(result, DockerContainerInfo{
+			ID:        c.ID[:12], // Short ID
+			Name:      name,
+			Image:     c.Image,
+			Status:    c.Status,
+			State:     c.State,
+			Created:   c.Created,
+			Ports:     ports,
+			IsManaged: managedIDs[c.ID],
+		})
+	}
+
+	return result, nil
+}
+
+// StopDockerContainer stops a Docker container by ID
+func (s *ContainerService) StopDockerContainer(ctx context.Context, dockerID string) error {
+	timeout := 30
+	return s.dockerClient.StopContainer(ctx, dockerID, &timeout)
+}
+
+// RemoveDockerContainer removes a Docker container by ID
+func (s *ContainerService) RemoveDockerContainer(ctx context.Context, dockerID string) error {
+	// Also remove from database if it exists
+	var container models.Container
+	if err := s.db.Where("docker_id LIKE ?", dockerID+"%").First(&container).Error; err == nil {
+		s.db.Delete(&container)
+	}
+	return s.dockerClient.RemoveContainer(ctx, dockerID, true)
+}

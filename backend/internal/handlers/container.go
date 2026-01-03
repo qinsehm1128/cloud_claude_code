@@ -250,6 +250,48 @@ func (h *ContainerHandler) GetContainerLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, logs)
 }
 
+// ListDockerContainers lists all Docker containers (including orphaned ones)
+func (h *ContainerHandler) ListDockerContainers(c *gin.Context) {
+	containers, err := h.containerService.ListDockerContainers(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, containers)
+}
+
+// StopDockerContainer stops a Docker container by ID
+func (h *ContainerHandler) StopDockerContainer(c *gin.Context) {
+	dockerID := c.Param("dockerId")
+	if dockerID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Docker container ID required"})
+		return
+	}
+
+	if err := h.containerService.StopDockerContainer(c.Request.Context(), dockerID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Container stopped"})
+}
+
+// RemoveDockerContainer removes a Docker container by ID
+func (h *ContainerHandler) RemoveDockerContainer(c *gin.Context) {
+	dockerID := c.Param("dockerId")
+	if dockerID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Docker container ID required"})
+		return
+	}
+
+	if err := h.containerService.RemoveDockerContainer(c.Request.Context(), dockerID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Container removed"})
+}
+
 // parseID parses a string ID to uint
 func parseID(idStr string) (uint, error) {
 	id, err := strconv.ParseUint(idStr, 10, 32)

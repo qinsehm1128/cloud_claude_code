@@ -9,7 +9,8 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  Network
+  Network,
+  Box
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,6 +24,7 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Repositories', href: '/repositories', icon: FolderGit2 },
   { name: 'Ports', href: '/ports', icon: Network },
+  { name: 'Docker', href: '/docker', icon: Box },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
