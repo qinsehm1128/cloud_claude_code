@@ -1,0 +1,123 @@
+package services
+
+import (
+	"errors"
+	"time"
+
+	"cc-platform/internal/config"
+	"cc-platform/internal/models"
+	"cc-platform/pkg/crypto"
+
+	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/gorm"
+)
+
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrInvalidToken       = errors.New("invalid token")
+	ErrTokenExpired       = errors.New("token expired")
+)
+
+// Claims represents JWT claims
+type Claims struct {
+	Username string `json:"username"`
+	jwt.RegisteredClaims
+}
+
+// AuthService handles authentication operations
+type AuthService struct {
+	db     *gorm.DB
+	config *config.Config
+}
+
+// NewAuthService creates a new AuthService
+func NewAuthService(db *gorm.DB, cfg *config.Config) *AuthService {
+	svc := &AuthService{
+		db:     db,
+		config: cfg,
+	}
+
+	// Ensure admin user exists
+	svc.ensureAdminUser()
+
+	return svc
+}
+
+// ensureAdminUser creates the admin user if it doesn't exist
+func (s *AuthService) ensureAdminUser() {
+	var user models.User
+	result := s.db.Where("username = ?", s.config.AdminUsername).First(&user)
+	
+	if result.Error == gorm.ErrRecordNotFound {
+		// Create admin user
+		hashedPassword, err := crypto.HashPassword(s.config.AdminPassword)
+		if err != nil {
+			panic("Failed to hash admin password: " + err.Error())
+		}
+
+		user = models.User{
+			Username:     s.config.AdminUsername,
+			PasswordHash: hashedPassword,
+		}
+		
+		if err := s.db.Create(&user).Error; err != nil {
+			panic("Failed to create admin user: " + err.Error())
+		}
+	}
+}
+
+// Login authenticates a user and returns a JWT token
+func (s *AuthService) Login(username, password string) (string, error) {
+	var user models.User
+	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+		return "", ErrInvalidCredentials
+	}
+
+	if !crypto.CheckPassword(password, user.PasswordHash) {
+		return "", ErrInvalidCredentials
+	}
+
+	// Generate JWT token
+	token, err := s.generateToken(username)
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
+}
+
+// VerifyToken validates a JWT token and returns the claims
+func (s *AuthService) VerifyToken(tokenString string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(s.config.JWTSecret), nil
+	})
+
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, ErrTokenExpired
+		}
+		return nil, ErrInvalidToken
+	}
+
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return nil, ErrInvalidToken
+	}
+
+	return claims, nil
+}
+
+// generateToken creates a new JWT token for a user
+func (s *AuthService) generateToken(username string) (string, error) {
+	claims := &Claims{
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "cc-platform",
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(s.config.JWTSecret))
+}
