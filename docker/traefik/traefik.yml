@@ -1,14 +1,23 @@
 # Traefik Static Configuration
 # This file configures Traefik as a reverse proxy for container services
+# 
+# NOTE: This file is for manual docker-compose deployment.
+# When using AUTO_START_TRAEFIK=true, the backend creates Traefik dynamically
+# with auto-assigned ports (38000+ range) to avoid conflicts.
 
 api:
   dashboard: true
-  insecure: true  # Dashboard accessible at :8081/dashboard/
+  insecure: true  # Dashboard accessible at dashboard port
 
 entryPoints:
   # Main HTTP entry point for domain-based routing
-  # Nginx will proxy *.containers.domain.com to this port
+  # Using port 80 inside container, mapped to high port on host
   web:
+    address: ":80"
+  
+  # Dashboard/API entry point
+  # Using port 8080 inside container for dashboard
+  traefik:
     address: ":8080"
   
   # Direct port access range (30001-30020)

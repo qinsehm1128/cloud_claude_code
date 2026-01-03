@@ -116,6 +116,12 @@ type traefikPorts struct {
 	dashboardPort int
 }
 
+// Traefik internal ports (inside container)
+const (
+	TraefikInternalWebPort       = 80
+	TraefikInternalDashboardPort = 9080 // Use 9080 instead of 8080 to avoid conflicts
+)
+
 // getTraefikStatus checks if Traefik container exists and is running
 func (s *TraefikService) getTraefikStatus(ctx context.Context) (exists bool, running bool, ports traefikPorts, err error) {
 	containers, err := s.cli.ContainerList(ctx, container.ListOptions{
@@ -133,12 +139,12 @@ func (s *TraefikService) getTraefikStatus(ctx context.Context) (exists bool, run
 	}
 
 	// Extract ports from existing container
-	// Traefik internal ports: 8080 (web), 8081 (dashboard)
+	// Traefik internal ports: 80 (web), 9080 (dashboard)
 	for _, p := range containers[0].Ports {
-		if p.PrivatePort == 8080 && p.PublicPort > 0 {
+		if p.PrivatePort == TraefikInternalWebPort && p.PublicPort > 0 {
 			ports.httpPort = int(p.PublicPort)
 		}
-		if p.PrivatePort == 8081 && p.PublicPort > 0 {
+		if (p.PrivatePort == TraefikInternalDashboardPort || p.PrivatePort == 8080) && p.PublicPort > 0 {
 			ports.dashboardPort = int(p.PublicPort)
 		}
 	}
@@ -148,6 +154,13 @@ func (s *TraefikService) getTraefikStatus(ctx context.Context) (exists bool, run
 
 // createTraefik creates and starts the Traefik container
 func (s *TraefikService) createTraefik(ctx context.Context) error {
+	log.Printf("[Traefik] Starting createTraefik...")
+	
+	// Force remove any existing container first to avoid conflicts
+	log.Printf("[Traefik] Removing any existing container...")
+	s.cli.ContainerStop(ctx, TraefikContainerName, container.StopOptions{})
+	s.cli.ContainerRemove(ctx, TraefikContainerName, container.RemoveOptions{Force: true})
+	
 	// Ensure network exists
 	if err := s.ensureNetwork(ctx); err != nil {
 		return err
@@ -162,12 +175,16 @@ func (s *TraefikService) createTraefik(ctx context.Context) error {
 	s.HTTPPort = s.config.TraefikHTTPPort
 	s.DashboardPort = s.config.TraefikDashboardPort
 	
+	log.Printf("[Traefik] Config ports - HTTP: %d, Dashboard: %d, Backend: %d", 
+		s.config.TraefikHTTPPort, s.config.TraefikDashboardPort, s.config.Port)
+	
 	if s.HTTPPort == 0 {
 		port, err := findFreePortExcluding(38000, 39000, s.config.Port)
 		if err != nil {
 			return fmt.Errorf("failed to find free port for HTTP: %w", err)
 		}
 		s.HTTPPort = port
+		log.Printf("[Traefik] Auto-assigned HTTP port: %d", s.HTTPPort)
 	}
 	
 	if s.DashboardPort == 0 {
@@ -176,6 +193,7 @@ func (s *TraefikService) createTraefik(ctx context.Context) error {
 			return fmt.Errorf("failed to find free port for dashboard: %w", err)
 		}
 		s.DashboardPort = port
+		log.Printf("[Traefik] Auto-assigned Dashboard port: %d", s.DashboardPort)
 	}
 	
 	// Verify ports don't conflict with backend
@@ -184,18 +202,29 @@ func (s *TraefikService) createTraefik(ctx context.Context) error {
 	}
 
 	// Build port bindings - map container internal ports to host ports
-	// Container uses 8080 internally for web, 8081 for dashboard
+	// Container internal: 80 (web), 9080 (dashboard/api)
+	// Host: HTTPPort (e.g., 38xxx), DashboardPort (e.g., 39xxx)
 	portBindings := nat.PortMap{
-		nat.Port("8080/tcp"): []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", s.HTTPPort)}},
-		nat.Port("8081/tcp"): []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", s.DashboardPort)}},
+		nat.Port(fmt.Sprintf("%d/tcp", TraefikInternalWebPort)):       []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", s.HTTPPort)}},
+		nat.Port(fmt.Sprintf("%d/tcp", TraefikInternalDashboardPort)): []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", s.DashboardPort)}},
 	}
+	
+	log.Printf("[Traefik] Port bindings: container:%d -> host:%d, container:%d -> host:%d", 
+		TraefikInternalWebPort, s.HTTPPort, TraefikInternalDashboardPort, s.DashboardPort)
 
-	// Add direct port range
+	// Add direct port range - check each port is free first
+	var addedPorts []int
 	for port := s.config.TraefikPortRangeStart; port <= s.config.TraefikPortRangeEnd; port++ {
+		if !isPortFree(port) {
+			log.Printf("[Traefik] Warning: port %d is not free, skipping", port)
+			continue
+		}
 		portBindings[nat.Port(fmt.Sprintf("%d/tcp", port))] = []nat.PortBinding{
 			{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", port)},
 		}
+		addedPorts = append(addedPorts, port)
 	}
+	log.Printf("[Traefik] Direct port range: %v", addedPorts)
 
 	// Build exposed ports
 	exposedPorts := nat.PortSet{}
@@ -204,7 +233,9 @@ func (s *TraefikService) createTraefik(ctx context.Context) error {
 	}
 
 	// Build Traefik command with dynamic configuration
-	cmd := s.buildTraefikCommand()
+	// Only include ports that were successfully added
+	cmd := s.buildTraefikCommand(addedPorts)
+	log.Printf("[Traefik] Command: %v", cmd)
 
 	// Create container
 	resp, err := s.cli.ContainerCreate(ctx,
@@ -234,11 +265,14 @@ func (s *TraefikService) createTraefik(ctx context.Context) error {
 		return fmt.Errorf("failed to create Traefik container: %w", err)
 	}
 
+	log.Printf("[Traefik] Container created with ID: %s", resp.ID[:12])
+
 	// Start container
 	if err := s.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("failed to start Traefik container: %w", err)
 	}
 
+	log.Printf("[Traefik] Container started successfully")
 	return nil
 }
 
@@ -279,18 +313,22 @@ func isPortFree(port int) bool {
 }
 
 // buildTraefikCommand builds the Traefik command with dynamic entrypoints
-func (s *TraefikService) buildTraefikCommand() []string {
+// Traefik listens on these ports INSIDE the container, then we map them to host ports
+func (s *TraefikService) buildTraefikCommand(directPorts []int) []string {
 	cmd := []string{
 		"--api.dashboard=true",
 		"--api.insecure=true",
 		"--providers.docker=true",
 		"--providers.docker.exposedbydefault=false",
 		fmt.Sprintf("--providers.docker.network=%s", TraefikNetworkName),
-		"--entrypoints.web.address=:8080",
+		// Web entrypoint - container internal port 80
+		fmt.Sprintf("--entrypoints.web.address=:%d", TraefikInternalWebPort),
+		// Dashboard entrypoint - container internal port 9080 (avoid 8080 conflict)
+		fmt.Sprintf("--entrypoints.traefik.address=:%d", TraefikInternalDashboardPort),
 	}
 
-	// Add direct port entrypoints
-	for port := s.config.TraefikPortRangeStart; port <= s.config.TraefikPortRangeEnd; port++ {
+	// Add direct port entrypoints only for ports that are available
+	for _, port := range directPorts {
 		cmd = append(cmd, fmt.Sprintf("--entrypoints.direct-%d.address=:%d", port, port))
 	}
 

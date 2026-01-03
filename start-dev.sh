@@ -550,11 +550,12 @@ start_backend() {
     
     cd backend
     
+    # Run backend directly in foreground (logs to terminal)
     # Use built binary if exists, otherwise use go run
     if [ -f "../bin/server" ]; then
-        PORT=$BACKEND_PORT ../bin/server > "$LOG_DIR/backend.log" 2>&1 &
+        PORT=$BACKEND_PORT ../bin/server &
     else
-        PORT=$BACKEND_PORT go run ./cmd/server > "$LOG_DIR/backend.log" 2>&1 &
+        PORT=$BACKEND_PORT go run ./cmd/server &
     fi
     
     BACKEND_PID=$!
@@ -571,8 +572,7 @@ start_backend() {
         retries=$((retries - 1))
     done
     
-    log_error "Backend failed to start. Check logs: $LOG_DIR/backend.log"
-    cat "$LOG_DIR/backend.log" | tail -20
+    log_error "Backend failed to start within 30 seconds"
     exit 1
 }
 
@@ -581,7 +581,7 @@ start_frontend() {
     log_info "Starting frontend dev server on port $FRONTEND_PORT..."
     
     cd frontend
-    VITE_PORT=$FRONTEND_PORT npm run dev > "$LOG_DIR/frontend.log" 2>&1 &
+    VITE_PORT=$FRONTEND_PORT npm run dev &
     FRONTEND_PID=$!
     cd ..
     
@@ -596,8 +596,7 @@ start_frontend() {
         retries=$((retries - 1))
     done
     
-    log_error "Frontend failed to start. Check logs: $LOG_DIR/frontend.log"
-    cat "$LOG_DIR/frontend.log" | tail -20
+    log_error "Frontend failed to start within 30 seconds"
     exit 1
 }
 
@@ -632,15 +631,13 @@ show_status() {
     echo ""
     
     if [ -z "$FRONTEND_ONLY" ] || [ "$FRONTEND_ONLY" = false ]; then
-        echo -e "  Backend API:  ${BLUE}http://localhost:$BACKEND_PORT${NC}"
+        echo -e "  Backend API:  ${BLUE}http://0.0.0.0:$BACKEND_PORT${NC}"
     fi
     
     if [ -z "$BACKEND_ONLY" ] || [ "$BACKEND_ONLY" = false ]; then
-        echo -e "  Frontend:     ${BLUE}http://localhost:$FRONTEND_PORT${NC}"
+        echo -e "  Frontend:     ${BLUE}http://0.0.0.0:$FRONTEND_PORT${NC}"
     fi
     
-    echo ""
-    echo "  Logs:         $LOG_DIR/"
     echo ""
     echo "  Press Ctrl+C to stop all services"
     echo "=========================================="
