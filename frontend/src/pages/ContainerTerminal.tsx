@@ -1,20 +1,28 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Button, message, Spin, Alert, Tabs, Drawer, Progress, Tooltip } from 'antd'
-import { 
-  ArrowLeftOutlined, 
-  PlusOutlined, 
-  CloseOutlined, 
-  FolderOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-} from '@ant-design/icons'
+import {
+  ArrowLeft,
+  Plus,
+  X,
+  FolderOpen,
+  Loader2,
+  AlertCircle,
+} from 'lucide-react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebLinksAddon } from 'xterm-addon-web-links'
-import { TerminalWebSocket, HistoryLoadProgress } from '../services/websocket'
-import { containerApi } from '../services/api'
-import FileBrowser from '../components/FileManager/FileBrowser'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Progress } from '@/components/ui/progress'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import { TerminalWebSocket, HistoryLoadProgress } from '@/services/websocket'
+import { containerApi } from '@/services/api'
+import FileBrowser from '@/components/FileManager/FileBrowser'
 import 'xterm/css/xterm.css'
 
 interface Container {
@@ -37,10 +45,8 @@ interface TerminalTab {
   historyProgress: number
 }
 
-// Storage key for session persistence
 const getStorageKey = (containerId: string) => `terminal_sessions_${containerId}`
 
-// Load saved sessions from localStorage
 const loadSavedSessions = (containerId: string): { key: string; sessionId: string }[] => {
   try {
     const saved = localStorage.getItem(getStorageKey(containerId))
@@ -50,7 +56,6 @@ const loadSavedSessions = (containerId: string): { key: string; sessionId: strin
   }
 }
 
-// Save sessions to localStorage
 const saveSessions = (containerId: string, tabs: TerminalTab[]) => {
   const sessions = tabs
     .filter(t => t.sessionId)
@@ -70,10 +75,8 @@ export default function ContainerTerminal() {
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeKey, setActiveKey] = useState<string>('')
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const initializedRef = useRef(false)
 
-  // Fetch container info
   useEffect(() => {
     const fetchContainer = async () => {
       if (!containerId) return
@@ -94,7 +97,6 @@ export default function ContainerTerminal() {
     fetchContainer()
   }, [containerId])
 
-  // Restore saved sessions or create initial tab
   useEffect(() => {
     if (!container || container.status !== 'running' || container.init_status !== 'ready') return
     if (initializedRef.current) return
@@ -105,7 +107,6 @@ export default function ContainerTerminal() {
     const savedSessions = loadSavedSessions(containerId)
     
     if (savedSessions.length > 0) {
-      // Restore saved sessions
       const restoredTabs: TerminalTab[] = savedSessions.map((s, index) => {
         tabCounter = Math.max(tabCounter, index + 1)
         return {
@@ -123,7 +124,6 @@ export default function ContainerTerminal() {
       setTabs(restoredTabs)
       setActiveKey(restoredTabs[0].key)
     } else {
-      // Create new tab
       addNewTab()
     }
   }, [container, containerId])
@@ -156,7 +156,6 @@ export default function ContainerTerminal() {
     const newTabs = tabs.filter(t => t.key !== targetKey)
     setTabs(newTabs)
 
-    // Save updated sessions
     if (containerId) {
       saveSessions(containerId, newTabs)
     }
@@ -166,15 +165,12 @@ export default function ContainerTerminal() {
     }
   }, [tabs, activeKey, containerId])
 
-
-  // Initialize terminal for active tab
   useEffect(() => {
     if (!activeKey || !container || !containerId) return
 
     const tab = tabs.find(t => t.key === activeKey)
     if (!tab || tab.terminal) return
 
-    // Wait for DOM element
     const initTerminal = () => {
       const element = terminalRefs.current.get(activeKey)
       if (!element) {
@@ -187,11 +183,13 @@ export default function ContainerTerminal() {
         fontSize: 14,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
         theme: {
-          background: '#1e1e1e',
-          foreground: '#d4d4d4',
-          cursor: '#d4d4d4',
+          background: '#0a0a0a',
+          foreground: '#fafafa',
+          cursor: '#fafafa',
+          cursorAccent: '#0a0a0a',
+          selectionBackground: '#3f3f46',
         },
-        scrollback: 50000, // Large scrollback for history
+        scrollback: 50000,
       })
 
       const fitAddon = new FitAddon()
@@ -204,7 +202,6 @@ export default function ContainerTerminal() {
 
       const currentTabKey = activeKey
 
-      // Create WebSocket connection with session ID for reconnection
       const ws = new TerminalWebSocket(
         containerId,
         {
@@ -212,14 +209,13 @@ export default function ContainerTerminal() {
             if (msg.type === 'output' && msg.data) {
               term.write(msg.data)
             } else if (msg.type === 'error' && msg.error) {
-              message.error(msg.error)
+              console.error(msg.error)
             }
           },
           onConnect: () => {
             setTabs(prev => prev.map(t => 
               t.key === currentTabKey ? { ...t, connected: true } : t
             ))
-            // Only show connected message for new sessions
             if (!tab.sessionId) {
               term.write('\r\n\x1b[32mConnected to container terminal\x1b[0m\r\n\r\n')
             }
@@ -232,15 +228,13 @@ export default function ContainerTerminal() {
             term.write('\r\n\x1b[33mDisconnected - attempting to reconnect...\x1b[0m\r\n')
           },
           onError: (err) => {
-            message.error(err)
+            console.error(err)
           },
           onSessionId: (sessionId) => {
-            // Save session ID for reconnection
             setTabs(prev => {
               const updated = prev.map(t => 
                 t.key === currentTabKey ? { ...t, sessionId } : t
               )
-              // Save to localStorage
               if (containerId) {
                 saveSessions(containerId, updated)
               }
@@ -248,7 +242,7 @@ export default function ContainerTerminal() {
             })
           },
           onHistoryStart: () => {
-            term.write('\x1b[2J\x1b[H') // Clear screen
+            term.write('\x1b[2J\x1b[H')
             term.write('\x1b[33m--- Restoring session history ---\x1b[0m\r\n')
             setTabs(prev => prev.map(t => 
               t.key === currentTabKey ? { ...t, historyLoading: true, historyProgress: 0 } : t
@@ -271,17 +265,14 @@ export default function ContainerTerminal() {
 
       ws.connect()
 
-      // Handle terminal input
       term.onData((data) => {
         ws.send(data)
       })
 
-      // Handle terminal resize
       term.onResize(({ cols, rows }) => {
         ws.resize(cols, rows)
       })
 
-      // Update tab
       setTabs(prev => prev.map(t => 
         t.key === currentTabKey ? { ...t, terminal: term, ws, fitAddon } : t
       ))
@@ -290,7 +281,6 @@ export default function ContainerTerminal() {
     initTerminal()
   }, [activeKey, container, containerId, tabs])
 
-  // Handle window resize
   useEffect(() => {
     const handleResize = () => {
       tabs.forEach(tab => {
@@ -304,11 +294,9 @@ export default function ContainerTerminal() {
     return () => window.removeEventListener('resize', handleResize)
   }, [tabs])
 
-  // Cleanup on unmount - don't disconnect, just dispose terminal UI
   useEffect(() => {
     return () => {
       tabs.forEach(tab => {
-        // Disconnect WebSocket but session stays alive on server
         tab.ws?.disconnect()
         tab.terminal?.dispose()
       })
@@ -325,182 +313,124 @@ export default function ContainerTerminal() {
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: 50 }}>
-        <Spin size="large" />
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   if (error) {
     return (
-      <div>
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate('/')}
-          style={{ marginBottom: 16 }}
-        >
+      <div className="p-6 space-y-4">
+        <Button variant="outline" onClick={() => navigate('/')}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Dashboard
         </Button>
-        <Alert message={error} type="error" showIcon />
+        <div className="flex items-center gap-2 p-4 text-destructive bg-destructive/10 rounded-md">
+          <AlertCircle className="h-5 w-5" />
+          {error}
+        </div>
       </div>
     )
   }
 
-  const tabItems = tabs.map(tab => ({
-    key: tab.key,
-    label: (
-      <span>
-        {tab.label}
-        <span
-          style={{
-            marginLeft: 8,
-            color: tab.connected ? '#52c41a' : '#ff4d4f',
-          }}
-        >
-          ●
-        </span>
-        {tab.historyLoading && (
-          <span style={{ marginLeft: 8, fontSize: 12, color: '#1890ff' }}>
-            {tab.historyProgress}%
-          </span>
-        )}
-        {tabs.length > 1 && (
-          <CloseOutlined
-            style={{ marginLeft: 8, fontSize: 12 }}
-            onClick={(e) => {
-              e.stopPropagation()
-              removeTab(tab.key)
-            }}
-          />
-        )}
-      </span>
-    ),
-    children: (
-      <div style={{ position: 'relative', height: 'calc(100vh - 200px)' }}>
-        {tab.historyLoading && (
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: 10,
-            background: 'rgba(0,0,0,0.8)',
-            padding: '8px 16px',
-          }}>
-            <div style={{ color: '#fff', marginBottom: 4 }}>
-              Restoring session history...
-            </div>
-            <Progress 
-              percent={tab.historyProgress} 
-              size="small" 
-              status="active"
-              strokeColor="#52c41a"
-            />
-          </div>
-        )}
-        <div
-          ref={(el) => setTerminalRef(tab.key, el)}
-          style={{
-            height: '100%',
-            backgroundColor: '#1e1e1e',
-            borderRadius: 4,
-          }}
-        />
-      </div>
-    ),
-  }))
+  const activeTab = tabs.find(t => t.key === activeKey)
 
   return (
-    <div style={{ height: 'calc(100vh - 112px)', display: 'flex' }}>
-      {/* Sidebar */}
-      <div style={{
-        width: sidebarCollapsed ? 48 : 0,
-        background: '#f5f5f5',
-        borderRight: '1px solid #e8e8e8',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        paddingTop: 8,
-        transition: 'width 0.2s',
-      }}>
-        {sidebarCollapsed && (
-          <Tooltip title="Files" placement="right">
-            <Button
-              type="text"
-              icon={<FolderOutlined style={{ fontSize: 20 }} />}
-              onClick={() => setFileDrawerOpen(true)}
-              style={{ marginBottom: 8 }}
-            />
-          </Tooltip>
+    <div className="flex flex-col h-[calc(100vh-1px)]">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Container: <span className="text-foreground font-medium">{container?.name}</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setFileDrawerOpen(true)}>
+            <FolderOpen className="h-4 w-4 mr-2" />
+            Files
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => addNewTab()}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Terminal
+          </Button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50">
+        <Tabs value={activeKey} onValueChange={setActiveKey} className="flex-1">
+          <TabsList className="h-8 bg-transparent p-0 gap-1">
+            {tabs.map((tab) => (
+              <TabsTrigger
+                key={tab.key}
+                value={tab.key}
+                className="h-8 px-3 data-[state=active]:bg-secondary rounded-md gap-2"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    tab.connected ? 'bg-green-500' : 'bg-red-500'
+                  }`}
+                />
+                {tab.label}
+                {tab.historyLoading && (
+                  <span className="text-xs text-blue-400">{tab.historyProgress}%</span>
+                )}
+                {tabs.length > 1 && (
+                  <button
+                    className="ml-1 hover:bg-muted rounded p-0.5"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      removeTab(tab.key)
+                    }}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <Button variant="ghost" size="sm" onClick={() => addNewTab()}>
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Terminal Content */}
+      <div className="flex-1 relative bg-[#0a0a0a]">
+        {activeTab?.historyLoading && (
+          <div className="absolute top-0 left-0 right-0 z-10 bg-background/90 p-3 border-b">
+            <div className="text-sm text-muted-foreground mb-2">
+              Restoring session history...
+            </div>
+            <Progress value={activeTab.historyProgress} className="h-1" />
+          </div>
         )}
-      </div>
-
-      {/* Main content */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ 
-          padding: '8px 16px', 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          borderBottom: '1px solid #e8e8e8',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
-              Back
-            </Button>
-            <span>
-              <strong>Container:</strong> {container?.name}
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Button 
-              type="text"
-              icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            />
-            <Button 
-              icon={<FolderOutlined />}
-              onClick={() => setFileDrawerOpen(true)}
-            >
-              Files
-            </Button>
-            <Button icon={<PlusOutlined />} onClick={() => addNewTab()}>
-              New Terminal
-            </Button>
-          </div>
-        </div>
-
-        <div style={{ flex: 1, padding: 8, overflow: 'hidden' }}>
-          <Tabs
-            type="card"
-            activeKey={activeKey}
-            onChange={setActiveKey}
-            items={tabItems}
-            style={{ height: '100%' }}
-            tabBarExtraContent={
-              <Button 
-                type="text" 
-                icon={<PlusOutlined />} 
-                onClick={() => addNewTab()}
-                size="small"
-              />
-            }
+        {tabs.map((tab) => (
+          <div
+            key={tab.key}
+            ref={(el) => setTerminalRef(tab.key, el)}
+            className={`absolute inset-0 ${tab.key === activeKey ? 'block' : 'hidden'}`}
+            style={{ padding: '8px' }}
           />
-        </div>
+        ))}
       </div>
 
-      {/* File Browser Drawer */}
-      <Drawer
-        title="File Browser"
-        placement="left"
-        width={400}
-        onClose={() => setFileDrawerOpen(false)}
-        open={fileDrawerOpen}
-        mask={false}
-        style={{ position: 'absolute' }}
-      >
-        <FileBrowser containerId={parseInt(containerId || '0')} />
-      </Drawer>
+      {/* File Browser Sheet */}
+      <Sheet open={fileDrawerOpen} onOpenChange={setFileDrawerOpen}>
+        <SheetContent side="left" className="w-[400px] sm:w-[500px]">
+          <SheetHeader>
+            <SheetTitle>File Browser</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 h-[calc(100vh-100px)] overflow-auto">
+            <FileBrowser containerId={parseInt(containerId || '0')} />
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

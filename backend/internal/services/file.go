@@ -357,10 +357,30 @@ func (s *FileService) getRunningContainer(containerID uint) (*models.Container, 
 
 // validatePath validates and sanitizes a path
 func (s *FileService) validatePath(path string) (string, error) {
+	// If empty or root, use workspace root
+	if path == "" || path == "/" || path == "." {
+		return WorkspaceDir, nil
+	}
+
+	// Clean the path
+	path = filepath.Clean(path)
+	
+	// If path already starts with /workspace, use it directly
+	if strings.HasPrefix(path, WorkspaceDir) {
+		// Ensure it doesn't escape workspace
+		if !strings.HasPrefix(filepath.Clean(path), WorkspaceDir) {
+			return "", ErrPathTraversal
+		}
+		return path, nil
+	}
+	
+	// Remove leading slash if present
+	path = strings.TrimPrefix(path, "/")
+	
 	// Sanitize the path
 	path = pathutil.SanitizePath(path)
 	
-	// If empty, use workspace root
+	// If empty after sanitization, use workspace root
 	if path == "" || path == "." {
 		return WorkspaceDir, nil
 	}

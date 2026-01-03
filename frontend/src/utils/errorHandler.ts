@@ -1,5 +1,3 @@
-import { message } from 'antd'
-
 interface ApiError {
   response?: {
     status?: number
@@ -45,17 +43,17 @@ export function handleApiError(error: unknown, defaultMessage = 'An error occurr
 
 export function showApiError(error: unknown, defaultMessage = 'An error occurred'): void {
   const errorMessage = handleApiError(error, defaultMessage)
-  message.error(errorMessage)
+  console.error(errorMessage)
 }
 
 export function showSuccess(msg: string): void {
-  message.success(msg)
+  console.log(msg)
 }
 
 export function showWarning(msg: string): void {
-  message.warning(msg)
+  console.warn(msg)
 }
 
 export function showInfo(msg: string): void {
-  message.info(msg)
+  console.info(msg)
 }

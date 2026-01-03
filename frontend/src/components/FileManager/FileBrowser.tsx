@@ -1,26 +1,33 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import {
+  Folder,
+  File,
+  Download,
+  Trash2,
+  FolderPlus,
+  Upload,
+  Home,
+  ChevronRight,
+  Loader2,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Table,
-  Button,
-  Breadcrumb,
-  Space,
-  message,
-  Popconfirm,
-  Modal,
-  Input,
-  Upload,
-} from 'antd'
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import {
-  FolderOutlined,
-  FileOutlined,
-  DownloadOutlined,
-  DeleteOutlined,
-  FolderAddOutlined,
-  UploadOutlined,
-  HomeOutlined,
-} from '@ant-design/icons'
-import type { UploadProps } from 'antd'
-import { fileApi } from '../../services/api'
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { fileApi } from '@/services/api'
 
 interface FileInfo {
   name: string
@@ -41,6 +48,9 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
   const [loading, setLoading] = useState(false)
   const [mkdirVisible, setMkdirVisible] = useState(false)
   const [newDirName, setNewDirName] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const fetchFiles = async (path: string) => {
     setLoading(true)
@@ -48,9 +58,8 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
       const response = await fileApi.listDirectory(containerId, path)
       setFiles(response.data || [])
       setCurrentPath(path)
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to list directory')
+    } catch {
+      console.error('Failed to list directory')
     } finally {
       setLoading(false)
     }
@@ -75,57 +84,51 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
       link.click()
       link.remove()
       window.URL.revokeObjectURL(url)
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to download file')
+    } catch {
+      console.error('Failed to download file')
     }
   }
 
   const handleDelete = async (file: FileInfo) => {
+    setDeleting(file.path)
     try {
       await fileApi.delete(containerId, file.path)
-      message.success('Deleted successfully')
       fetchFiles(currentPath)
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to delete')
+    } catch {
+      console.error('Failed to delete')
+    } finally {
+      setDeleting(null)
     }
   }
 
   const handleCreateDir = async () => {
-    if (!newDirName.trim()) {
-      message.error('Please enter a directory name')
-      return
-    }
+    if (!newDirName.trim()) return
+    setCreating(true)
     try {
       const path = currentPath === '/' ? `/${newDirName}` : `${currentPath}/${newDirName}`
       await fileApi.createDirectory(containerId, path)
-      message.success('Directory created')
       setMkdirVisible(false)
       setNewDirName('')
       fetchFiles(currentPath)
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to create directory')
+    } catch {
+      console.error('Failed to create directory')
+    } finally {
+      setCreating(false)
     }
   }
 
-  const uploadProps: UploadProps = {
-    name: 'file',
-    multiple: false,
-    showUploadList: false,
-    customRequest: async ({ file, onSuccess, onError }) => {
-      try {
-        await fileApi.upload(containerId, currentPath, file as File)
-        message.success('File uploaded successfully')
-        fetchFiles(currentPath)
-        onSuccess?.({})
-      } catch (error: unknown) {
-        const err = error as { response?: { data?: { error?: string } } }
-        message.error(err.response?.data?.error || 'Failed to upload file')
-        onError?.(new Error('Upload failed'))
-      }
-    },
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      await fileApi.upload(containerId, currentPath, file)
+      fetchFiles(currentPath)
+    } catch {
+      console.error('Failed to upload file')
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
   }
 
   const formatSize = (bytes: number) => {
@@ -136,136 +139,177 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
-  const getBreadcrumbItems = () => {
+  const getBreadcrumbParts = () => {
     const parts = currentPath.split('/').filter(Boolean)
-    const items = [
-      {
-        title: (
-          <a onClick={() => handleNavigate('/')}>
-            <HomeOutlined /> workspace
-          </a>
-        ),
-      },
-    ]
-
+    const items: { name: string; path: string }[] = [{ name: 'workspace', path: '/' }]
+    
     let path = ''
     parts.forEach((part) => {
       path += '/' + part
-      const currentPathCopy = path
-      items.push({
-        title: <a onClick={() => handleNavigate(currentPathCopy)}>{part}</a>,
-      })
+      items.push({ name: part, path })
     })
-
+    
     return items
   }
 
-  const columns = [
-    {
-      title: 'Name',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string, record: FileInfo) => (
-        <Space>
-          {record.is_directory ? (
-            <FolderOutlined style={{ color: '#1890ff' }} />
-          ) : (
-            <FileOutlined />
-          )}
-          {record.is_directory ? (
-            <a onClick={() => handleNavigate(record.path)}>{name}</a>
-          ) : (
-            name
-          )}
-        </Space>
-      ),
-    },
-    {
-      title: 'Size',
-      dataIndex: 'size',
-      key: 'size',
-      width: 100,
-      render: (size: number, record: FileInfo) =>
-        record.is_directory ? '-' : formatSize(size),
-    },
-    {
-      title: 'Modified',
-      dataIndex: 'modified_time',
-      key: 'modified_time',
-      width: 180,
-      render: (time: string) =>
-        time ? new Date(time).toLocaleString() : '-',
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 150,
-      render: (_: unknown, record: FileInfo) => (
-        <Space>
-          {!record.is_directory && (
-            <Button
-              type="text"
-              size="small"
-              icon={<DownloadOutlined />}
-              onClick={() => handleDownload(record)}
-            />
-          )}
-          <Popconfirm
-            title={`Delete ${record.is_directory ? 'directory' : 'file'}?`}
-            onConfirm={() => handleDelete(record)}
-            okText="Yes"
-            cancelText="No"
-          >
-            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
-
   return (
-    <div>
-      <div style={{ marginBottom: 16 }}>
-        <Breadcrumb items={getBreadcrumbItems()} />
+    <div className="space-y-4">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-1 text-sm flex-wrap">
+        {getBreadcrumbParts().map((item, index, arr) => (
+          <div key={item.path} className="flex items-center gap-1">
+            {index === 0 ? (
+              <button
+                onClick={() => handleNavigate(item.path)}
+                className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              >
+                <Home className="h-4 w-4" />
+                {item.name}
+              </button>
+            ) : (
+              <>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                <button
+                  onClick={() => handleNavigate(item.path)}
+                  className={`hover:text-foreground ${
+                    index === arr.length - 1 ? 'text-foreground font-medium' : 'text-muted-foreground'
+                  }`}
+                >
+                  {item.name}
+                </button>
+              </>
+            )}
+          </div>
+        ))}
       </div>
-      <div style={{ marginBottom: 16 }}>
-        <Space>
-          <Upload {...uploadProps}>
-            <Button icon={<UploadOutlined />}>Upload File</Button>
-          </Upload>
-          <Button
-            icon={<FolderAddOutlined />}
-            onClick={() => setMkdirVisible(true)}
-          >
-            New Folder
-          </Button>
-        </Space>
-      </div>
-      <Table
-        columns={columns}
-        dataSource={files}
-        rowKey="path"
-        loading={loading}
-        pagination={false}
-        size="small"
-      />
 
-      <Modal
-        title="Create New Directory"
-        open={mkdirVisible}
-        onOk={handleCreateDir}
-        onCancel={() => {
-          setMkdirVisible(false)
-          setNewDirName('')
-        }}
-      >
-        <Input
-          placeholder="Directory name"
-          value={newDirName}
-          onChange={(e) => setNewDirName(e.target.value)}
-          onPressEnter={handleCreateDir}
+      {/* Actions */}
+      <div className="flex items-center gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={handleUpload}
         />
-      </Modal>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Upload className="h-4 w-4 mr-2" />
+          Upload
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setMkdirVisible(true)}
+        >
+          <FolderPlus className="h-4 w-4 mr-2" />
+          New Folder
+        </Button>
+      </div>
+
+      {/* File List */}
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : files.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          Empty directory
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead className="w-[80px]">Size</TableHead>
+              <TableHead className="w-[100px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {files.map((file) => (
+              <TableRow key={file.path}>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    {file.is_directory ? (
+                      <Folder className="h-4 w-4 text-blue-400" />
+                    ) : (
+                      <File className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    {file.is_directory ? (
+                      <button
+                        onClick={() => handleNavigate(file.path)}
+                        className="hover:text-blue-400 hover:underline"
+                      >
+                        {file.name}
+                      </button>
+                    ) : (
+                      <span>{file.name}</span>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs">
+                  {file.is_directory ? '-' : formatSize(file.size)}
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1">
+                    {!file.is_directory && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={() => handleDownload(file)}
+                      >
+                        <Download className="h-3 w-3" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                      onClick={() => handleDelete(file)}
+                      disabled={deleting === file.path}
+                    >
+                      {deleting === file.path ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      {/* Create Directory Dialog */}
+      <Dialog open={mkdirVisible} onOpenChange={setMkdirVisible}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Create New Directory</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              placeholder="Directory name"
+              value={newDirName}
+              onChange={(e) => setNewDirName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateDir()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMkdirVisible(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateDir} disabled={creating || !newDirName.trim()}>
+              {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

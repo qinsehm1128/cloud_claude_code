@@ -1,43 +1,42 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { 
+  Plus, 
+  Play, 
+  Square, 
+  Trash2, 
+  Terminal, 
+  RefreshCw,
+  FileText,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  GitBranch
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import {
-  Card,
-  Row,
-  Col,
-  Button,
-  Modal,
-  Form,
-  Input,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
   Select,
-  message,
-  Tag,
-  Space,
-  Popconfirm,
-  Empty,
-  Spin,
-  Progress,
-  Typography,
-  Timeline,
-} from 'antd'
-import {
-  PlayCircleOutlined,
-  PauseCircleOutlined,
-  DeleteOutlined,
-  PlusOutlined,
-  CodeOutlined,
-  SyncOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  LoadingOutlined,
-  ReloadOutlined,
-  FileTextOutlined,
-  InfoCircleOutlined,
-  WarningOutlined,
-  CloseCircleFilled,
-} from '@ant-design/icons'
-import { containerApi, repoApi } from '../services/api'
-
-const { Text } = Typography
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { containerApi, repoApi } from '@/services/api'
 
 interface Container {
   id: number
@@ -48,11 +47,7 @@ interface Container {
   init_message?: string
   git_repo_url?: string
   git_repo_name?: string
-  work_dir?: string
   created_at: string
-  started_at?: string
-  stopped_at?: string
-  initialized_at?: string
 }
 
 interface RemoteRepository {
@@ -60,14 +55,12 @@ interface RemoteRepository {
   name: string
   full_name: string
   clone_url: string
-  html_url: string
   private: boolean
 }
 
 interface ContainerLog {
   ID: number
   CreatedAt: string
-  container_id: number
   level: string
   stage: string
   message: string
@@ -77,23 +70,27 @@ export default function Dashboard() {
   const [containers, setContainers] = useState<Container[]>([])
   const [remoteRepos, setRemoteRepos] = useState<RemoteRepository[]>([])
   const [loading, setLoading] = useState(true)
-  const [modalVisible, setModalVisible] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [loadingRepos, setLoadingRepos] = useState(false)
-  const [repoSource, setRepoSource] = useState<'select' | 'url'>('select')
-  const [logModalVisible, setLogModalVisible] = useState(false)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [logDialogOpen, setLogDialogOpen] = useState(false)
   const [selectedContainerId, setSelectedContainerId] = useState<number | null>(null)
   const [logs, setLogs] = useState<ContainerLog[]>([])
   const [loadingLogs, setLoadingLogs] = useState(false)
-  const [form] = Form.useForm()
+  const [creating, setCreating] = useState(false)
+  const [loadingRepos, setLoadingRepos] = useState(false)
+  const [repoSource, setRepoSource] = useState<'select' | 'url'>('select')
+  const [formData, setFormData] = useState({
+    name: '',
+    selectedRepo: '',
+    gitRepoUrl: '',
+  })
   const navigate = useNavigate()
 
   const fetchContainers = useCallback(async () => {
     try {
       const response = await containerApi.list()
       setContainers(response.data)
-    } catch (error) {
-      message.error('Failed to fetch containers')
+    } catch {
+      console.error('Failed to fetch containers')
     }
   }, [])
 
@@ -102,9 +99,8 @@ export default function Dashboard() {
     try {
       const response = await repoApi.listRemote()
       setRemoteRepos(response.data || [])
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to fetch GitHub repositories')
+    } catch {
+      console.error('Failed to fetch repositories')
     } finally {
       setLoadingRepos(false)
     }
@@ -122,58 +118,45 @@ export default function Dashboard() {
   // Poll for container status updates
   useEffect(() => {
     const initializingContainers = containers.filter(
-      c => c.init_status === 'pending' || c.init_status === 'cloning' || c.init_status === 'initializing'
+      c => ['pending', 'cloning', 'initializing'].includes(c.init_status)
     )
-    
     if (initializingContainers.length === 0) return
 
-    const interval = setInterval(() => {
-      fetchContainers()
-    }, 3000)
-
+    const interval = setInterval(fetchContainers, 3000)
     return () => clearInterval(interval)
   }, [containers, fetchContainers])
 
-  const handleOpenModal = () => {
-    setModalVisible(true)
+  const handleOpenCreateDialog = () => {
+    setCreateDialogOpen(true)
     fetchRemoteRepos()
   }
 
-  const handleCreate = async (values: { 
-    name: string
-    repo_source: 'select' | 'url'
-    selected_repo?: string
-    git_repo_url?: string
-  }) => {
+  const handleCreate = async () => {
     setCreating(true)
     try {
       let gitRepoUrl = ''
       let gitRepoName = ''
 
-      if (values.repo_source === 'select' && values.selected_repo) {
-        const selectedRepo = remoteRepos.find(r => r.clone_url === values.selected_repo)
+      if (repoSource === 'select' && formData.selectedRepo) {
+        const selectedRepo = remoteRepos.find(r => r.clone_url === formData.selectedRepo)
         if (selectedRepo) {
           gitRepoUrl = selectedRepo.clone_url
           gitRepoName = selectedRepo.name
         }
-      } else if (values.repo_source === 'url' && values.git_repo_url) {
-        gitRepoUrl = values.git_repo_url
+      } else if (repoSource === 'url' && formData.gitRepoUrl) {
+        gitRepoUrl = formData.gitRepoUrl
       }
 
-      if (!gitRepoUrl) {
-        message.error('Please select a repository or enter a URL')
-        setCreating(false)
+      if (!gitRepoUrl || !formData.name) {
         return
       }
 
-      await containerApi.create(values.name, gitRepoUrl, gitRepoName)
-      message.success('Container created! Initialization starting...')
-      setModalVisible(false)
-      form.resetFields()
+      await containerApi.create(formData.name, gitRepoUrl, gitRepoName)
+      setCreateDialogOpen(false)
+      setFormData({ name: '', selectedRepo: '', gitRepoUrl: '' })
       fetchContainers()
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to create container')
+    } catch (err) {
+      console.error('Failed to create container', err)
     } finally {
       setCreating(false)
     }
@@ -182,83 +165,106 @@ export default function Dashboard() {
   const handleStart = async (id: number) => {
     try {
       await containerApi.start(id)
-      message.success('Container started')
       fetchContainers()
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to start container')
+    } catch (err) {
+      console.error('Failed to start container', err)
     }
   }
 
   const handleStop = async (id: number) => {
     try {
       await containerApi.stop(id)
-      message.success('Container stopped')
       fetchContainers()
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to stop container')
+    } catch (err) {
+      console.error('Failed to stop container', err)
     }
   }
 
   const handleDelete = async (id: number) => {
     try {
       await containerApi.delete(id)
-      message.success('Container deleted')
       fetchContainers()
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || 'Failed to delete container')
+    } catch (err) {
+      console.error('Failed to delete container', err)
     }
   }
 
-  const getStatusTag = (status: string) => {
-    const colors: Record<string, string> = {
-      running: 'green',
-      stopped: 'red',
-      created: 'blue',
+  const handleViewLogs = async (containerId: number) => {
+    setSelectedContainerId(containerId)
+    setLogDialogOpen(true)
+    setLoadingLogs(true)
+    try {
+      const response = await containerApi.getLogs(containerId, 50)
+      setLogs(response.data || [])
+    } catch {
+      console.error('Failed to fetch logs')
+    } finally {
+      setLoadingLogs(false)
     }
-    return <Tag color={colors[status] || 'default'}>{status}</Tag>
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'running':
+        return <Badge variant="success">Running</Badge>
+      case 'stopped':
+        return <Badge variant="destructive">Stopped</Badge>
+      default:
+        return <Badge variant="secondary">{status}</Badge>
+    }
   }
 
   const getInitStatusDisplay = (container: Container) => {
-    const { init_status, init_message } = container
-
-    switch (init_status) {
+    switch (container.init_status) {
       case 'pending':
         return (
-          <div>
-            <Tag icon={<LoadingOutlined spin />} color="processing">Starting</Tag>
-            <Text type="secondary" style={{ fontSize: 12 }}>Preparing container...</Text>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Starting...
+            </div>
+            <Progress value={10} className="h-1" />
           </div>
         )
       case 'cloning':
         return (
-          <div>
-            <Tag icon={<LoadingOutlined spin />} color="processing">Cloning</Tag>
-            <Progress percent={30} size="small" status="active" />
-            <Text type="secondary" style={{ fontSize: 12 }}>{init_message}</Text>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Cloning repository...
+            </div>
+            <Progress value={40} className="h-1" />
           </div>
         )
       case 'initializing':
         return (
-          <div>
-            <Tag icon={<LoadingOutlined spin />} color="processing">Initializing</Tag>
-            <Progress percent={70} size="small" status="active" />
-            <Text type="secondary" style={{ fontSize: 12 }}>{init_message}</Text>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Initializing environment...
+            </div>
+            <Progress value={70} className="h-1" />
           </div>
         )
       case 'ready':
         return (
-          <div>
-            <Tag icon={<CheckCircleOutlined />} color="success">Ready</Tag>
+          <div className="flex items-center gap-2 text-sm text-success">
+            <CheckCircle2 className="h-4 w-4" />
+            Ready
           </div>
         )
       case 'failed':
         return (
-          <div>
-            <Tag icon={<CloseCircleOutlined />} color="error">Failed</Tag>
-            <Text type="danger" style={{ fontSize: 12, display: 'block' }}>{init_message}</Text>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <XCircle className="h-4 w-4" />
+              Failed
+            </div>
+            {container.init_message && (
+              <p className="text-xs text-muted-foreground truncate">
+                {container.init_message}
+              </p>
+            )}
           </div>
         )
       default:
@@ -266,292 +272,269 @@ export default function Dashboard() {
     }
   }
 
-  const canAccessTerminal = (container: Container) => {
-    return container.status === 'running' && container.init_status === 'ready'
-  }
-
-  const canStartContainer = (container: Container) => {
-    return container.status === 'stopped' && container.init_status === 'ready'
-  }
-
-  const canStopContainer = (container: Container) => {
-    return container.status === 'running'
-  }
-
-  const handleViewLogs = async (containerId: number) => {
-    setSelectedContainerId(containerId)
-    setLogModalVisible(true)
-    setLoadingLogs(true)
-    try {
-      const response = await containerApi.getLogs(containerId, 50)
-      setLogs(response.data || [])
-    } catch (error) {
-      message.error('Failed to fetch logs')
-    } finally {
-      setLoadingLogs(false)
-    }
-  }
-
-  const getLogIcon = (level: string) => {
-    switch (level) {
-      case 'error':
-        return <CloseCircleFilled style={{ color: '#ff4d4f' }} />
-      case 'warn':
-        return <WarningOutlined style={{ color: '#faad14' }} />
-      default:
-        return <InfoCircleOutlined style={{ color: '#1890ff' }} />
-    }
-  }
-
-  const getLogColor = (level: string) => {
-    switch (level) {
-      case 'error':
-        return 'red'
-      case 'warn':
-        return 'orange'
-      default:
-        return 'blue'
-    }
-  }
-
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: 50 }}>
-        <Spin size="large" />
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <h2>Containers</h2>
-        <Space>
-          <Button icon={<SyncOutlined />} onClick={fetchContainers}>
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Containers</h1>
+          <p className="text-muted-foreground">Manage your development containers</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={fetchContainers}>
+            <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleOpenModal}
-          >
-            Create Container
+          <Button size="sm" onClick={handleOpenCreateDialog}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Container
           </Button>
-        </Space>
+        </div>
       </div>
 
+      {/* Container Grid */}
       {containers.length === 0 ? (
-        <Empty description="No containers yet. Create one to get started!" />
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Terminal className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium mb-2">No containers yet</h3>
+            <p className="text-muted-foreground text-sm mb-4">
+              Create your first container to get started
+            </p>
+            <Button onClick={handleOpenCreateDialog}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Container
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
-        <Row gutter={[16, 16]}>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {containers.map((container) => (
-            <Col xs={24} sm={12} lg={8} key={container.id}>
-              <Card
-                title={container.name}
-                extra={getStatusTag(container.status)}
-                actions={[
-                  canStopContainer(container) ? (
+            <Card key={container.id} className="relative">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <CardTitle className="text-base">{container.name}</CardTitle>
+                    {container.git_repo_name && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <GitBranch className="h-3 w-3" />
+                        {container.git_repo_name}
+                      </div>
+                    )}
+                  </div>
+                  {getStatusBadge(container.status)}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Init Status */}
+                {getInitStatusDisplay(container)}
+
+                {/* Created Time */}
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  {new Date(container.created_at).toLocaleString()}
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 pt-2 border-t">
+                  {container.status === 'running' ? (
                     <Button
-                      type="text"
-                      icon={<PauseCircleOutlined />}
+                      variant="outline"
+                      size="sm"
                       onClick={() => handleStop(container.id)}
                     >
+                      <Square className="h-3 w-3 mr-1" />
                       Stop
                     </Button>
-                  ) : canStartContainer(container) ? (
+                  ) : container.init_status === 'ready' ? (
                     <Button
-                      type="text"
-                      icon={<PlayCircleOutlined />}
+                      variant="outline"
+                      size="sm"
                       onClick={() => handleStart(container.id)}
                     >
+                      <Play className="h-3 w-3 mr-1" />
                       Start
                     </Button>
                   ) : (
-                    <Button type="text" disabled icon={<ReloadOutlined spin />}>
+                    <Button variant="outline" size="sm" disabled>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                       Initializing
                     </Button>
-                  ),
+                  )}
                   <Button
-                    type="text"
-                    icon={<FileTextOutlined />}
+                    variant="outline"
+                    size="sm"
                     onClick={() => handleViewLogs(container.id)}
                   >
+                    <FileText className="h-3 w-3 mr-1" />
                     Logs
-                  </Button>,
+                  </Button>
                   <Button
-                    type="text"
-                    icon={<CodeOutlined />}
+                    variant="outline"
+                    size="sm"
                     onClick={() => navigate(`/terminal/${container.id}`)}
-                    disabled={!canAccessTerminal(container)}
+                    disabled={container.status !== 'running' || container.init_status !== 'ready'}
                   >
+                    <Terminal className="h-3 w-3 mr-1" />
                     Terminal
-                  </Button>,
-                  <Popconfirm
-                    title="Delete this container?"
-                    onConfirm={() => handleDelete(container.id)}
-                    okText="Yes"
-                    cancelText="No"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => handleDelete(container.id)}
                   >
-                    <Button type="text" danger icon={<DeleteOutlined />}>
-                      Delete
-                    </Button>
-                  </Popconfirm>,
-                ]}
-              >
-                <p><strong>Repository:</strong> {container.git_repo_name || 'N/A'}</p>
-                <p><strong>Created:</strong> {new Date(container.created_at).toLocaleString()}</p>
-                <div style={{ marginTop: 8 }}>
-                  <strong>Status:</strong>
-                  {getInitStatusDisplay(container)}
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
                 </div>
-              </Card>
-            </Col>
+              </CardContent>
+            </Card>
           ))}
-        </Row>
+        </div>
       )}
 
-      <Modal
-        title="Create Container"
-        open={modalVisible}
-        onCancel={() => {
-          setModalVisible(false)
-          form.resetFields()
-          setRepoSource('select')
-        }}
-        footer={null}
-        width={600}
-      >
-        <Form 
-          form={form} 
-          onFinish={handleCreate} 
-          layout="vertical"
-          initialValues={{ repo_source: 'select' }}
-        >
-          <Form.Item
-            name="name"
-            label="Container Name"
-            rules={[{ required: true, message: 'Please enter a name' }]}
-          >
-            <Input placeholder="my-project-container" />
-          </Form.Item>
-
-          <Form.Item
-            name="repo_source"
-            label="Repository Source"
-          >
-            <Select onChange={(value) => setRepoSource(value)}>
-              <Select.Option value="select">Select from GitHub</Select.Option>
-              <Select.Option value="url">Enter URL manually</Select.Option>
-            </Select>
-          </Form.Item>
-
-          {repoSource === 'select' ? (
-            <Form.Item
-              name="selected_repo"
-              label="GitHub Repository"
-              rules={[{ required: repoSource === 'select', message: 'Please select a repository' }]}
-            >
-              <Select
-                placeholder="Select a repository"
-                loading={loadingRepos}
-                showSearch
-                optionFilterProp="children"
-                notFoundContent={loadingRepos ? <Spin size="small" /> : 'No repositories found'}
-              >
-                {remoteRepos.map((repo) => (
-                  <Select.Option key={repo.id} value={repo.clone_url}>
-                    {repo.full_name} {repo.private && <Tag color="orange" style={{ marginLeft: 8 }}>Private</Tag>}
-                  </Select.Option>
-                ))}
+      {/* Create Dialog */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Create Container</DialogTitle>
+            <DialogDescription>
+              Create a new development container from a GitHub repository
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Container Name</Label>
+              <Input
+                id="name"
+                placeholder="my-project"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Repository Source</Label>
+              <Select value={repoSource} onValueChange={(v: 'select' | 'url') => setRepoSource(v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="select">Select from GitHub</SelectItem>
+                  <SelectItem value="url">Enter URL manually</SelectItem>
+                </SelectContent>
               </Select>
-            </Form.Item>
-          ) : (
-            <Form.Item
-              name="git_repo_url"
-              label="GitHub Repository URL"
-              rules={[
-                { required: repoSource === 'url', message: 'Please enter a repository URL' },
-                { pattern: /^https:\/\/github\.com\//, message: 'Please enter a valid GitHub URL' }
-              ]}
-            >
-              <Input placeholder="https://github.com/username/repository" />
-            </Form.Item>
-          )}
-
-          <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit" loading={creating}>
-                Create Container
-              </Button>
-              <Button onClick={() => {
-                setModalVisible(false)
-                form.resetFields()
-              }}>
-                Cancel
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-
-        <div style={{ marginTop: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
-          <Text type="secondary">
-            <strong>What happens:</strong>
-            <ol style={{ marginTop: 8, paddingLeft: 20, marginBottom: 0 }}>
-              <li>Container will be created and started automatically</li>
-              <li>Repository will be cloned inside the container</li>
-              <li>Claude Code will set up the development environment</li>
-              <li>Once ready, you can access the terminal</li>
-            </ol>
-          </Text>
-        </div>
-      </Modal>
-
-      <Modal
-        title="Container Logs"
-        open={logModalVisible}
-        onCancel={() => {
-          setLogModalVisible(false)
-          setLogs([])
-          setSelectedContainerId(null)
-        }}
-        footer={[
-          <Button key="refresh" icon={<SyncOutlined />} onClick={() => selectedContainerId && handleViewLogs(selectedContainerId)}>
-            Refresh
-          </Button>,
-          <Button key="close" onClick={() => setLogModalVisible(false)}>
-            Close
-          </Button>,
-        ]}
-        width={700}
-      >
-        {loadingLogs ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin size="large" />
+            </div>
+            {repoSource === 'select' ? (
+              <div className="space-y-2">
+                <Label>GitHub Repository</Label>
+                <Select
+                  value={formData.selectedRepo}
+                  onValueChange={(v) => setFormData({ ...formData, selectedRepo: v })}
+                  disabled={loadingRepos}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={loadingRepos ? "Loading..." : "Select a repository"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {remoteRepos.map((repo) => (
+                      <SelectItem key={repo.id} value={repo.clone_url}>
+                        {repo.full_name}
+                        {repo.private && " (Private)"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="url">Repository URL</Label>
+                <Input
+                  id="url"
+                  placeholder="https://github.com/username/repository"
+                  value={formData.gitRepoUrl}
+                  onChange={(e) => setFormData({ ...formData, gitRepoUrl: e.target.value })}
+                />
+              </div>
+            )}
+            <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+              <p className="font-medium mb-1">What happens next:</p>
+              <ol className="list-decimal list-inside space-y-1 text-xs">
+                <li>Container will be created and started</li>
+                <li>Repository will be cloned inside</li>
+                <li>Claude Code will set up the environment</li>
+                <li>Once ready, you can access the terminal</li>
+              </ol>
+            </div>
           </div>
-        ) : logs.length === 0 ? (
-          <Empty description="No logs yet" />
-        ) : (
-          <div style={{ maxHeight: 400, overflow: 'auto' }}>
-            <Timeline
-              items={logs.slice().reverse().map((log) => ({
-                dot: getLogIcon(log.level),
-                color: getLogColor(log.level),
-                children: (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Tag color={getLogColor(log.level)}>{log.stage}</Tag>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreate} disabled={creating || !formData.name}>
+              {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Logs Dialog */}
+      <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Container Logs</DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="h-[400px] rounded-md border p-4">
+            {loadingLogs ? (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : logs.length === 0 ? (
+              <p className="text-center text-muted-foreground">No logs yet</p>
+            ) : (
+              <div className="space-y-3">
+                {logs.slice().reverse().map((log) => (
+                  <div key={log.ID} className="text-sm">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge
+                        variant={
+                          log.level === 'error' ? 'destructive' :
+                          log.level === 'warn' ? 'warning' : 'secondary'
+                        }
+                        className="text-xs"
+                      >
+                        {log.stage}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
                         {new Date(log.CreatedAt).toLocaleString()}
-                      </Text>
+                      </span>
                     </div>
-                    <div style={{ marginTop: 4 }}>{log.message}</div>
+                    <p className="text-muted-foreground">{log.message}</p>
                   </div>
-                ),
-              }))}
-            />
-          </div>
-        )}
-      </Modal>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => selectedContainerId && handleViewLogs(selectedContainerId)}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            <Button onClick={() => setLogDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
