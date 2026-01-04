@@ -12,19 +12,20 @@ import {
   PanelRightClose,
   PanelRight,
   ListTodo,
+  Settings,
 } from 'lucide-react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebLinksAddon } from 'xterm-addon-web-links'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { TerminalWebSocket, HistoryLoadProgress } from '@/services/websocket'
 import { containerApi } from '@/services/api'
 import { monitoringApi, taskQueueApi, Task as ApiTask } from '@/services/monitoringApi'
 import FileBrowser from '@/components/FileManager/FileBrowser'
 import { MonitoringStatusBar, MonitoringStatus } from '@/components/Automation/MonitoringStatusBar'
-import { QuickConfigPopover, MonitoringConfig } from '@/components/Automation/QuickConfigPopover'
+import { MonitoringConfigPanel, MonitoringConfig } from '@/components/Automation/MonitoringConfigPanel'
 import { TaskPanel, Task } from '@/components/Automation/TaskPanel'
 import { TaskEditor } from '@/components/Automation/TaskEditor'
 import 'xterm/css/xterm.css'
@@ -87,6 +88,7 @@ export default function ContainerTerminal() {
     threshold: 30,
     strategy: 'webhook',
     queueSize: 0,
+    claudeDetected: false,
   })
   const [monitoringConfig, setMonitoringConfig] = useState<MonitoringConfig>({
     silenceThreshold: 30,
@@ -772,12 +774,6 @@ export default function ContainerTerminal() {
         </div>
 
         {/* Monitoring Status Bar */}
-        <QuickConfigPopover
-          config={monitoringConfig}
-          onSave={handleConfigSave}
-        >
-          <div className="hidden" />
-        </QuickConfigPopover>
         <MonitoringStatusBar
           status={monitoringStatus}
           onToggle={handleMonitoringToggle}
@@ -788,11 +784,11 @@ export default function ContainerTerminal() {
       {/* Task Panel - Right sidebar */}
       <div 
         className={`h-full bg-card border-l flex flex-col transition-all duration-300 ${
-          taskPanelOpen ? 'w-80' : 'w-0'
+          taskPanelOpen ? 'w-96' : 'w-0'
         } overflow-hidden`}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
-          <h3 className="font-medium text-sm">Task Queue</h3>
+          <h3 className="font-medium text-sm">Automation</h3>
           <div className="flex items-center gap-1">
             <TaskEditor
               tasks={tasks}
@@ -809,17 +805,39 @@ export default function ContainerTerminal() {
             </Button>
           </div>
         </div>
-        <div className="flex-1 overflow-hidden">
-          {taskPanelOpen && (
-            <TaskPanel
-              tasks={tasks}
-              onAddTask={handleAddTask}
-              onRemoveTask={handleRemoveTask}
-              onReorderTasks={handleReorderTasks}
-              onClearTasks={handleClearTasks}
-            />
-          )}
-        </div>
+        
+        {/* Tabs for Settings and Tasks */}
+        {taskPanelOpen && (
+          <Tabs defaultValue="tasks" className="flex-1 flex flex-col overflow-hidden">
+            <TabsList className="mx-4 mt-2 grid grid-cols-2">
+              <TabsTrigger value="tasks">
+                <ListTodo className="h-4 w-4 mr-1" />
+                Tasks
+              </TabsTrigger>
+              <TabsTrigger value="settings">
+                <Settings className="h-4 w-4 mr-1" />
+                Settings
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="tasks" className="flex-1 overflow-hidden mt-0 p-0">
+              <TaskPanel
+                tasks={tasks}
+                onAddTask={handleAddTask}
+                onRemoveTask={handleRemoveTask}
+                onReorderTasks={handleReorderTasks}
+                onClearTasks={handleClearTasks}
+              />
+            </TabsContent>
+            
+            <TabsContent value="settings" className="flex-1 overflow-auto mt-0">
+              <MonitoringConfigPanel
+                config={monitoringConfig}
+                onSave={handleConfigSave}
+              />
+            </TabsContent>
+          </Tabs>
+        )}
       </div>
     </div>
   )

@@ -21,7 +21,10 @@ const (
 )
 
 // PTYOutputCallback is called when PTY produces output
-type PTYOutputCallback func(containerID uint, data []byte)
+// containerID: the database ID of the container
+// ptySessionID: the unique ID of the PTY session (exec ID)
+// data: the output data
+type PTYOutputCallback func(containerID uint, ptySessionID string, data []byte)
 
 // PTYSessionCreatedCallback is called when a new PTY session is created
 type PTYSessionCreatedCallback func(containerID uint, dockerID string, session *PTYSession)
@@ -431,7 +434,7 @@ func (s *PTYSession) readLoop() {
 				// Call monitoring callback (independent of WebSocket clients)
 				if s.ptyManager != nil {
 					if callback := s.ptyManager.GetPTYOutputCallback(); callback != nil {
-						callback(s.containerDBID, data)
+						callback(s.containerDBID, s.ID, data)
 					}
 				}
 

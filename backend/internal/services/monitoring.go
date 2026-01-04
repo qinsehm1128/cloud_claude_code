@@ -42,8 +42,8 @@ func NewMonitoringService(db *gorm.DB, terminalService *terminal.TerminalService
 	// Set up PTY output callback for monitoring
 	// This ensures monitoring receives PTY output even without WebSocket clients
 	if terminalService != nil {
-		terminalService.SetPTYOutputCallback(func(containerID uint, data []byte) {
-			service.OnPTYOutput(containerID, data)
+		terminalService.SetPTYOutputCallback(func(containerID uint, ptySessionID string, data []byte) {
+			service.OnPTYOutput(containerID, ptySessionID, data)
 		})
 		
 		// Set up session created callback to update monitoring with PTY session
@@ -318,9 +318,9 @@ func (s *MonitoringService) Close() {
 // OnPTYOutput forwards PTY output to the monitoring manager.
 // This is called from the PTY data flow via the callback.
 // It automatically ensures a monitoring session exists for the container.
-func (s *MonitoringService) OnPTYOutput(containerID uint, data []byte) {
-	// Get or create session - this ensures monitoring works even without explicit initialization
-	session := s.manager.GetSession(containerID)
+func (s *MonitoringService) OnPTYOutput(containerID uint, ptySessionID string, data []byte) {
+	// Get session by PTY session ID
+	session := s.manager.GetSessionByPTY(ptySessionID)
 	if session == nil {
 		// Session doesn't exist yet - we need to look up the Docker ID
 		// This happens when PTY output arrives before explicit session initialization
@@ -328,16 +328,19 @@ func (s *MonitoringService) OnPTYOutput(containerID uint, data []byte) {
 		return
 	}
 	
-	s.manager.OnPTYOutput(containerID, data)
+	s.manager.OnPTYOutput(containerID, ptySessionID, data)
 }
 
 // OnPTYSessionCreated is called when a new PTY session is created.
-// It updates the monitoring session with the PTY session reference.
+// It creates a monitoring session for this specific PTY session.
 func (s *MonitoringService) OnPTYSessionCreated(containerID uint, dockerID string, ptySession *terminal.PTYSession) {
-	// Get or create monitoring session
-	session, err := s.manager.GetOrCreateSession(containerID, dockerID, ptySession)
+	// Get the PTY session ID
+	ptySessionID := ptySession.ID
+	
+	// Get or create monitoring session for this specific PTY
+	session, err := s.manager.GetOrCreateSessionForPTY(containerID, dockerID, ptySessionID, ptySession)
 	if err != nil {
-		fmt.Printf("[MonitoringService] Failed to get/create session for container %d: %v\n", containerID, err)
+		fmt.Printf("[MonitoringService] Failed to get/create session for PTY %s (container %d): %v\n", ptySessionID, containerID, err)
 		return
 	}
 
@@ -356,7 +359,7 @@ func (s *MonitoringService) OnPTYSessionCreated(containerID uint, dockerID strin
 
 	if config.Enabled && !session.IsEnabled() {
 		session.Enable()
-		fmt.Printf("[MonitoringService] Auto-enabled monitoring for container %d\n", containerID)
+		fmt.Printf("[MonitoringService] Auto-enabled monitoring for PTY %s (container %d)\n", ptySessionID, containerID)
 	}
 }
 

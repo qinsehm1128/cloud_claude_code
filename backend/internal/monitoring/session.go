@@ -3,6 +3,7 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,11 +14,14 @@ import (
 // MonitoringStatus represents the current monitoring state for WebSocket broadcast
 type MonitoringStatus struct {
 	ContainerID     uint           `json:"container_id"`
+	PTYSessionID    string         `json:"pty_session_id,omitempty"` // The specific PTY session being monitored
 	Enabled         bool           `json:"enabled"`
 	SilenceDuration int            `json:"silence_duration"` // Seconds since last output
 	Threshold       int            `json:"threshold"`        // Configured threshold in seconds
 	Strategy        string         `json:"strategy"`         // Active strategy name
 	QueueSize       int            `json:"queue_size"`       // Number of pending tasks
+	ClaudeDetected  bool           `json:"claude_detected"`  // Whether Claude Code process is detected in this PTY
+	ClaudePID       string         `json:"claude_pid,omitempty"` // PID of detected Claude process
 	CurrentTask     *TaskSummary   `json:"current_task,omitempty"`
 	LastAction      *ActionSummary `json:"last_action,omitempty"`
 }
@@ -37,23 +41,30 @@ type ActionSummary struct {
 	Success   bool      `json:"success"`
 }
 
-// MonitoringSession represents an active monitoring session for a container.
+// MonitoringSession represents an active monitoring session for a specific PTY session.
 // It tracks silence duration, manages the context buffer, and triggers strategies.
+// Note: Monitoring is now per-PTY-session, not per-container, to support multiple terminals.
 type MonitoringSession struct {
-	ContainerID uint
-	DockerID    string
-	PTYSession  *terminal.PTYSession // Optional - may be nil if no active PTY
-	Config      *models.MonitoringConfig
+	ContainerID  uint
+	DockerID     string
+	PTYSessionID string                   // The specific PTY session being monitored
+	PTYSession   *terminal.PTYSession     // Optional - may be nil if no active PTY
+	Config       *models.MonitoringConfig
 
 	// Write function for injecting commands (set by manager)
 	writeToPTY func(data []byte) error
 
+	// Function to execute commands in container (for process detection)
+	execInContainer func(cmd []string) (string, error)
+
 	// State
-	enabled         bool
-	silenceDuration time.Duration
-	lastOutputTime  time.Time
-	lastAction      *ActionSummary
+	enabled          bool
+	silenceDuration  time.Duration
+	lastOutputTime   time.Time
+	lastAction       *ActionSummary
 	lastNotification *NotificationInfo
+	claudeDetected   bool   // Whether Claude Code process is detected in this PTY
+	claudePID        string // PID of detected Claude process (for tracking)
 
 	// Silence timer
 	silenceTimer *time.Timer
@@ -85,8 +96,8 @@ type NotificationInfo struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// NewMonitoringSession creates a new monitoring session for a container.
-func NewMonitoringSession(containerID uint, dockerID string, ptySession *terminal.PTYSession, config *models.MonitoringConfig) *MonitoringSession {
+// NewMonitoringSession creates a new monitoring session for a specific PTY session.
+func NewMonitoringSession(containerID uint, dockerID string, ptySessionID string, ptySession *terminal.PTYSession, config *models.MonitoringConfig) *MonitoringSession {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	bufferSize := config.ContextBufferSize
@@ -97,6 +108,7 @@ func NewMonitoringSession(containerID uint, dockerID string, ptySession *termina
 	session := &MonitoringSession{
 		ContainerID:    containerID,
 		DockerID:       dockerID,
+		PTYSessionID:   ptySessionID,
 		PTYSession:     ptySession,
 		Config:         config,
 		enabled:        false,
@@ -168,6 +180,104 @@ func (s *MonitoringSession) OnOutput(data []byte) {
 	}
 }
 
+// DetectClaudeProcess checks if Claude Code process is running in this PTY session.
+// It uses the PTY's exec ID to find the shell PID, then checks for claude in its process tree.
+func (s *MonitoringSession) DetectClaudeProcess() bool {
+	if s.execInContainer == nil {
+		fmt.Printf("[Session] No execInContainer function set for container %d\n", s.ContainerID)
+		return false
+	}
+
+	// Get the shell PID for this PTY session by checking the exec process
+	// The PTYSessionID is the Docker exec ID, we need to find its PID
+	// Method: Use ps to find processes with "claude" in the command
+	// and check if they're descendants of our PTY shell
+	
+	// First, try to find claude processes
+	cmd := []string{"sh", "-c", "pgrep -a -f 'claude' 2>/dev/null || true"}
+	output, err := s.execInContainer(cmd)
+	if err != nil {
+		fmt.Printf("[Session] Failed to detect Claude process: %v\n", err)
+		return false
+	}
+
+	// Check if we found any claude process
+	output = strings.TrimSpace(output)
+	if output == "" {
+		s.stateMu.Lock()
+		if s.claudeDetected {
+			s.claudeDetected = false
+			s.claudePID = ""
+			fmt.Printf("[Session] Claude Code process no longer detected in container %d, PTY %s\n", s.ContainerID, s.PTYSessionID)
+			s.broadcastStatus()
+		}
+		s.stateMu.Unlock()
+		return false
+	}
+
+	// Parse the output to get PID
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Format: "PID command..."
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) >= 1 {
+			pid := strings.TrimSpace(parts[0])
+			// Remove any non-printable characters (Docker exec output may have them)
+			pid = strings.Map(func(r rune) rune {
+				if r >= '0' && r <= '9' {
+					return r
+				}
+				return -1
+			}, pid)
+			
+			if pid != "" {
+				s.stateMu.Lock()
+				if !s.claudeDetected || s.claudePID != pid {
+					s.claudeDetected = true
+					s.claudePID = pid
+					fmt.Printf("[Session] Claude Code detected in container %d, PTY %s, PID: %s\n", s.ContainerID, s.PTYSessionID, pid)
+					s.broadcastStatus()
+				}
+				s.stateMu.Unlock()
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// SetExecInContainer sets the function to execute commands in the container.
+func (s *MonitoringSession) SetExecInContainer(fn func(cmd []string) (string, error)) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.execInContainer = fn
+}
+
+// StartClaudeDetection starts a background goroutine to periodically check for Claude process.
+func (s *MonitoringSession) StartClaudeDetection(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		// Initial detection
+		s.DetectClaudeProcess()
+
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				s.DetectClaudeProcess()
+			}
+		}
+	}()
+}
+
 // GetContextBuffer returns the current context buffer content.
 func (s *MonitoringSession) GetContextBuffer() string {
 	s.bufferMu.RLock()
@@ -194,11 +304,31 @@ func (s *MonitoringSession) GetStatus() MonitoringStatus {
 
 	return MonitoringStatus{
 		ContainerID:     s.ContainerID,
+		PTYSessionID:    s.PTYSessionID,
 		Enabled:         s.enabled,
 		SilenceDuration: silenceSecs,
 		Threshold:       s.Config.SilenceThreshold,
 		Strategy:        s.Config.ActiveStrategy,
+		ClaudeDetected:  s.claudeDetected,
+		ClaudePID:       s.claudePID,
 		LastAction:      s.lastAction,
+	}
+}
+
+// IsClaudeDetected returns whether Claude Code has been detected.
+func (s *MonitoringSession) IsClaudeDetected() bool {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.claudeDetected
+}
+
+// SetClaudeDetected manually sets the Claude detection state.
+func (s *MonitoringSession) SetClaudeDetected(detected bool) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.claudeDetected != detected {
+		s.claudeDetected = detected
+		s.broadcastStatus()
 	}
 }
 
@@ -343,10 +473,13 @@ func (s *MonitoringSession) GetLastNotification() *NotificationInfo {
 func (s *MonitoringSession) broadcastStatus() {
 	status := MonitoringStatus{
 		ContainerID:     s.ContainerID,
+		PTYSessionID:    s.PTYSessionID,
 		Enabled:         s.enabled,
 		SilenceDuration: int(s.silenceDuration.Seconds()),
 		Threshold:       s.Config.SilenceThreshold,
 		Strategy:        s.Config.ActiveStrategy,
+		ClaudeDetected:  s.claudeDetected,
+		ClaudePID:       s.claudePID,
 		LastAction:      s.lastAction,
 	}
 

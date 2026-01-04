@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Pause, Settings, ChevronDown, ChevronUp, Clock, Zap } from 'lucide-react';
+import { Play, Pause, Settings, ChevronDown, ChevronUp, Clock, Zap, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,9 @@ export interface MonitoringStatus {
   threshold: number;
   strategy: string;
   queueSize: number;
+  claudeDetected: boolean;
+  claudePID?: string;
+  ptySessionId?: string;
   currentTask?: {
     id: number;
     text: string;
@@ -70,6 +73,14 @@ export function MonitoringStatusBar({
         className
       )}
     >
+      {/* Claude Code not detected warning */}
+      {!status.claudeDetected && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-sm">
+          <AlertTriangle className="h-4 w-4" />
+          <span>Claude Code not detected in this terminal. Automation features may not work properly.</span>
+        </div>
+      )}
+
       {/* Main status bar */}
       <div className="flex items-center justify-between px-4 py-2">
         <div className="flex items-center gap-4">

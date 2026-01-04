@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"cc-platform/internal/models"
 	"cc-platform/internal/terminal"
@@ -11,12 +12,16 @@ import (
 	"gorm.io/gorm"
 )
 
-// Manager manages monitoring sessions for all containers.
+// Manager manages monitoring sessions for all PTY sessions.
 // It provides the central coordination point for PTY monitoring.
+// Note: Monitoring is now per-PTY-session, not per-container.
 type Manager struct {
 	db       *gorm.DB
-	sessions map[uint]*MonitoringSession // containerID -> session
+	sessions map[string]*MonitoringSession // ptySessionID -> session
 	mu       sync.RWMutex
+
+	// Docker client for executing commands in containers
+	execInContainer func(dockerID string, cmd []string) (string, error)
 
 	// Strategy engine for executing automation strategies
 	strategyEngine StrategyEngine
@@ -37,10 +42,17 @@ func NewManager(db *gorm.DB) *Manager {
 
 	return &Manager{
 		db:         db,
-		sessions:   make(map[uint]*MonitoringSession),
+		sessions:   make(map[string]*MonitoringSession),
 		ctx:        ctx,
 		cancelFunc: cancel,
 	}
+}
+
+// SetExecInContainer sets the function to execute commands in containers.
+func (m *Manager) SetExecInContainer(fn func(dockerID string, cmd []string) (string, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.execInContainer = fn
 }
 
 // SetStrategyEngine sets the strategy engine for automation.
@@ -50,14 +62,13 @@ func (m *Manager) SetStrategyEngine(engine StrategyEngine) {
 	m.strategyEngine = engine
 }
 
-// GetOrCreateSession gets an existing monitoring session or creates a new one.
-// PTYSession can be nil - monitoring will still work via the PTY output callback.
-func (m *Manager) GetOrCreateSession(containerID uint, dockerID string, ptySession *terminal.PTYSession) (*MonitoringSession, error) {
+// GetOrCreateSessionForPTY gets an existing monitoring session or creates a new one for a specific PTY session.
+func (m *Manager) GetOrCreateSessionForPTY(containerID uint, dockerID string, ptySessionID string, ptySession *terminal.PTYSession) (*MonitoringSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check for existing session
-	if session, exists := m.sessions[containerID]; exists {
+	// Check for existing session by PTY session ID
+	if session, exists := m.sessions[ptySessionID]; exists {
 		// Update PTY session reference if provided and changed
 		if ptySession != nil && session.PTYSession != ptySession {
 			session.PTYSession = ptySession
@@ -65,29 +76,46 @@ func (m *Manager) GetOrCreateSession(containerID uint, dockerID string, ptySessi
 		return session, nil
 	}
 
-	// Load or create config from database
+	// Load or create config from database (config is still per-container)
 	config, err := m.loadOrCreateConfig(containerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load monitoring config: %w", err)
 	}
 
-	// Create new session (PTYSession can be nil)
-	session := NewMonitoringSession(containerID, dockerID, ptySession, config)
+	// Create new session for this PTY
+	session := NewMonitoringSession(containerID, dockerID, ptySessionID, ptySession, config)
 
 	// Set up silence threshold callback
 	session.SetOnSilenceThreshold(m.onSilenceThreshold)
 
-	m.sessions[containerID] = session
+	// Set up exec function for Claude detection
+	if m.execInContainer != nil {
+		session.SetExecInContainer(func(cmd []string) (string, error) {
+			return m.execInContainer(dockerID, cmd)
+		})
+	}
+
+	m.sessions[ptySessionID] = session
+
+	// Start Claude detection with 5 second interval
+	session.StartClaudeDetection(5 * time.Second)
 
 	return session, nil
 }
 
-// EnsureSession ensures a monitoring session exists for a container.
-// Creates one if it doesn't exist, using the provided Docker ID.
-// This is called when PTY output is received to ensure monitoring is active.
-func (m *Manager) EnsureSession(containerID uint, dockerID string) (*MonitoringSession, error) {
+// GetOrCreateSession gets an existing monitoring session or creates a new one.
+// Deprecated: Use GetOrCreateSessionForPTY instead for PTY-specific monitoring.
+// This method is kept for backward compatibility and uses container ID as session key.
+func (m *Manager) GetOrCreateSession(containerID uint, dockerID string, ptySession *terminal.PTYSession) (*MonitoringSession, error) {
+	// Use container ID as PTY session ID for backward compatibility
+	ptySessionID := fmt.Sprintf("container-%d", containerID)
+	return m.GetOrCreateSessionForPTY(containerID, dockerID, ptySessionID, ptySession)
+}
+
+// EnsureSessionForPTY ensures a monitoring session exists for a specific PTY session.
+func (m *Manager) EnsureSessionForPTY(containerID uint, dockerID string, ptySessionID string) (*MonitoringSession, error) {
 	m.mu.RLock()
-	session, exists := m.sessions[containerID]
+	session, exists := m.sessions[ptySessionID]
 	m.mu.RUnlock()
 
 	if exists {
@@ -95,25 +123,95 @@ func (m *Manager) EnsureSession(containerID uint, dockerID string) (*MonitoringS
 	}
 
 	// Create session without PTYSession - it will receive output via callback
-	return m.GetOrCreateSession(containerID, dockerID, nil)
+	return m.GetOrCreateSessionForPTY(containerID, dockerID, ptySessionID, nil)
+}
+
+// EnsureSession ensures a monitoring session exists for a container.
+// Deprecated: Use EnsureSessionForPTY instead.
+func (m *Manager) EnsureSession(containerID uint, dockerID string) (*MonitoringSession, error) {
+	ptySessionID := fmt.Sprintf("container-%d", containerID)
+	return m.EnsureSessionForPTY(containerID, dockerID, ptySessionID)
+}
+
+// GetSessionByPTY returns a monitoring session by PTY session ID.
+func (m *Manager) GetSessionByPTY(ptySessionID string) *MonitoringSession {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sessions[ptySessionID]
 }
 
 // GetSession returns a monitoring session by container ID.
+// Note: This returns the first session found for the container.
+// For multi-terminal support, use GetSessionByPTY instead.
 func (m *Manager) GetSession(containerID uint) *MonitoringSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.sessions[containerID]
+	
+	// Find first session for this container
+	for _, session := range m.sessions {
+		if session.ContainerID == containerID {
+			return session
+		}
+	}
+	return nil
+}
+
+// GetSessionsForContainer returns all monitoring sessions for a container.
+func (m *Manager) GetSessionsForContainer(containerID uint) []*MonitoringSession {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
+	var sessions []*MonitoringSession
+	for _, session := range m.sessions {
+		if session.ContainerID == containerID {
+			sessions = append(sessions, session)
+		}
+	}
+	return sessions
+}
+
+// RemoveSessionByPTY removes and closes a monitoring session by PTY session ID.
+func (m *Manager) RemoveSessionByPTY(ptySessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if session, exists := m.sessions[ptySessionID]; exists {
+		session.Close()
+		delete(m.sessions, ptySessionID)
+	}
 }
 
 // RemoveSession removes and closes a monitoring session.
+// Note: This removes all sessions for the container.
 func (m *Manager) RemoveSession(containerID uint) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if session, exists := m.sessions[containerID]; exists {
-		session.Close()
-		delete(m.sessions, containerID)
+	for id, session := range m.sessions {
+		if session.ContainerID == containerID {
+			session.Close()
+			delete(m.sessions, id)
+		}
 	}
+}
+
+// EnableMonitoringForPTY enables monitoring for a specific PTY session.
+func (m *Manager) EnableMonitoringForPTY(ptySessionID string) error {
+	session := m.GetSessionByPTY(ptySessionID)
+	if session == nil {
+		return fmt.Errorf("monitoring session not found for PTY %s", ptySessionID)
+	}
+
+	// Update database (config is per-container)
+	if err := m.db.Model(&models.MonitoringConfig{}).
+		Where("container_id = ?", session.ContainerID).
+		Update("enabled", true).Error; err != nil {
+		return fmt.Errorf("failed to update monitoring config: %w", err)
+	}
+
+	session.Enable()
+	fmt.Printf("[Manager] Monitoring enabled for PTY %s (container %d)\n", ptySessionID, session.ContainerID)
+	return nil
 }
 
 // EnableMonitoring enables monitoring for a container.
@@ -132,6 +230,24 @@ func (m *Manager) EnableMonitoring(containerID uint) error {
 
 	session.Enable()
 	fmt.Printf("[Manager] Monitoring enabled for container %d\n", containerID)
+	return nil
+}
+
+// DisableMonitoringForPTY disables monitoring for a specific PTY session.
+func (m *Manager) DisableMonitoringForPTY(ptySessionID string) error {
+	session := m.GetSessionByPTY(ptySessionID)
+	if session == nil {
+		return fmt.Errorf("monitoring session not found for PTY %s", ptySessionID)
+	}
+
+	// Update database
+	if err := m.db.Model(&models.MonitoringConfig{}).
+		Where("container_id = ?", session.ContainerID).
+		Update("enabled", false).Error; err != nil {
+		return fmt.Errorf("failed to update monitoring config: %w", err)
+	}
+
+	session.Disable()
 	return nil
 }
 
@@ -165,8 +281,8 @@ func (m *Manager) UpdateConfig(containerID uint, config *models.MonitoringConfig
 		return fmt.Errorf("failed to save monitoring config: %w", err)
 	}
 
-	// Update session if exists
-	if session := m.GetSession(containerID); session != nil {
+	// Update all sessions for this container
+	for _, session := range m.GetSessionsForContainer(containerID) {
 		session.UpdateConfig(config)
 	}
 
@@ -174,6 +290,7 @@ func (m *Manager) UpdateConfig(containerID uint, config *models.MonitoringConfig
 }
 
 // GetStatus returns the monitoring status for a container.
+// Note: Returns status of the first session found for the container.
 func (m *Manager) GetStatus(containerID uint) (*MonitoringStatus, error) {
 	session := m.GetSession(containerID)
 	if session == nil {
@@ -193,6 +310,17 @@ func (m *Manager) GetStatus(containerID uint) (*MonitoringStatus, error) {
 	return &status, nil
 }
 
+// GetStatusByPTY returns the monitoring status for a specific PTY session.
+func (m *Manager) GetStatusByPTY(ptySessionID string) (*MonitoringStatus, error) {
+	session := m.GetSessionByPTY(ptySessionID)
+	if session == nil {
+		return nil, fmt.Errorf("monitoring session not found for PTY %s", ptySessionID)
+	}
+
+	status := session.GetStatus()
+	return &status, nil
+}
+
 // GetContextBuffer returns the context buffer content for a container.
 func (m *Manager) GetContextBuffer(containerID uint) (string, error) {
 	session := m.GetSession(containerID)
@@ -204,7 +332,18 @@ func (m *Manager) GetContextBuffer(containerID uint) (string, error) {
 
 // OnPTYOutput should be called when PTY produces output.
 // This is the hook that integrates monitoring with the PTY data flow.
-func (m *Manager) OnPTYOutput(containerID uint, data []byte) {
+// ptySessionID is the specific PTY session that produced the output.
+func (m *Manager) OnPTYOutput(containerID uint, ptySessionID string, data []byte) {
+	session := m.GetSessionByPTY(ptySessionID)
+	if session == nil {
+		return
+	}
+	session.OnOutput(data)
+}
+
+// OnPTYOutputLegacy is the legacy method for backward compatibility.
+// Deprecated: Use OnPTYOutput with ptySessionID instead.
+func (m *Manager) OnPTYOutputLegacy(containerID uint, data []byte) {
 	session := m.GetSession(containerID)
 	if session == nil {
 		return
@@ -215,8 +354,8 @@ func (m *Manager) OnPTYOutput(containerID uint, data []byte) {
 // BroadcastNotification sends a notification to all connected clients for a container.
 // This is used for queue empty notifications and other events.
 func (m *Manager) BroadcastNotification(containerID uint, notificationType string, message string) {
-	session := m.GetSession(containerID)
-	if session == nil {
+	sessions := m.GetSessionsForContainer(containerID)
+	if len(sessions) == 0 {
 		return
 	}
 	
@@ -224,9 +363,10 @@ func (m *Manager) BroadcastNotification(containerID uint, notificationType strin
 	fmt.Printf("[Manager] Broadcasting notification for container %d: type=%s, message=%s\n", 
 		containerID, notificationType, message)
 	
-	// The actual WebSocket broadcast is handled by the terminal service
-	// This is a placeholder that can be extended to integrate with WebSocket
-	session.SetLastNotification(notificationType, message)
+	// Notify all sessions for this container
+	for _, session := range sessions {
+		session.SetLastNotification(notificationType, message)
+	}
 }
 
 // Close shuts down the monitoring manager and all sessions.
@@ -276,13 +416,19 @@ func (m *Manager) onSilenceThreshold(session *MonitoringSession) {
 		return
 	}
 
+	// Only execute if Claude is detected in this PTY session
+	if !session.IsClaudeDetected() {
+		fmt.Printf("[Manager] Skipping strategy execution for PTY %s: Claude not detected\n", session.PTYSessionID)
+		return
+	}
+
 	// Execute strategy in background
 	go func() {
 		ctx, cancel := context.WithTimeout(m.ctx, session.GetThreshold())
 		defer cancel()
 
 		if err := engine.Execute(ctx, session); err != nil {
-			fmt.Printf("Strategy execution failed for container %d: %v\n", session.ContainerID, err)
+			fmt.Printf("Strategy execution failed for PTY %s (container %d): %v\n", session.PTYSessionID, session.ContainerID, err)
 		}
 	}()
 }
