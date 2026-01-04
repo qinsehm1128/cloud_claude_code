@@ -813,12 +813,20 @@ func (s *ContainerService) GetContainer(id uint) (*models.Container, error) {
 func (s *ContainerService) GetContainerByDockerID(dockerID string) (*models.Container, error) {
 	var container models.Container
 	
-	// Try exact match first
-	if err := s.db.Where("docker_id = ?", dockerID).First(&container).Error; err == nil {
+	// For short Docker IDs (12+ chars), use prefix match directly
+	// For full IDs (64 chars), try exact match
+	if len(dockerID) >= 64 {
+		// Full Docker ID - exact match
+		if err := s.db.Where("docker_id = ?", dockerID).First(&container).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrContainerNotFound
+			}
+			return nil, err
+		}
 		return &container, nil
 	}
 	
-	// Try prefix match for short Docker IDs (at least 12 characters)
+	// Short Docker ID (12+ chars) - use prefix match
 	if len(dockerID) >= 12 {
 		if err := s.db.Where("docker_id LIKE ?", dockerID+"%").First(&container).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
