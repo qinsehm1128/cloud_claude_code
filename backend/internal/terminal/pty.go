@@ -631,19 +631,29 @@ func (s *PTYSession) GetInfo() SessionInfo {
 // CloseSessionsForContainer closes all PTY sessions for a specific container
 func (m *PTYManager) CloseSessionsForContainer(containerID uint) int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	
 	containerIDStr := fmt.Sprintf("%d", containerID)
-	closedCount := 0
+	var sessionsToClose []*PTYSession
+	var sessionIDs []string
 
+	// Collect sessions to close
 	for id, session := range m.sessions {
 		if session.ContainerID == containerIDStr {
+			sessionsToClose = append(sessionsToClose, session)
+			sessionIDs = append(sessionIDs, id)
 			// Flush history
 			m.historyManager.FlushSession(id)
-			session.Close()
 			delete(m.sessions, id)
-			closedCount++
 		}
+	}
+
+	// Get callback before releasing lock
+	callback := m.onSessionClosed
+	m.mu.Unlock()
+
+	// Close sessions outside of lock to avoid deadlock
+	for _, session := range sessionsToClose {
+		session.Close()
 	}
 
 	// Update database - mark all sessions for this container as inactive
@@ -651,24 +661,47 @@ func (m *PTYManager) CloseSessionsForContainer(containerID uint) int {
 		Where("container_id = ?", containerID).
 		Update("active", false)
 
-	return closedCount
+	// Notify monitoring service for each closed session
+	if callback != nil {
+		for _, sessionID := range sessionIDs {
+			callback(containerID, sessionID)
+		}
+	}
+
+	if len(sessionsToClose) > 0 {
+		fmt.Printf("[PTYManager] Closed %d sessions for container %d, notified monitoring\n", len(sessionsToClose), containerID)
+	}
+
+	return len(sessionsToClose)
 }
 
 // CloseSessionsForDockerID closes all PTY sessions for a specific Docker container ID
 func (m *PTYManager) CloseSessionsForDockerID(dockerID string) int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	closedCount := 0
+	var sessionsToClose []*PTYSession
+	var sessionIDs []string
+	var containerIDs []uint
 
+	// Collect sessions to close
 	for id, session := range m.sessions {
 		if session.DockerID == dockerID {
+			sessionsToClose = append(sessionsToClose, session)
+			sessionIDs = append(sessionIDs, id)
+			containerIDs = append(containerIDs, session.containerDBID)
 			// Flush history
 			m.historyManager.FlushSession(id)
-			session.Close()
 			delete(m.sessions, id)
-			closedCount++
 		}
+	}
+
+	// Get callback before releasing lock
+	callback := m.onSessionClosed
+	m.mu.Unlock()
+
+	// Close sessions outside of lock to avoid deadlock
+	for _, session := range sessionsToClose {
+		session.Close()
 	}
 
 	// Update database
@@ -676,5 +709,16 @@ func (m *PTYManager) CloseSessionsForDockerID(dockerID string) int {
 		Where("docker_id = ?", dockerID).
 		Update("active", false)
 
-	return closedCount
+	// Notify monitoring service for each closed session
+	if callback != nil {
+		for i, sessionID := range sessionIDs {
+			callback(containerIDs[i], sessionID)
+		}
+	}
+
+	if len(sessionsToClose) > 0 {
+		fmt.Printf("[PTYManager] Closed %d sessions for Docker ID %s, notified monitoring\n", len(sessionsToClose), dockerID[:12])
+	}
+
+	return len(sessionsToClose)
 }

@@ -314,6 +314,26 @@ func (m *Manager) RemoveSession(containerID uint) {
 	}
 }
 
+// RemoveAllSessionsForContainer removes and closes all monitoring sessions for a container.
+// This should be called when a container is stopped to clean up resources.
+func (m *Manager) RemoveAllSessionsForContainer(containerID uint) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var removedCount int
+	for id, session := range m.sessions {
+		if session.ContainerID == containerID {
+			session.Close()
+			delete(m.sessions, id)
+			removedCount++
+		}
+	}
+	
+	if removedCount > 0 {
+		fmt.Printf("[Manager] Removed %d monitoring sessions for stopped container %d\n", removedCount, containerID)
+	}
+}
+
 // EnableMonitoringForPTY enables monitoring for a specific PTY session.
 func (m *Manager) EnableMonitoringForPTY(ptySessionID string) error {
 	session := m.GetSessionByPTY(ptySessionID)

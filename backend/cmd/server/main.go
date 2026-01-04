@@ -89,6 +89,18 @@ func main() {
 	monitoringService := services.NewMonitoringService(db, terminalService)
 	defer monitoringService.Close()
 
+	// Initialize Docker event listener for container lifecycle events
+	dockerEventListener, err := monitoring.NewDockerEventListener(monitoringService.GetManager())
+	if err != nil {
+		log.Printf("Warning: Failed to initialize Docker event listener: %v", err)
+	} else {
+		if err := dockerEventListener.Start(); err != nil {
+			log.Printf("Warning: Failed to start Docker event listener: %v", err)
+		} else {
+			defer dockerEventListener.Close()
+		}
+	}
+
 	// Initialize cleanup manager for graceful shutdown
 	cleanupManager := monitoring.NewCleanupManager(monitoringService.GetManager())
 

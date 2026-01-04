@@ -235,6 +235,11 @@ func (s *MonitoringSession) DetectClaudeProcess() bool {
 		return false
 	}
 
+	// Check if session is closed
+	if s.IsClosed() {
+		return false
+	}
+
 	// Get the shell PID for this PTY session by checking the exec process
 	// The PTYSessionID is the Docker exec ID, we need to find its PID
 	// Method: Use ps to find processes with "claude" in the command
@@ -244,7 +249,17 @@ func (s *MonitoringSession) DetectClaudeProcess() bool {
 	cmd := []string{"sh", "-c", "pgrep -a -f 'claude' 2>/dev/null || true"}
 	output, err := s.execInContainer(cmd)
 	if err != nil {
-		fmt.Printf("[Session] Failed to detect Claude process: %v\n", err)
+		// Check if error is due to container not running
+		errStr := err.Error()
+		if strings.Contains(errStr, "is not running") || 
+		   strings.Contains(errStr, "No such container") ||
+		   strings.Contains(errStr, "container not found") {
+			// Container stopped - close this session
+			fmt.Printf("[Session] Container %d stopped, closing monitoring session %s\n", s.ContainerID, s.PTYSessionID)
+			go s.Close() // Close in goroutine to avoid deadlock
+			return false
+		}
+		// Only log other errors occasionally to avoid spam
 		return false
 	}
 

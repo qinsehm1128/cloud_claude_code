@@ -173,7 +173,8 @@ func (h *ContainerHandler) StopContainer(c *gin.Context) {
 		return
 	}
 
-	// Close active terminal sessions for this container
+	// Close active terminal sessions for this container first
+	// This helps speed up container stop by closing PTY connections
 	if h.terminalService != nil {
 		closedSessions := h.terminalService.CloseSessionsForContainer(id)
 		if closedSessions > 0 {
@@ -182,21 +183,34 @@ func (h *ContainerHandler) StopContainer(c *gin.Context) {
 		}
 	}
 
-	// Use a background context with longer timeout for Docker stop operation
-	// This prevents HTTP request timeout from canceling the Docker operation
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Use a background context with timeout for Docker stop operation
+	// Docker stop can take time if processes don't respond to SIGTERM
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	if err := h.containerService.StopContainer(ctx, id); err != nil {
-		if err == services.ErrContainerNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+	// Run stop operation in goroutine and return early if it takes too long
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- h.containerService.StopContainer(ctx, id)
+	}()
+
+	// Wait for stop to complete or timeout after 10 seconds for HTTP response
+	// The actual Docker stop will continue in background
+	select {
+	case err := <-errChan:
+		if err != nil {
+			if err == services.ErrContainerNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		c.JSON(http.StatusOK, gin.H{"message": "Container stopped successfully"})
+	case <-time.After(10 * time.Second):
+		// Return success early - the stop operation will continue in background
+		c.JSON(http.StatusAccepted, gin.H{"message": "Container stop initiated, please refresh to check status"})
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Container stopped successfully"})
 }
 
 // DeleteContainer deletes a container
@@ -207,25 +221,38 @@ func (h *ContainerHandler) DeleteContainer(c *gin.Context) {
 		return
 	}
 
-	// Close active terminal sessions for this container
+	// Close active terminal sessions for this container first
+	// This ensures monitoring sessions are also cleaned up
 	if h.terminalService != nil {
 		h.terminalService.CloseSessionsForContainer(id)
 	}
 
-	// Use a background context with longer timeout for Docker delete operation
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Use a background context with timeout for Docker delete operation
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	if err := h.containerService.DeleteContainer(ctx, id); err != nil {
-		if err == services.ErrContainerNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+	// Run delete operation in goroutine and return early if it takes too long
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- h.containerService.DeleteContainer(ctx, id)
+	}()
+
+	// Wait for delete to complete or timeout after 10 seconds for HTTP response
+	select {
+	case err := <-errChan:
+		if err != nil {
+			if err == services.ErrContainerNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		c.JSON(http.StatusOK, gin.H{"message": "Container deleted successfully"})
+	case <-time.After(10 * time.Second):
+		// Return success early - the delete operation will continue in background
+		c.JSON(http.StatusAccepted, gin.H{"message": "Container delete initiated, please refresh to check status"})
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Container deleted successfully"})
 }
 
 // GetContainerStatus gets the current status of a container (for polling)
