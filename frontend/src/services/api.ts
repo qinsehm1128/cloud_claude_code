@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { toast } from '@/components/ui/toast'
 
 const api = axios.create({
   baseURL: '/api',
@@ -6,16 +7,45 @@ const api = axios.create({
   withCredentials: true, // Send cookies with requests
 })
 
-// Response interceptor to handle auth errors
+// Response interceptor to handle auth errors and show error toasts
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Handle auth errors
     if (error.response?.status === 401) {
       // Redirect to login if not already there
       if (window.location.pathname !== '/login') {
         window.location.href = '/login'
       }
+      return Promise.reject(error)
     }
+
+    // Show error toast for other errors
+    const errorMessage = error.response?.data?.error || error.message || 'Request failed'
+    const statusCode = error.response?.status
+    
+    // Don't show toast for cancelled requests
+    if (axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
+
+    // Show appropriate error message
+    if (statusCode === 404) {
+      toast.error('Not Found', errorMessage)
+    } else if (statusCode === 400) {
+      toast.error('Bad Request', errorMessage)
+    } else if (statusCode === 403) {
+      toast.error('Forbidden', errorMessage)
+    } else if (statusCode === 500) {
+      toast.error('Server Error', errorMessage)
+    } else if (error.code === 'ECONNABORTED') {
+      toast.error('Timeout', 'Request timed out')
+    } else if (!error.response) {
+      toast.error('Network Error', 'Unable to connect to server')
+    } else {
+      toast.error('Error', errorMessage)
+    }
+
     return Promise.reject(error)
   }
 )

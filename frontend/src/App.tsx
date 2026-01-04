@@ -1,10 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { useAuth } from './hooks/useAuth'
 import { MainLayout } from './components/layout/MainLayout'
+import { ToastProvider, useToast, setGlobalToast } from './components/ui/toast'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Settings from './pages/Settings'
-import Repositories from './pages/Repositories'
 import ContainerTerminal from './pages/ContainerTerminal'
 import Ports from './pages/Ports'
 import DockerContainers from './pages/DockerContainers'
@@ -25,29 +26,42 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />
 }
 
+// Component to initialize global toast
+function ToastInitializer() {
+  const { addToast } = useToast()
+  
+  useEffect(() => {
+    setGlobalToast(addToast)
+  }, [addToast])
+  
+  return null
+}
+
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route
-          path="/"
-          element={
-            <PrivateRoute>
-              <MainLayout />
-            </PrivateRoute>
-          }
-        >
-          <Route index element={<Dashboard />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="repositories" element={<Repositories />} />
-          <Route path="ports" element={<Ports />} />
-          <Route path="docker" element={<DockerContainers />} />
-          <Route path="automation-logs" element={<AutomationLogs />} />
-          <Route path="terminal/:containerId" element={<ContainerTerminal />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <ToastProvider>
+      <ToastInitializer />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/"
+            element={
+              <PrivateRoute>
+                <MainLayout />
+              </PrivateRoute>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="ports" element={<Ports />} />
+            <Route path="docker" element={<DockerContainers />} />
+            <Route path="automation-logs" element={<AutomationLogs />} />
+            <Route path="terminal/:containerId" element={<ContainerTerminal />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </ToastProvider>
   )
 }
 

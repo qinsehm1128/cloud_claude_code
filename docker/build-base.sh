@@ -97,18 +97,28 @@ if [ -d "${SCRIPT_DIR}/../vscode-extension" ]; then
     
     # Install dependencies and build
     if [ ! -d "node_modules" ]; then
+        echo "  - Installing dependencies..."
         npm install
     fi
+    echo "  - Compiling TypeScript..."
     npm run compile
     
     # Package extension
     if ! command -v vsce &> /dev/null; then
+        echo "  - Installing vsce..."
         npm install -g @vscode/vsce
     fi
-    vsce package --out "${EXTENSION_DIR}/pty-automation-monitor.vsix"
+    echo "  - Packaging extension..."
+    vsce package --out "${EXTENSION_DIR}/pty-automation-monitor.vsix" --allow-missing-repository
     
     cd "${SCRIPT_DIR}"
-    echo "✓ Built: pty-automation-monitor.vsix"
+    
+    if [ -f "${EXTENSION_DIR}/pty-automation-monitor.vsix" ]; then
+        echo "✓ Built: pty-automation-monitor.vsix"
+    else
+        echo "✗ Failed to build extension"
+        exit 1
+    fi
 else
     echo ""
     echo "[1/4] Warning: vscode-extension directory not found, skipping extension build"

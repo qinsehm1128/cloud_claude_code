@@ -119,14 +119,41 @@ export default function Ports() {
     const url = getServiceUrl(port, serviceName, codeServerDomain)
     
     try {
-      await fetch(url, { 
-        method: 'HEAD',
-        mode: 'no-cors' // Direct port access may have CORS issues
+      // Use a timeout for the test
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 5000)
+      
+      const response = await fetch(url, { 
+        method: 'GET',
+        mode: 'cors',
+        signal: controller.signal
       })
-      // With no-cors, we can't read the response, but if it doesn't throw, it's likely reachable
-      setTestStatus(prev => ({ ...prev, [id]: 'success' }))
+      clearTimeout(timeoutId)
+      
+      // Check if response is successful (2xx or 3xx)
+      if (response.ok || (response.status >= 300 && response.status < 400)) {
+        setTestStatus(prev => ({ ...prev, [id]: 'success' }))
+      } else {
+        setTestStatus(prev => ({ ...prev, [id]: 'error' }))
+      }
     } catch {
-      setTestStatus(prev => ({ ...prev, [id]: 'error' }))
+      // Try with no-cors as fallback (for cross-origin services)
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 5000)
+        
+        await fetch(url, { 
+          method: 'HEAD',
+          mode: 'no-cors',
+          signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+        
+        // With no-cors we can't read status, mark as unknown/success
+        setTestStatus(prev => ({ ...prev, [id]: 'success' }))
+      } catch {
+        setTestStatus(prev => ({ ...prev, [id]: 'error' }))
+      }
     }
     
     // Reset status after 3 seconds
