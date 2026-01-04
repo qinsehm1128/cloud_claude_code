@@ -68,9 +68,21 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	// Authenticate via query parameter (for WebSocket)
-	// Note: In production, consider using WebSocket subprotocol for token
-	token := c.Query("token")
+	// Authenticate via multiple sources:
+	// 1. Cookie (cc_token) - automatically sent with WebSocket for same-origin
+	// 2. Query parameter (token) - fallback for cross-origin or explicit token
+	var token string
+
+	// Try cookie first (httpOnly cookie is sent automatically with WebSocket)
+	if cookieToken, err := c.Cookie(middleware.TokenCookieName); err == nil && cookieToken != "" {
+		token = cookieToken
+	}
+
+	// Fallback to query parameter
+	if token == "" {
+		token = c.Query("token")
+	}
+
 	if token == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
 		return

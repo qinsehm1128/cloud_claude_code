@@ -107,7 +107,7 @@ export default function Settings() {
         <TabsList>
           <TabsTrigger value="github">GitHub</TabsTrigger>
           <TabsTrigger value="environment">Environment Variables</TabsTrigger>
-          <TabsTrigger value="automation">自动化</TabsTrigger>
+          <TabsTrigger value="automation">Automation</TabsTrigger>
         </TabsList>
 
         <TabsContent value="github">

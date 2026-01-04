@@ -54,7 +54,7 @@ const defaultConfig: GlobalAutomationConfig = {
   webhookHeaders: '{}',
   injectionCommand: '',
   injectionDelay: 0,
-  userPromptTemplate: '请继续执行以下任务:',
+  userPromptTemplate: 'Please continue with the following task:',
   queueEmptyNotification: true,
   aiEndpoint: '',
   aiApiKey: '',
@@ -65,10 +65,10 @@ const defaultConfig: GlobalAutomationConfig = {
 };
 
 const strategies = [
-  { value: 'webhook', label: 'Webhook 通知' },
-  { value: 'injection', label: '命令注入' },
-  { value: 'queue', label: '任务队列' },
-  { value: 'ai', label: 'AI 决策' },
+  { value: 'webhook', label: 'Webhook Notification' },
+  { value: 'injection', label: 'Command Injection' },
+  { value: 'queue', label: 'Task Queue' },
+  { value: 'ai', label: 'AI Decision' },
 ];
 
 export function AutomationSettings() {
@@ -98,16 +98,16 @@ export function AutomationSettings() {
     try {
       // Validate config
       if (config.defaultSilenceThreshold < 5 || config.defaultSilenceThreshold > 300) {
-        throw new Error('静默阈值必须在 5-300 秒之间');
+        throw new Error('Silence threshold must be between 5-300 seconds');
       }
       if (config.webhookRetryCount < 0 || config.webhookRetryCount > 10) {
-        throw new Error('重试次数必须在 0-10 之间');
+        throw new Error('Retry count must be between 0-10');
       }
       if (config.webhookHeaders) {
         try {
           JSON.parse(config.webhookHeaders);
         } catch {
-          throw new Error('Webhook Headers 必须是有效的 JSON');
+          throw new Error('Webhook Headers must be valid JSON');
         }
       }
 
@@ -116,7 +116,7 @@ export function AutomationSettings() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败');
+      setError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setSaving(false);
     }
@@ -130,13 +130,13 @@ export function AutomationSettings() {
     <div className="container max-w-4xl py-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">自动化设置</h1>
-          <p className="text-muted-foreground">配置 PTY 监控和自动化策略</p>
+          <h1 className="text-2xl font-bold">Automation Settings</h1>
+          <p className="text-muted-foreground">Configure PTY monitoring and automation strategies</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={handleReset}>
             <RefreshCw className="h-4 w-4 mr-2" />
-            重置
+            Reset
           </Button>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? (
@@ -146,7 +146,7 @@ export function AutomationSettings() {
             ) : (
               <Save className="h-4 w-4 mr-2" />
             )}
-            {saved ? '已保存' : '保存'}
+            {saved ? 'Saved' : 'Save'}
           </Button>
         </div>
       </div>
@@ -161,13 +161,13 @@ export function AutomationSettings() {
       {/* General Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>通用设置</CardTitle>
-          <CardDescription>配置默认的监控行为</CardDescription>
+          <CardTitle>General Settings</CardTitle>
+          <CardDescription>Configure default monitoring behavior</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <div className="flex justify-between">
-              <Label>默认静默阈值</Label>
+              <Label>Default Silence Threshold</Label>
               <span className="text-sm text-muted-foreground">
                 {config.defaultSilenceThreshold}s
               </span>
@@ -182,12 +182,12 @@ export function AutomationSettings() {
               step={5}
             />
             <p className="text-xs text-muted-foreground">
-              无输出超过此时间后触发策略 (5-300秒)
+              Trigger strategy after no output for this duration (5-300 seconds)
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label>默认策略</Label>
+            <Label>Default Strategy</Label>
             <Select
               value={config.defaultStrategy}
               onValueChange={(value) =>
@@ -212,8 +212,8 @@ export function AutomationSettings() {
       {/* Webhook Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>Webhook 设置</CardTitle>
-          <CardDescription>配置 Webhook 通知策略</CardDescription>
+          <CardTitle>Webhook Settings</CardTitle>
+          <CardDescription>Configure webhook notification strategy</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -229,7 +229,7 @@ export function AutomationSettings() {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>超时时间 (秒)</Label>
+              <Label>Timeout (seconds)</Label>
               <Input
                 type="number"
                 value={config.webhookTimeout}
@@ -241,7 +241,7 @@ export function AutomationSettings() {
               />
             </div>
             <div className="space-y-2">
-              <Label>重试次数</Label>
+              <Label>Retry Count</Label>
               <Input
                 type="number"
                 value={config.webhookRetryCount}
@@ -255,7 +255,7 @@ export function AutomationSettings() {
           </div>
 
           <div className="space-y-2">
-            <Label>自定义 Headers (JSON)</Label>
+            <Label>Custom Headers (JSON)</Label>
             <Textarea
               value={config.webhookHeaders}
               onChange={(e) =>
@@ -271,12 +271,12 @@ export function AutomationSettings() {
       {/* Injection Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>命令注入设置</CardTitle>
-          <CardDescription>配置命令注入策略</CardDescription>
+          <CardTitle>Command Injection Settings</CardTitle>
+          <CardDescription>Configure command injection strategy</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>注入命令</Label>
+            <Label>Injection Command</Label>
             <Input
               value={config.injectionCommand}
               onChange={(e) =>
@@ -285,12 +285,12 @@ export function AutomationSettings() {
               placeholder="echo 'continue'"
             />
             <p className="text-xs text-muted-foreground">
-              支持占位符: {'{container_id}'}, {'{session_id}'}, {'{timestamp}'}, {'{context}'}
+              Supports placeholders: {'{container_id}'}, {'{session_id}'}, {'{timestamp}'}, {'{context}'}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label>注入延迟 (毫秒)</Label>
+            <Label>Injection Delay (ms)</Label>
             <Input
               type="number"
               value={config.injectionDelay}
@@ -307,22 +307,22 @@ export function AutomationSettings() {
       {/* Queue Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>任务队列设置</CardTitle>
-          <CardDescription>配置任务队列策略</CardDescription>
+          <CardTitle>Task Queue Settings</CardTitle>
+          <CardDescription>Configure task queue strategy</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>提示词模板</Label>
+            <Label>Prompt Template</Label>
             <Textarea
               value={config.userPromptTemplate}
               onChange={(e) =>
                 setConfig({ ...config, userPromptTemplate: e.target.value })
               }
-              placeholder="请继续执行以下任务:"
+              placeholder="Please continue with the following task:"
               rows={3}
             />
             <p className="text-xs text-muted-foreground">
-              任务内容将追加到此模板后面
+              Task content will be appended after this template
             </p>
           </div>
         </CardContent>
@@ -333,12 +333,12 @@ export function AutomationSettings() {
       {/* AI Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>AI 策略设置</CardTitle>
-          <CardDescription>配置 AI 决策策略 (OpenAI 兼容 API)</CardDescription>
+          <CardTitle>AI Strategy Settings</CardTitle>
+          <CardDescription>Configure AI decision strategy (OpenAI compatible API)</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>API 端点</Label>
+            <Label>API Endpoint</Label>
             <Input
               value={config.aiEndpoint}
               onChange={(e) =>
@@ -362,7 +362,7 @@ export function AutomationSettings() {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>模型</Label>
+              <Label>Model</Label>
               <Input
                 value={config.aiModel}
                 onChange={(e) =>
@@ -372,7 +372,7 @@ export function AutomationSettings() {
               />
             </div>
             <div className="space-y-2">
-              <Label>超时时间 (秒)</Label>
+              <Label>Timeout (seconds)</Label>
               <Input
                 type="number"
                 value={config.aiTimeout}
@@ -386,19 +386,19 @@ export function AutomationSettings() {
           </div>
 
           <div className="space-y-2">
-            <Label>系统提示词</Label>
+            <Label>System Prompt</Label>
             <Textarea
               value={config.aiSystemPrompt}
               onChange={(e) =>
                 setConfig({ ...config, aiSystemPrompt: e.target.value })
               }
-              placeholder="你是一个编程助手，负责分析终端输出并决定下一步操作..."
+              placeholder="You are a programming assistant responsible for analyzing terminal output and deciding the next action..."
               rows={4}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>失败回退策略</Label>
+            <Label>Fallback Strategy</Label>
             <Select
               value={config.aiFallbackStrategy}
               onValueChange={(value) =>
@@ -417,7 +417,7 @@ export function AutomationSettings() {
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              AI 请求失败时使用的备用策略
+              Fallback strategy when AI request fails
             </p>
           </div>
         </CardContent>

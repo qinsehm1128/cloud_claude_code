@@ -46,10 +46,10 @@ const statusColors: Record<Task['status'], string> = {
 };
 
 const statusLabels: Record<Task['status'], string> = {
-  pending: '待执行',
-  running: '执行中',
-  completed: '已完成',
-  failed: '失败',
+  pending: 'Pending',
+  running: 'Running',
+  completed: 'Completed',
+  failed: 'Failed',
 };
 
 export function TaskPanel({
@@ -136,9 +136,9 @@ export function TaskPanel({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">
-          <h3 className="font-medium text-sm">任务队列</h3>
+          <h3 className="font-medium text-sm">Task Queue</h3>
           <Badge variant="secondary" className="text-xs">
-            {pendingCount} 待执行
+            {pendingCount} pending
           </Badge>
         </div>
         {tasks.length > 0 && (
@@ -160,7 +160,7 @@ export function TaskPanel({
             value={newTaskText}
             onChange={(e) => setNewTaskText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入新任务..."
+            placeholder="Enter new task..."
             className="flex-1"
           />
           <Button size="sm" onClick={handleAddTask} disabled={!newTaskText.trim()}>
@@ -174,8 +174,8 @@ export function TaskPanel({
         <div className="p-2">
           {tasks.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground text-sm">
-              <p>暂无任务</p>
-              <p className="text-xs mt-1">添加任务后，静默触发时将自动执行</p>
+              <p>No tasks</p>
+              <p className="text-xs mt-1">Tasks will be executed automatically when silence is triggered</p>
             </div>
           ) : (
             <div className="space-y-1">
@@ -251,12 +251,12 @@ export function TaskPanel({
         <div className="px-4 py-2 border-t text-xs text-muted-foreground">
           <div className="flex items-center justify-between">
             <span>
-              共 {tasks.length} 个任务，{completedCount} 已完成
+              {tasks.length} tasks, {completedCount} completed
             </span>
             {pendingCount > 0 && (
               <span className="flex items-center gap-1">
                 <ChevronRight className="h-3 w-3" />
-                下一个: {tasks.find((t) => t.status === 'pending')?.text.slice(0, 20)}...
+                Next: {tasks.find((t) => t.status === 'pending')?.text.slice(0, 20)}...
               </span>
             )}
           </div>

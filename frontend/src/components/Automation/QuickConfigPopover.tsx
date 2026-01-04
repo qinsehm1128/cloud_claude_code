@@ -32,10 +32,10 @@ interface QuickConfigPopoverProps {
 }
 
 const strategies = [
-  { value: 'webhook', label: 'Webhook 通知' },
-  { value: 'injection', label: '命令注入' },
-  { value: 'queue', label: '任务队列' },
-  { value: 'ai', label: 'AI 决策' },
+  { value: 'webhook', label: 'Webhook Notification' },
+  { value: 'injection', label: 'Command Injection' },
+  { value: 'queue', label: 'Task Queue' },
+  { value: 'ai', label: 'AI Decision' },
 ];
 
 export function QuickConfigPopover({
@@ -66,12 +66,12 @@ export function QuickConfigPopover({
       </PopoverTrigger>
       <PopoverContent className="w-80" align="end">
         <div className="space-y-4">
-          <h4 className="font-medium">快速配置</h4>
+          <h4 className="font-medium">Quick Config</h4>
 
           {/* Silence threshold */}
           <div className="space-y-2">
             <div className="flex justify-between">
-              <Label>静默阈值</Label>
+              <Label>Silence Threshold</Label>
               <span className="text-sm text-muted-foreground">
                 {localConfig.silenceThreshold}s
               </span>
@@ -86,13 +86,13 @@ export function QuickConfigPopover({
               step={5}
             />
             <p className="text-xs text-muted-foreground">
-              无输出超过此时间后触发策略 (5-300秒)
+              Trigger strategy after no output for this duration (5-300s)
             </p>
           </div>
 
           {/* Strategy selection */}
           <div className="space-y-2">
-            <Label>触发策略</Label>
+            <Label>Strategy</Label>
             <Select
               value={localConfig.activeStrategy}
               onValueChange={handleStrategyChange}
@@ -126,7 +126,7 @@ export function QuickConfigPopover({
 
           {localConfig.activeStrategy === 'injection' && (
             <div className="space-y-2">
-              <Label>注入命令</Label>
+              <Label>Injection Command</Label>
               <Input
                 value={localConfig.injectionCommand || ''}
                 onChange={(e) =>
@@ -138,14 +138,14 @@ export function QuickConfigPopover({
                 placeholder="echo 'continue'"
               />
               <p className="text-xs text-muted-foreground">
-                支持占位符: {'{container_id}'}, {'{session_id}'}, {'{timestamp}'}
+                Supports placeholders: {'{container_id}'}, {'{session_id}'}, {'{timestamp}'}
               </p>
             </div>
           )}
 
           {localConfig.activeStrategy === 'queue' && (
             <div className="space-y-2">
-              <Label>提示词模板</Label>
+              <Label>Prompt Template</Label>
               <Input
                 value={localConfig.userPromptTemplate || ''}
                 onChange={(e) =>
@@ -154,7 +154,7 @@ export function QuickConfigPopover({
                     userPromptTemplate: e.target.value,
                   })
                 }
-                placeholder="请继续执行以下任务:"
+                placeholder="Please continue with the following task:"
               />
             </div>
           )}
@@ -162,10 +162,10 @@ export function QuickConfigPopover({
           {/* Save button */}
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
-              取消
+              Cancel
             </Button>
             <Button size="sm" onClick={handleSave}>
-              保存
+              Save
             </Button>
           </div>
         </div>

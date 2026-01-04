@@ -668,7 +668,7 @@ export default function ContainerTerminal() {
         } overflow-hidden`}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
-          <h3 className="font-medium text-sm">任务队列</h3>
+          <h3 className="font-medium text-sm">Task Queue</h3>
           <div className="flex items-center gap-1">
             <TaskEditor
               tasks={tasks}

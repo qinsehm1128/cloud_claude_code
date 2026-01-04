@@ -32,9 +32,9 @@ interface MonitoringStatusBarProps {
 
 const strategyLabels: Record<string, string> = {
   webhook: 'Webhook',
-  injection: '命令注入',
-  queue: '任务队列',
-  ai: 'AI 决策',
+  injection: 'Command Injection',
+  queue: 'Task Queue',
+  ai: 'AI Decision',
 };
 
 const strategyColors: Record<string, string> = {
@@ -83,12 +83,12 @@ export function MonitoringStatusBar({
             {status.enabled ? (
               <>
                 <Pause className="h-4 w-4" />
-                监控中
+                Monitoring
               </>
             ) : (
               <>
                 <Play className="h-4 w-4" />
-                启用监控
+                Enable Monitoring
               </>
             )}
           </Button>
@@ -129,7 +129,7 @@ export function MonitoringStatusBar({
           {/* Queue size */}
           {status.strategy === 'queue' && status.queueSize > 0 && (
             <Badge variant="outline">
-              队列: {status.queueSize}
+              Queue: {status.queueSize}
             </Badge>
           )}
         </div>
@@ -166,7 +166,7 @@ export function MonitoringStatusBar({
             {/* Current task */}
             {status.currentTask && (
               <div>
-                <span className="text-muted-foreground">当前任务:</span>
+                <span className="text-muted-foreground">Current Task:</span>
                 <p className="truncate">{status.currentTask.text}</p>
               </div>
             )}
@@ -174,13 +174,13 @@ export function MonitoringStatusBar({
             {/* Last action */}
             {status.lastAction && (
               <div>
-                <span className="text-muted-foreground">上次动作:</span>
+                <span className="text-muted-foreground">Last Action:</span>
                 <p>
                   {status.lastAction.action}
                   {status.lastAction.success ? (
-                    <Badge variant="outline" className="ml-2 text-green-500">成功</Badge>
+                    <Badge variant="outline" className="ml-2 text-green-500">Success</Badge>
                   ) : (
-                    <Badge variant="outline" className="ml-2 text-red-500">失败</Badge>
+                    <Badge variant="outline" className="ml-2 text-red-500">Failed</Badge>
                   )}
                 </p>
               </div>
