@@ -78,10 +78,9 @@ func (s *InjectionStrategy) Execute(ctx context.Context, session *MonitoringSess
 }
 
 // Validate checks if the injection configuration is valid.
+// Validation is lenient - empty command is allowed (strategy will skip on execute).
 func (s *InjectionStrategy) Validate(config *models.MonitoringConfig) error {
-	if config.InjectionCommand == "" {
-		return fmt.Errorf("injection command is required")
-	}
+	// Allow empty command - strategy will skip on execute
 	return nil
 }
 

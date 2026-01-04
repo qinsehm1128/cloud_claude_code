@@ -134,13 +134,9 @@ func (a *AIStrategyAdapter) Execute(ctx context.Context, session *MonitoringSess
 }
 
 // Validate checks if the AI configuration is valid.
+// Validation is lenient - empty endpoint/model is allowed (strategy will fallback on execute).
 func (a *AIStrategyAdapter) Validate(config *models.MonitoringConfig) error {
-	if config.AIEndpoint == "" {
-		return fmt.Errorf("AI endpoint is required")
-	}
-	if config.AIModel == "" {
-		return fmt.Errorf("AI model is required")
-	}
+	// Allow empty config - strategy will use fallback on execute
 	return nil
 }
 

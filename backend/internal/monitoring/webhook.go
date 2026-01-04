@@ -76,12 +76,15 @@ func (s *WebhookStrategy) Execute(ctx context.Context, session *MonitoringSessio
 }
 
 // Validate checks if the webhook configuration is valid.
+// Validation is lenient - empty URL is allowed (strategy will skip on execute).
+// Only validates format if URL is provided.
 func (s *WebhookStrategy) Validate(config *models.MonitoringConfig) error {
+	// Allow empty URL - strategy will skip on execute
 	if config.WebhookURL == "" {
-		return fmt.Errorf("webhook URL is required")
+		return nil
 	}
 
-	// Validate URL format
+	// Validate URL format only if provided
 	_, err := url.ParseRequestURI(config.WebhookURL)
 	if err != nil {
 		return fmt.Errorf("invalid webhook URL: %w", err)
