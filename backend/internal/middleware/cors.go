@@ -7,8 +7,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// allowAllOrigins indicates if all origins should be allowed
+var allowAllOrigins = false
+
 // getAllowedOrigins returns the list of allowed origins based on environment
 func getAllowedOrigins() map[string]bool {
+	// Check for wildcard first
+	if customOrigins := os.Getenv("ALLOWED_ORIGINS"); customOrigins == "*" {
+		allowAllOrigins = true
+		return nil
+	}
+
 	// Default allowed origins for development
 	allowed := map[string]bool{
 		"http://localhost:3000":  true,
@@ -37,8 +46,16 @@ func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 
-		// Check if origin is allowed
-		if origin != "" && allowedOrigins[origin] {
+		// Allow all origins if wildcard is set
+		if allowAllOrigins {
+			if origin != "" {
+				c.Header("Access-Control-Allow-Origin", origin)
+			} else {
+				c.Header("Access-Control-Allow-Origin", "*")
+			}
+			c.Header("Access-Control-Allow-Credentials", "true")
+		} else if origin != "" && allowedOrigins[origin] {
+			// Check if origin is in whitelist
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}
@@ -58,5 +75,8 @@ func CORS() gin.HandlerFunc {
 
 // IsOriginAllowed checks if an origin is in the whitelist
 func IsOriginAllowed(origin string) bool {
+	if allowAllOrigins {
+		return true
+	}
 	return getAllowedOrigins()[origin]
 }
