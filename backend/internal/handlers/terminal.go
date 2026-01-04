@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"net"
 	"net/http"
+	"strings"
 
 	"cc-platform/internal/middleware"
 	"cc-platform/internal/models"
@@ -20,6 +22,43 @@ var upgrader = websocket.Upgrader{
 		// Use the same origin whitelist as CORS middleware
 		return middleware.IsOriginAllowed(origin)
 	},
+}
+
+// Docker internal network ranges
+var dockerNetworks = []string{
+	"172.16.0.0/12",  // Docker default bridge network
+	"192.168.0.0/16", // Docker custom networks
+	"10.0.0.0/8",     // Docker swarm overlay networks
+}
+
+// isDockerInternalIP checks if the IP is from Docker internal network
+func isDockerInternalIP(ipStr string) bool {
+	// Handle IPv6 mapped IPv4 addresses
+	if strings.HasPrefix(ipStr, "::ffff:") {
+		ipStr = strings.TrimPrefix(ipStr, "::ffff:")
+	}
+	
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	
+	for _, cidr := range dockerNetworks {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	
+	// Also allow localhost for development
+	if ip.IsLoopback() {
+		return true
+	}
+	
+	return false
 }
 
 // TerminalHandler handles terminal WebSocket endpoints
@@ -83,30 +122,39 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
+	// Check if request is from internal Docker network (container-to-host communication)
+	// These requests come from VS Code extension running inside containers
+	clientIP := c.ClientIP()
+	isInternalRequest := isDockerInternalIP(clientIP)
+
 	// Authenticate via multiple sources:
-	// 1. Cookie (cc_token) - automatically sent with WebSocket for same-origin
-	// 2. Query parameter (token) - fallback for cross-origin or explicit token
-	var token string
+	// 1. Internal Docker network - skip auth for container-internal requests
+	// 2. Cookie (cc_token) - automatically sent with WebSocket for same-origin
+	// 3. Query parameter (token) - fallback for cross-origin or explicit token
+	
+	if !isInternalRequest {
+		var token string
 
-	// Try cookie first (httpOnly cookie is sent automatically with WebSocket)
-	if cookieToken, err := c.Cookie(middleware.TokenCookieName); err == nil && cookieToken != "" {
-		token = cookieToken
-	}
+		// Try cookie first (httpOnly cookie is sent automatically with WebSocket)
+		if cookieToken, err := c.Cookie(middleware.TokenCookieName); err == nil && cookieToken != "" {
+			token = cookieToken
+		}
 
-	// Fallback to query parameter
-	if token == "" {
-		token = c.Query("token")
-	}
+		// Fallback to query parameter
+		if token == "" {
+			token = c.Query("token")
+		}
 
-	if token == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
-		return
-	}
+		if token == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})
+			return
+		}
 
-	_, err = h.authService.VerifyToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
-		return
+		_, err = h.authService.VerifyToken(token)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
+			return
+		}
 	}
 
 	// Get optional session ID for reconnection
