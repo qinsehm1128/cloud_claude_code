@@ -20,6 +20,12 @@ const (
 	SessionTimeout = 30 * time.Minute
 )
 
+// PTYOutputCallback is called when PTY produces output
+type PTYOutputCallback func(containerID uint, data []byte)
+
+// PTYSessionCreatedCallback is called when a new PTY session is created
+type PTYSessionCreatedCallback func(containerID uint, dockerID string, session *PTYSession)
+
 // PTYManager manages PTY sessions for containers
 type PTYManager struct {
 	db             *gorm.DB
@@ -27,6 +33,12 @@ type PTYManager struct {
 	historyManager *HistoryManager
 	sessions       map[string]*PTYSession // sessionID -> session
 	mu             sync.RWMutex
+	
+	// Callback for monitoring integration
+	onPTYOutput PTYOutputCallback
+	
+	// Callback for session creation
+	onSessionCreated PTYSessionCreatedCallback
 }
 
 // PTYSession represents an active PTY session that persists across WebSocket reconnections
@@ -41,6 +53,12 @@ type PTYSession struct {
 	
 	// History manager reference
 	historyManager *HistoryManager
+	
+	// PTY manager reference for callbacks
+	ptyManager *PTYManager
+	
+	// Container database ID for monitoring
+	containerDBID uint
 	
 	// Output channel for broadcasting to connected clients
 	outputChan  chan []byte
@@ -87,6 +105,34 @@ func NewPTYManager(db *gorm.DB) (*PTYManager, error) {
 	go manager.cleanupLoop()
 
 	return manager, nil
+}
+
+// SetPTYOutputCallback sets the callback for PTY output (used by monitoring)
+func (m *PTYManager) SetPTYOutputCallback(callback PTYOutputCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onPTYOutput = callback
+}
+
+// GetPTYOutputCallback returns the current PTY output callback
+func (m *PTYManager) GetPTYOutputCallback() PTYOutputCallback {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.onPTYOutput
+}
+
+// SetSessionCreatedCallback sets the callback for PTY session creation
+func (m *PTYManager) SetSessionCreatedCallback(callback PTYSessionCreatedCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onSessionCreated = callback
+}
+
+// GetSessionCreatedCallback returns the current session created callback
+func (m *PTYManager) GetSessionCreatedCallback() PTYSessionCreatedCallback {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.onSessionCreated
 }
 
 // restoreSessions restores session metadata from database (not the actual PTY connections)
@@ -204,6 +250,8 @@ func (m *PTYManager) CreateSession(ctx context.Context, dockerID string, contain
 		Width:          cols,
 		Height:         rows,
 		historyManager: m.historyManager,
+		ptyManager:     m,
+		containerDBID:  containerID,
 		outputChan:     make(chan []byte, 100),
 		clients:        make(map[string]chan []byte),
 		running:        true,
@@ -233,6 +281,11 @@ func (m *PTYManager) CreateSession(ctx context.Context, dockerID string, contain
 
 	// Start reading from PTY in background
 	go session.readLoop()
+
+	// Notify monitoring service about new session
+	if callback := m.GetSessionCreatedCallback(); callback != nil {
+		callback(containerID, dockerID, session)
+	}
 
 	return session, nil
 }
@@ -374,6 +427,13 @@ func (s *PTYSession) readLoop() {
 				// Save to history manager
 				s.historyManager.Write(s.ID, data)
 				s.lastActive = time.Now()
+
+				// Call monitoring callback (independent of WebSocket clients)
+				if s.ptyManager != nil {
+					if callback := s.ptyManager.GetPTYOutputCallback(); callback != nil {
+						callback(s.containerDBID, data)
+					}
+				}
 
 				// Broadcast to all connected clients
 				s.broadcastToClients(data)

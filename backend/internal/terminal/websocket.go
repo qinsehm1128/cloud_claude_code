@@ -125,6 +125,21 @@ func (s *TerminalService) Close() error {
 	return s.ptyManager.Close()
 }
 
+// SetPTYOutputCallback sets the callback for PTY output (used by monitoring)
+func (s *TerminalService) SetPTYOutputCallback(callback PTYOutputCallback) {
+	s.ptyManager.SetPTYOutputCallback(callback)
+}
+
+// SetSessionCreatedCallback sets the callback for PTY session creation
+func (s *TerminalService) SetSessionCreatedCallback(callback PTYSessionCreatedCallback) {
+	s.ptyManager.SetSessionCreatedCallback(callback)
+}
+
+// GetPTYManager returns the PTY manager for direct access
+func (s *TerminalService) GetPTYManager() *PTYManager {
+	return s.ptyManager
+}
+
 // HandleConnection handles a new WebSocket connection
 func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.Conn, dockerID string, containerID uint, sessionID string) error {
 	// Configure WebSocket

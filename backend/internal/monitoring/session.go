@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -41,8 +42,11 @@ type ActionSummary struct {
 type MonitoringSession struct {
 	ContainerID uint
 	DockerID    string
-	PTYSession  *terminal.PTYSession
+	PTYSession  *terminal.PTYSession // Optional - may be nil if no active PTY
 	Config      *models.MonitoringConfig
+
+	// Write function for injecting commands (set by manager)
+	writeToPTY func(data []byte) error
 
 	// State
 	enabled         bool
@@ -298,11 +302,23 @@ func (s *MonitoringSession) Context() context.Context {
 
 // WriteToPTY writes data to the PTY session.
 func (s *MonitoringSession) WriteToPTY(data []byte) error {
+	// Try the custom write function first (set by manager)
+	if s.writeToPTY != nil {
+		return s.writeToPTY(data)
+	}
+	// Fall back to PTYSession if available
 	if s.PTYSession == nil {
-		return nil
+		return fmt.Errorf("no PTY session or write function available")
 	}
 	_, err := s.PTYSession.Write(data)
 	return err
+}
+
+// SetWriteToPTY sets the function used to write to PTY.
+func (s *MonitoringSession) SetWriteToPTY(fn func(data []byte) error) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.writeToPTY = fn
 }
 
 // SetLastNotification records the last notification sent.

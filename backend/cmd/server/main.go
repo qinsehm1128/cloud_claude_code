@@ -115,6 +115,8 @@ func main() {
 	portHandler := handlers.NewPortHandler(portService)
 	proxyHandler := handlers.NewProxyHandler(containerService, db)
 	automationLogsHandler := handlers.NewAutomationLogsHandler(db)
+	monitoringHandler := handlers.NewMonitoringHandler(monitoringService)
+	taskQueueHandler := handlers.NewTaskQueueHandler(services.NewTaskQueueService(db))
 
 	// Public routes (with rate limiting for login)
 	router.POST("/api/auth/login", middleware.LoginRateLimit(), authHandler.Login)
@@ -177,6 +179,12 @@ func main() {
 		protected.DELETE("/logs/automation/cleanup", automationLogsHandler.DeleteOldLogs)
 		protected.GET("/logs/automation/:id", automationLogsHandler.GetLog)
 		protected.GET("/logs/automation/container/:containerId", automationLogsHandler.GetLogsByContainer)
+
+		// Monitoring routes
+		monitoringHandler.RegisterRoutes(protected)
+
+		// Task queue routes
+		taskQueueHandler.RegisterRoutes(protected)
 	}
 
 	// WebSocket routes (with JWT query param auth)

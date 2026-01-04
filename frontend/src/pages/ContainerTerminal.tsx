@@ -21,6 +21,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { TerminalWebSocket, HistoryLoadProgress } from '@/services/websocket'
 import { containerApi } from '@/services/api'
+import { monitoringApi, taskQueueApi, Task as ApiTask } from '@/services/monitoringApi'
 import FileBrowser from '@/components/FileManager/FileBrowser'
 import { MonitoringStatusBar, MonitoringStatus } from '@/components/Automation/MonitoringStatusBar'
 import { QuickConfigPopover, MonitoringConfig } from '@/components/Automation/QuickConfigPopover'
@@ -92,8 +93,80 @@ export default function ContainerTerminal() {
     activeStrategy: 'webhook',
   })
   const [tasks, setTasks] = useState<Task[]>([])
-  const [nextTaskId, setNextTaskId] = useState(1)
   const initializedRef = useRef(false)
+  const silenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Load monitoring config and tasks from backend
+  useEffect(() => {
+    if (!containerId) return
+    
+    const loadMonitoringData = async () => {
+      try {
+        // Load monitoring config
+        const configResponse = await monitoringApi.getConfig(parseInt(containerId))
+        const config = configResponse.data
+        setMonitoringConfig({
+          silenceThreshold: config.silence_threshold,
+          activeStrategy: config.active_strategy,
+          webhookUrl: config.webhook_url,
+          injectionCommand: config.injection_command,
+          userPromptTemplate: config.user_prompt_template,
+        })
+        setMonitoringStatus(prev => ({
+          ...prev,
+          enabled: config.enabled,
+          threshold: config.silence_threshold,
+          strategy: config.active_strategy,
+        }))
+      } catch (err) {
+        console.error('Failed to load monitoring config:', err)
+      }
+
+      try {
+        // Load tasks
+        const tasksResponse = await taskQueueApi.list(parseInt(containerId))
+        const loadedTasks: Task[] = tasksResponse.data.map((t: ApiTask) => ({
+          id: t.id,
+          text: t.text,
+          status: t.status as Task['status'],
+          order: t.order_index,
+        }))
+        setTasks(loadedTasks)
+        setMonitoringStatus(prev => ({
+          ...prev,
+          queueSize: loadedTasks.filter(t => t.status === 'pending').length,
+        }))
+      } catch (err) {
+        console.error('Failed to load tasks:', err)
+      }
+    }
+
+    loadMonitoringData()
+  }, [containerId])
+
+  // Silence duration timer - update every second when monitoring is enabled
+  useEffect(() => {
+    if (monitoringStatus.enabled) {
+      silenceTimerRef.current = setInterval(() => {
+        setMonitoringStatus(prev => ({
+          ...prev,
+          silenceDuration: prev.silenceDuration + 1,
+        }))
+      }, 1000)
+    } else {
+      if (silenceTimerRef.current) {
+        clearInterval(silenceTimerRef.current)
+        silenceTimerRef.current = null
+      }
+      setMonitoringStatus(prev => ({ ...prev, silenceDuration: 0 }))
+    }
+
+    return () => {
+      if (silenceTimerRef.current) {
+        clearInterval(silenceTimerRef.current)
+      }
+    }
+  }, [monitoringStatus.enabled])
 
   useEffect(() => {
     const fetchContainer = async () => {
@@ -227,6 +300,8 @@ export default function ContainerTerminal() {
           onMessage: (msg) => {
             if (msg.type === 'output' && msg.data) {
               term.write(msg.data)
+              // Reset silence duration when output is received
+              setMonitoringStatus(prev => ({ ...prev, silenceDuration: 0 }))
             } else if (msg.type === 'error' && msg.error) {
               console.error(msg.error)
             }
@@ -365,20 +440,34 @@ export default function ContainerTerminal() {
     if (!containerId) return
     try {
       const newEnabled = !monitoringStatus.enabled
-      // TODO: Call monitoring API when implemented
-      // await monitoringApi.toggle(containerId, newEnabled)
-      setMonitoringStatus(prev => ({ ...prev, enabled: newEnabled }))
+      if (newEnabled) {
+        await monitoringApi.enable(parseInt(containerId), {
+          silence_threshold: monitoringConfig.silenceThreshold,
+          active_strategy: monitoringConfig.activeStrategy,
+          webhook_url: monitoringConfig.webhookUrl,
+          injection_command: monitoringConfig.injectionCommand,
+          user_prompt_template: monitoringConfig.userPromptTemplate,
+        })
+      } else {
+        await monitoringApi.disable(parseInt(containerId))
+      }
+      setMonitoringStatus(prev => ({ ...prev, enabled: newEnabled, silenceDuration: 0 }))
     } catch (err) {
       console.error('Failed to toggle monitoring:', err)
     }
-  }, [containerId, monitoringStatus.enabled])
+  }, [containerId, monitoringStatus.enabled, monitoringConfig])
 
   // Handle monitoring config save
   const handleConfigSave = useCallback(async (config: MonitoringConfig) => {
     if (!containerId) return
     try {
-      // TODO: Call monitoring API when implemented
-      // await monitoringApi.updateConfig(containerId, config)
+      await monitoringApi.updateConfig(parseInt(containerId), {
+        silence_threshold: config.silenceThreshold,
+        active_strategy: config.activeStrategy,
+        webhook_url: config.webhookUrl,
+        injection_command: config.injectionCommand,
+        user_prompt_template: config.userPromptTemplate,
+      })
       setMonitoringConfig(config)
       setMonitoringStatus(prev => ({
         ...prev,
@@ -400,54 +489,81 @@ export default function ContainerTerminal() {
   }, [tabs, activeKey])
 
   // Task handlers
-  const handleAddTask = useCallback((text: string) => {
-    const newTask: Task = {
-      id: nextTaskId,
-      text,
-      status: 'pending',
-      order: tasks.length,
+  const handleAddTask = useCallback(async (text: string) => {
+    if (!containerId) return
+    try {
+      const response = await taskQueueApi.add(parseInt(containerId), text)
+      const newTask: Task = {
+        id: response.data.id,
+        text: response.data.text,
+        status: response.data.status as Task['status'],
+        order: response.data.order_index,
+      }
+      setTasks(prev => [...prev, newTask])
+      setMonitoringStatus(prev => ({ ...prev, queueSize: prev.queueSize + 1 }))
+    } catch (err) {
+      console.error('Failed to add task:', err)
     }
-    setTasks(prev => [...prev, newTask])
-    setNextTaskId(prev => prev + 1)
-    setMonitoringStatus(prev => ({ ...prev, queueSize: prev.queueSize + 1 }))
-    // TODO: Call task API when implemented
-  }, [nextTaskId, tasks.length])
+  }, [containerId])
 
-  const handleRemoveTask = useCallback((id: number) => {
-    setTasks(prev => prev.filter(t => t.id !== id))
-    setMonitoringStatus(prev => ({ ...prev, queueSize: Math.max(0, prev.queueSize - 1) }))
-    // TODO: Call task API when implemented
-  }, [])
+  const handleRemoveTask = useCallback(async (id: number) => {
+    if (!containerId) return
+    try {
+      await taskQueueApi.remove(parseInt(containerId), id)
+      setTasks(prev => prev.filter(t => t.id !== id))
+      setMonitoringStatus(prev => ({ ...prev, queueSize: Math.max(0, prev.queueSize - 1) }))
+    } catch (err) {
+      console.error('Failed to remove task:', err)
+    }
+  }, [containerId])
 
-  const handleReorderTasks = useCallback((taskIds: number[]) => {
-    setTasks(prev => {
-      const taskMap = new Map(prev.map(t => [t.id, t]))
-      return taskIds.map((id, index) => ({
-        ...taskMap.get(id)!,
-        order: index,
-      }))
-    })
-    // TODO: Call task API when implemented
-  }, [])
+  const handleReorderTasks = useCallback(async (taskIds: number[]) => {
+    if (!containerId) return
+    try {
+      await taskQueueApi.reorder(parseInt(containerId), taskIds)
+      setTasks(prev => {
+        const taskMap = new Map(prev.map(t => [t.id, t]))
+        return taskIds.map((id, index) => ({
+          ...taskMap.get(id)!,
+          order: index,
+        }))
+      })
+    } catch (err) {
+      console.error('Failed to reorder tasks:', err)
+    }
+  }, [containerId])
 
-  const handleClearTasks = useCallback(() => {
-    setTasks([])
-    setMonitoringStatus(prev => ({ ...prev, queueSize: 0 }))
-    // TODO: Call task API when implemented
-  }, [])
+  const handleClearTasks = useCallback(async () => {
+    if (!containerId) return
+    try {
+      await taskQueueApi.clear(parseInt(containerId))
+      setTasks([])
+      setMonitoringStatus(prev => ({ ...prev, queueSize: 0 }))
+    } catch (err) {
+      console.error('Failed to clear tasks:', err)
+    }
+  }, [containerId])
 
-  const handleImportTasks = useCallback((texts: string[]) => {
-    const newTasks: Task[] = texts.map((text, index) => ({
-      id: nextTaskId + index,
-      text,
-      status: 'pending',
-      order: tasks.length + index,
-    }))
-    setTasks(prev => [...prev, ...newTasks])
-    setNextTaskId(prev => prev + texts.length)
-    setMonitoringStatus(prev => ({ ...prev, queueSize: prev.queueSize + texts.length }))
-    // TODO: Call task API when implemented
-  }, [nextTaskId, tasks.length])
+  const handleImportTasks = useCallback(async (texts: string[]) => {
+    if (!containerId) return
+    try {
+      // Add tasks one by one since we don't have a batch import API
+      const newTasks: Task[] = []
+      for (const text of texts) {
+        const response = await taskQueueApi.add(parseInt(containerId), text)
+        newTasks.push({
+          id: response.data.id,
+          text: response.data.text,
+          status: response.data.status as Task['status'],
+          order: response.data.order_index,
+        })
+      }
+      setTasks(prev => [...prev, ...newTasks])
+      setMonitoringStatus(prev => ({ ...prev, queueSize: prev.queueSize + texts.length }))
+    } catch (err) {
+      console.error('Failed to import tasks:', err)
+    }
+  }, [containerId])
 
   if (loading) {
     return (

@@ -51,14 +51,15 @@ func (m *Manager) SetStrategyEngine(engine StrategyEngine) {
 }
 
 // GetOrCreateSession gets an existing monitoring session or creates a new one.
+// PTYSession can be nil - monitoring will still work via the PTY output callback.
 func (m *Manager) GetOrCreateSession(containerID uint, dockerID string, ptySession *terminal.PTYSession) (*MonitoringSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Check for existing session
 	if session, exists := m.sessions[containerID]; exists {
-		// Update PTY session reference if changed
-		if session.PTYSession != ptySession {
+		// Update PTY session reference if provided and changed
+		if ptySession != nil && session.PTYSession != ptySession {
 			session.PTYSession = ptySession
 		}
 		return session, nil
@@ -70,7 +71,7 @@ func (m *Manager) GetOrCreateSession(containerID uint, dockerID string, ptySessi
 		return nil, fmt.Errorf("failed to load monitoring config: %w", err)
 	}
 
-	// Create new session
+	// Create new session (PTYSession can be nil)
 	session := NewMonitoringSession(containerID, dockerID, ptySession, config)
 
 	// Set up silence threshold callback
@@ -79,6 +80,22 @@ func (m *Manager) GetOrCreateSession(containerID uint, dockerID string, ptySessi
 	m.sessions[containerID] = session
 
 	return session, nil
+}
+
+// EnsureSession ensures a monitoring session exists for a container.
+// Creates one if it doesn't exist, using the provided Docker ID.
+// This is called when PTY output is received to ensure monitoring is active.
+func (m *Manager) EnsureSession(containerID uint, dockerID string) (*MonitoringSession, error) {
+	m.mu.RLock()
+	session, exists := m.sessions[containerID]
+	m.mu.RUnlock()
+
+	if exists {
+		return session, nil
+	}
+
+	// Create session without PTYSession - it will receive output via callback
+	return m.GetOrCreateSession(containerID, dockerID, nil)
 }
 
 // GetSession returns a monitoring session by container ID.
@@ -114,6 +131,7 @@ func (m *Manager) EnableMonitoring(containerID uint) error {
 	}
 
 	session.Enable()
+	fmt.Printf("[Manager] Monitoring enabled for container %d\n", containerID)
 	return nil
 }
 

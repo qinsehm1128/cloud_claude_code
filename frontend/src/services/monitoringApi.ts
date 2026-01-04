@@ -1,108 +1,109 @@
-import axios from 'axios';
-
-const API_BASE = '/api';
+import api from './api'
 
 export interface MonitoringStatus {
-  enabled: boolean;
-  silenceDuration: number;
-  threshold: number;
-  strategy: string;
-  queueSize: number;
-  currentTask?: {
-    id: number;
-    text: string;
-    status: string;
-  };
-  lastAction?: {
-    strategy: string;
-    action: string;
-    timestamp: string;
-    success: boolean;
-  };
+  container_id: number
+  enabled: boolean
+  silence_duration: number
+  threshold: number
+  strategy: string
+  queue_size: number
+  current_task?: {
+    id: number
+    text: string
+    status: string
+  }
+  last_action?: {
+    strategy: string
+    action: string
+    timestamp: string
+    success: boolean
+  }
 }
 
 export interface MonitoringConfig {
-  silenceThreshold: number;
-  activeStrategy: string;
-  webhookUrl?: string;
-  webhookTimeout?: number;
-  webhookRetryCount?: number;
-  webhookHeaders?: Record<string, string>;
-  injectionCommand?: string;
-  injectionDelay?: number;
-  userPromptTemplate?: string;
-  aiEndpoint?: string;
-  aiApiKey?: string;
-  aiModel?: string;
-  aiTimeout?: number;
-  aiSystemPrompt?: string;
-  aiFallbackStrategy?: string;
+  id?: number
+  container_id: number
+  enabled: boolean
+  silence_threshold: number
+  active_strategy: string
+  webhook_url?: string
+  injection_command?: string
+  user_prompt_template?: string
+  context_buffer_size: number
 }
 
-export interface ContextBuffer {
-  data: string;
-  size: number;
-  capacity: number;
+export interface StrategyInfo {
+  name: string
+  description: string
+  enabled: boolean
 }
 
+export interface Task {
+  id: number
+  container_id: number
+  text: string
+  status: string
+  order_index: number
+  created_at: string
+  updated_at: string
+}
+
+// Monitoring API
 export const monitoringApi = {
-  // Get monitoring status for a container
-  getStatus: async (containerId: number | string): Promise<MonitoringStatus> => {
-    const response = await axios.get(`${API_BASE}/monitoring/${containerId}/status`);
-    return response.data;
-  },
+  // Get monitoring status
+  getStatus: (containerId: number) =>
+    api.get<MonitoringStatus>(`/monitoring/${containerId}/status`),
 
-  // Enable monitoring for a container
-  enable: async (containerId: number | string): Promise<void> => {
-    await axios.post(`${API_BASE}/monitoring/${containerId}/enable`);
-  },
+  // Get monitoring config
+  getConfig: (containerId: number) =>
+    api.get<MonitoringConfig>(`/monitoring/${containerId}/config`),
 
-  // Disable monitoring for a container
-  disable: async (containerId: number | string): Promise<void> => {
-    await axios.post(`${API_BASE}/monitoring/${containerId}/disable`);
-  },
+  // Update monitoring config
+  updateConfig: (containerId: number, config: Partial<MonitoringConfig>) =>
+    api.put(`/monitoring/${containerId}/config`, config),
 
-  // Toggle monitoring for a container
-  toggle: async (containerId: number | string, enabled: boolean): Promise<void> => {
-    if (enabled) {
-      await monitoringApi.enable(containerId);
-    } else {
-      await monitoringApi.disable(containerId);
-    }
-  },
+  // Enable monitoring
+  enable: (containerId: number, config?: Partial<MonitoringConfig>) =>
+    api.post(`/monitoring/${containerId}/enable`, config || {}),
 
-  // Get monitoring configuration for a container
-  getConfig: async (containerId: number | string): Promise<MonitoringConfig> => {
-    const response = await axios.get(`${API_BASE}/monitoring/${containerId}/config`);
-    return response.data;
-  },
+  // Disable monitoring
+  disable: (containerId: number) =>
+    api.post(`/monitoring/${containerId}/disable`),
 
-  // Update monitoring configuration for a container
-  updateConfig: async (containerId: number | string, config: Partial<MonitoringConfig>): Promise<void> => {
-    await axios.put(`${API_BASE}/monitoring/${containerId}/config`, config);
-  },
+  // Get context buffer
+  getContextBuffer: (containerId: number) =>
+    api.get<{ context: string }>(`/monitoring/${containerId}/context`),
 
-  // Get context buffer for a container
-  getContextBuffer: async (containerId: number | string): Promise<ContextBuffer> => {
-    const response = await axios.get(`${API_BASE}/monitoring/${containerId}/context`);
-    return response.data;
-  },
+  // List available strategies
+  listStrategies: () =>
+    api.get<StrategyInfo[]>('/monitoring/strategies'),
+}
 
-  // Get global automation configuration
-  getGlobalConfig: async (): Promise<MonitoringConfig> => {
-    const response = await axios.get(`${API_BASE}/monitoring/config`);
-    return response.data;
-  },
+// Task Queue API
+export const taskQueueApi = {
+  // List tasks for a container
+  list: (containerId: number) =>
+    api.get<Task[]>(`/tasks/${containerId}`),
 
-  // Update global automation configuration
-  updateGlobalConfig: async (config: Partial<MonitoringConfig>): Promise<void> => {
-    await axios.put(`${API_BASE}/monitoring/config`, config);
-  },
+  // Add a task
+  add: (containerId: number, text: string) =>
+    api.post<Task>(`/tasks/${containerId}`, { text }),
 
-  // Manually trigger strategy execution
-  triggerStrategy: async (containerId: number | string): Promise<void> => {
-    await axios.post(`${API_BASE}/monitoring/${containerId}/trigger`);
-  },
-};
+  // Remove a task
+  remove: (containerId: number, taskId: number) =>
+    api.delete(`/tasks/${containerId}/${taskId}`),
 
-export default monitoringApi;
+  // Reorder tasks
+  reorder: (containerId: number, taskIds: number[]) =>
+    api.put(`/tasks/${containerId}/reorder`, { task_ids: taskIds }),
+
+  // Clear all tasks
+  clear: (containerId: number) =>
+    api.delete(`/tasks/${containerId}`),
+
+  // Import tasks (batch add)
+  import: (containerId: number, texts: string[]) =>
+    api.post<Task[]>(`/tasks/${containerId}/import`, { texts }),
+}
+
+export default monitoringApi

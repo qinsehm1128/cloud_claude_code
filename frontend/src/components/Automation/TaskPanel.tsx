@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 export interface Task {
   id: number;
   text: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'in_progress' | 'completed' | 'skipped';
   order: number;
 }
 
@@ -33,23 +33,23 @@ interface TaskPanelProps {
 
 const statusIcons: Record<Task['status'], typeof Circle> = {
   pending: Circle,
-  running: PlayCircle,
+  in_progress: PlayCircle,
   completed: CheckCircle2,
-  failed: XCircle,
+  skipped: XCircle,
 };
 
 const statusColors: Record<Task['status'], string> = {
   pending: 'text-muted-foreground',
-  running: 'text-blue-500 animate-pulse',
+  in_progress: 'text-blue-500 animate-pulse',
   completed: 'text-green-500',
-  failed: 'text-red-500',
+  skipped: 'text-red-500',
 };
 
 const statusLabels: Record<Task['status'], string> = {
   pending: 'Pending',
-  running: 'Running',
+  in_progress: 'Running',
   completed: 'Completed',
-  failed: 'Failed',
+  skipped: 'Skipped',
 };
 
 export function TaskPanel({
@@ -221,7 +221,7 @@ export function TaskPanel({
                     </div>
 
                     {/* Status badge for running */}
-                    {task.status === 'running' && (
+                    {task.status === 'in_progress' && (
                       <Badge variant="secondary" className="text-xs">
                         {statusLabels[task.status]}
                       </Badge>
