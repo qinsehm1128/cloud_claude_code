@@ -1,0 +1,30 @@
+# Source files (only need compiled output)
+src/**
+**/*.ts
+!out/**
+
+# Development files
+.gitignore
+tsconfig.json
+.eslintrc*
+.prettierrc*
+
+# Test files
+**/*.test.js
+**/*.test.ts
+test/**
+tests/**
+
+# Build artifacts
+*.vsix
+
+# Documentation (optional, can include if needed)
+# README.md
+# CHANGELOG.md
+
+# Node modules dev dependencies (ws is needed at runtime)
+node_modules/.bin/**
+node_modules/@types/**
+node_modules/typescript/**
+node_modules/eslint/**
+node_modules/@typescript-eslint/**
