@@ -304,8 +304,8 @@ export function AutomationSettings() {
         </CardContent>
       </Card>
 
-      {/* Queue Settings */}
-      <Card>
+      {/* Queue Settings - Hidden for now, configure in task panel instead */}
+      {/* <Card>
         <CardHeader>
           <CardTitle>Task Queue Settings</CardTitle>
           <CardDescription>Configure task queue strategy</CardDescription>
@@ -326,7 +326,7 @@ export function AutomationSettings() {
             </p>
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
 
       <Separator />
 
