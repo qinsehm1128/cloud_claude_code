@@ -41,7 +41,7 @@ import { Badge } from '@/components/ui/badge';
 import { automationLogsApi, AutomationLog, LogsFilter, LogStats } from '@/services/automationLogsApi';
 
 const strategies = [
-  { value: '', label: 'All Strategies' },
+  { value: 'all', label: 'All Strategies' },
   { value: 'webhook', label: 'Webhook' },
   { value: 'injection', label: 'Injection' },
   { value: 'queue', label: 'Queue' },
@@ -49,7 +49,7 @@ const strategies = [
 ];
 
 const results = [
-  { value: '', label: 'All Results' },
+  { value: 'all', label: 'All Results' },
   { value: 'success', label: 'Success' },
   { value: 'failed', label: 'Failed' },
   { value: 'skipped', label: 'Skipped' },
@@ -262,9 +262,9 @@ export function AutomationLogs() {
               <div className="space-y-2">
                 <Label>Strategy Type</Label>
                 <Select
-                  value={filter.strategy || ''}
+                  value={filter.strategy || 'all'}
                   onValueChange={(value) =>
-                    setFilter({ ...filter, strategy: value || undefined, page: 1 })
+                    setFilter({ ...filter, strategy: value === 'all' ? undefined : value, page: 1 })
                   }
                 >
                   <SelectTrigger>
@@ -282,9 +282,9 @@ export function AutomationLogs() {
               <div className="space-y-2">
                 <Label>Result</Label>
                 <Select
-                  value={filter.result || ''}
+                  value={filter.result || 'all'}
                   onValueChange={(value) =>
-                    setFilter({ ...filter, result: value || undefined, page: 1 })
+                    setFilter({ ...filter, result: value === 'all' ? undefined : value, page: 1 })
                   }
                 >
                   <SelectTrigger>
