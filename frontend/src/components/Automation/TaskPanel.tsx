@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 export interface Task {
   id: number;
   text: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'skipped';
+  status: 'pending' | 'in_progress' | 'completed' | 'skipped' | 'failed';
   order: number;
 }
 
@@ -36,13 +36,15 @@ const statusIcons: Record<Task['status'], typeof Circle> = {
   in_progress: PlayCircle,
   completed: CheckCircle2,
   skipped: XCircle,
+  failed: XCircle,
 };
 
 const statusColors: Record<Task['status'], string> = {
   pending: 'text-muted-foreground',
   in_progress: 'text-blue-500 animate-pulse',
   completed: 'text-green-500',
-  skipped: 'text-red-500',
+  skipped: 'text-yellow-500',
+  failed: 'text-red-500',
 };
 
 const statusLabels: Record<Task['status'], string> = {
@@ -50,6 +52,7 @@ const statusLabels: Record<Task['status'], string> = {
   in_progress: 'Running',
   completed: 'Completed',
   skipped: 'Skipped',
+  failed: 'Failed',
 };
 
 export function TaskPanel({
@@ -220,9 +223,12 @@ export function TaskPanel({
                       </p>
                     </div>
 
-                    {/* Status badge for running */}
-                    {task.status === 'in_progress' && (
-                      <Badge variant="secondary" className="text-xs">
+                    {/* Status badge for running or failed */}
+                    {(task.status === 'in_progress' || task.status === 'failed') && (
+                      <Badge
+                        variant={task.status === 'failed' ? 'destructive' : 'secondary'}
+                        className="text-xs"
+                      >
                         {statusLabels[task.status]}
                       </Badge>
                     )}
