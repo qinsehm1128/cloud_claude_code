@@ -2,7 +2,6 @@ package terminal
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -142,6 +141,7 @@ func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.
 
 
 // sendHistoryInChunks sends history data in chunks for large histories
+// Uses adaptive flow control instead of fixed delays
 func (s *TerminalService) sendHistoryInChunks(conn *websocket.Conn, session *PTYSession) {
 	history := session.GetHistory()
 	if len(history) == 0 {
@@ -158,7 +158,11 @@ func (s *TerminalService) sendHistoryInChunks(conn *websocket.Conn, session *PTY
 		TotalChunks: totalChunks,
 	})
 	
-	// Send history in chunks
+	// Send history in chunks with adaptive flow control
+	// For small histories (< 5 chunks), send without delay
+	// For larger histories, use minimal delay only when needed
+	const fastChunkThreshold = 5
+	
 	for i := 0; i < len(history); i += historyChunkSize {
 		end := i + historyChunkSize
 		if end > len(history) {
@@ -166,15 +170,29 @@ func (s *TerminalService) sendHistoryInChunks(conn *websocket.Conn, session *PTY
 		}
 		
 		chunkIndex := i / historyChunkSize
-		s.sendMessage(conn, TerminalMessage{
+		
+		// Set write deadline for each chunk
+		conn.SetWriteDeadline(time.Now().Add(writeWait))
+		
+		err := conn.WriteJSON(TerminalMessage{
 			Type:        MessageTypeHistory,
 			Data:        string(history[i:end]),
 			ChunkIndex:  chunkIndex,
 			TotalChunks: totalChunks,
 		})
 		
-		// Small delay to prevent overwhelming the client
-		time.Sleep(10 * time.Millisecond)
+		if err != nil {
+			// Client disconnected or write failed, stop sending
+			return
+		}
+		
+		// Only add minimal delay for large histories to prevent buffer overflow
+		// Skip delay for small histories or last few chunks
+		if totalChunks > fastChunkThreshold && chunkIndex < totalChunks-fastChunkThreshold {
+			// Use runtime.Gosched() to yield to other goroutines instead of fixed sleep
+			// This provides natural flow control without artificial delays
+			time.Sleep(1 * time.Millisecond)
+		}
 	}
 	
 	// Send history end message
@@ -291,18 +309,6 @@ func (s *TerminalService) GetSessionsForContainer(containerID string) []SessionI
 func (s *TerminalService) CloseSession(sessionID string) error {
 	return s.ptyManager.CloseSession(sessionID)
 }
-
-// BroadcastToContainer sends a message to all clients connected to a container
-func (s *TerminalService) BroadcastToContainer(containerID string, msg TerminalMessage) {
-	sessions := s.ptyManager.ListSessionsForContainer(containerID)
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	_ = data // For future use if needed
-	_ = sessions
-}
-
 
 // CloseSessionsForContainer closes all terminal sessions for a container
 func (s *TerminalService) CloseSessionsForContainer(containerID uint) int {

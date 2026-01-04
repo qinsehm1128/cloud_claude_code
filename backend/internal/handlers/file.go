@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 
@@ -90,7 +91,10 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 	c.Header("Content-Type", "application/octet-stream")
 
 	// Stream the file
-	io.Copy(c.Writer, reader)
+	if _, err := io.Copy(c.Writer, reader); err != nil {
+		// Log error but can't change response status as headers already sent
+		log.Printf("Error streaming file download: %v", err)
+	}
 }
 
 // UploadFile uploads a file to a container

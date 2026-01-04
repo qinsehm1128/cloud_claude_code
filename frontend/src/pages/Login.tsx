@@ -20,16 +20,8 @@ export default function Login() {
     setError('')
 
     try {
-      const response = await authApi.login(username, password)
-      const token = response.data.token
-      
-      // Store token in localStorage
-      localStorage.setItem('token', token)
-      
-      // Also set cookie for proxy access (code-server, etc.)
-      // Cookie will be accessible by the backend for flexible auth
-      document.cookie = `cc_token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`
-      
+      // Login - server sets httpOnly cookie automatically
+      await authApi.login(username, password)
       navigate('/')
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } }

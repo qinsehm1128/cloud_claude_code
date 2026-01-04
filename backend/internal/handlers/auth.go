@@ -2,10 +2,18 @@ package handlers
 
 import (
 	"net/http"
+	"os"
 
 	"cc-platform/internal/services"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	// Cookie name for JWT token
+	TokenCookieName = "cc_token"
+	// Cookie max age in seconds (24 hours)
+	TokenCookieMaxAge = 86400
 )
 
 // AuthHandler handles authentication endpoints
@@ -28,7 +36,12 @@ type LoginRequest struct {
 
 // LoginResponse represents the login response
 type LoginResponse struct {
-	Token string `json:"token"`
+	Message string `json:"message"`
+}
+
+// isProduction checks if running in production mode
+func isProduction() bool {
+	return os.Getenv("ENVIRONMENT") == "production"
 }
 
 // Login handles user login
@@ -49,12 +62,35 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, LoginResponse{Token: token})
+	// Set httpOnly cookie with the token
+	// In production, set Secure=true for HTTPS only
+	secure := isProduction()
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(
+		TokenCookieName,    // name
+		token,              // value
+		TokenCookieMaxAge,  // maxAge (24 hours)
+		"/",                // path
+		"",                 // domain (empty = current domain)
+		secure,             // secure (HTTPS only in production)
+		true,               // httpOnly (not accessible via JavaScript)
+	)
+
+	c.JSON(http.StatusOK, LoginResponse{Message: "Login successful"})
 }
 
 // Logout handles user logout
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// JWT is stateless, so logout is handled client-side by removing the token
+	// Clear the cookie by setting maxAge to -1
+	c.SetCookie(
+		TokenCookieName,
+		"",
+		-1,
+		"/",
+		"",
+		isProduction(),
+		true,
+	)
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 

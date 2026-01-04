@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config holds all configuration for the application
@@ -184,7 +185,11 @@ func getEnvInt(key string, defaultValue int) int {
 func generateRandomString(length int) string {
 	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {
-		panic(err)
+		// Fallback to a less secure but functional default
+		// This should never happen in practice as crypto/rand uses OS entropy
+		log.Printf("Warning: crypto/rand failed, using fallback: %v", err)
+		// Use a timestamp-based fallback (not cryptographically secure)
+		return hex.EncodeToString([]byte(strconv.FormatInt(time.Now().UnixNano(), 16)))[:length]
 	}
 	return hex.EncodeToString(bytes)[:length]
 }

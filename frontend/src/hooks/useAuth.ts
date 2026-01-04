@@ -6,18 +6,11 @@ export function useAuth() {
   const [loading, setLoading] = useState(true)
 
   const checkAuth = useCallback(async () => {
-    const token = localStorage.getItem('token')
-    if (!token) {
-      setIsAuthenticated(false)
-      setLoading(false)
-      return
-    }
-
     try {
+      // Cookie is sent automatically with credentials: 'include'
       await authApi.verify()
       setIsAuthenticated(true)
     } catch {
-      localStorage.removeItem('token')
       setIsAuthenticated(false)
     } finally {
       setLoading(false)
@@ -30,8 +23,7 @@ export function useAuth() {
 
   const login = async (username: string, password: string) => {
     const response = await authApi.login(username, password)
-    const { token } = response.data
-    localStorage.setItem('token', token)
+    // Cookie is set by the server (httpOnly)
     setIsAuthenticated(true)
     return response
   }
@@ -40,7 +32,7 @@ export function useAuth() {
     try {
       await authApi.logout()
     } finally {
-      localStorage.removeItem('token')
+      // Cookie is cleared by the server
       setIsAuthenticated(false)
     }
   }

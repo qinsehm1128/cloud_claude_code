@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 
+	"cc-platform/internal/middleware"
+	"cc-platform/internal/models"
 	"cc-platform/internal/services"
 	"cc-platform/internal/terminal"
 
@@ -14,8 +16,9 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// In production, implement proper origin checking
-		return true
+		origin := r.Header.Get("Origin")
+		// Use the same origin whitelist as CORS middleware
+		return middleware.IsOriginAllowed(origin)
 	},
 }
 
@@ -60,12 +63,13 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	if container.Status != "running" {
+	if container.Status != models.ContainerStatusRunning {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Container is not running"})
 		return
 	}
 
 	// Authenticate via query parameter (for WebSocket)
+	// Note: In production, consider using WebSocket subprotocol for token
 	token := c.Query("token")
 	if token == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authentication token"})

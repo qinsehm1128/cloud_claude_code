@@ -18,6 +18,16 @@ export interface HistoryLoadProgress {
   percent: number
 }
 
+// Helper to get cookie value
+function getCookie(name: string): string | null {
+  const value = `; ${document.cookie}`
+  const parts = value.split(`; ${name}=`)
+  if (parts.length === 2) {
+    return parts.pop()?.split(';').shift() || null
+  }
+  return null
+}
+
 export class TerminalWebSocket {
   private ws: WebSocket | null = null
   private reconnectAttempts = 0
@@ -64,18 +74,27 @@ export class TerminalWebSocket {
   }
 
   connect() {
-    const token = localStorage.getItem('token')
-    if (!token) {
-      this.onError('No authentication token')
-      return
-    }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    let wsUrl = `${protocol}//${window.location.host}/api/ws/terminal/${this.containerId}?token=${token}`
+    // Get token from httpOnly cookie (for same-origin) or fallback
+    // Note: httpOnly cookies are not accessible via JS, but WebSocket
+    // will send them automatically for same-origin requests.
+    // For cross-origin or when cookie is not httpOnly, we use query param.
+    const token = getCookie('cc_token')
     
-    // Add session ID for reconnection
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let wsUrl = `${protocol}//${window.location.host}/api/ws/terminal/${this.containerId}`
+    
+    // Build query params
+    const params = new URLSearchParams()
+    if (token) {
+      params.set('token', token)
+    }
     if (this.sessionId) {
-      wsUrl += `&session=${this.sessionId}`
+      params.set('session', this.sessionId)
+    }
+    
+    const queryString = params.toString()
+    if (queryString) {
+      wsUrl += `?${queryString}`
     }
 
     this.ws = new WebSocket(wsUrl)

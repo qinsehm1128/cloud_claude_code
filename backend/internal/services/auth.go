@@ -2,6 +2,8 @@ package services
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"time"
 
 	"cc-platform/internal/config"
@@ -16,6 +18,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInvalidToken       = errors.New("invalid token")
 	ErrTokenExpired       = errors.New("token expired")
+	ErrAuthInitFailed     = errors.New("auth service initialization failed")
 )
 
 // Claims represents JWT claims
@@ -31,26 +34,28 @@ type AuthService struct {
 }
 
 // NewAuthService creates a new AuthService
-func NewAuthService(db *gorm.DB, cfg *config.Config) *AuthService {
+func NewAuthService(db *gorm.DB, cfg *config.Config) (*AuthService, error) {
 	svc := &AuthService{
 		db:     db,
 		config: cfg,
 	}
 
 	// Ensure admin user exists
-	svc.ensureAdminUser()
+	if err := svc.ensureAdminUser(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrAuthInitFailed, err)
+	}
 
-	return svc
+	return svc, nil
 }
 
 // ensureAdminUser creates or updates the admin user
-func (s *AuthService) ensureAdminUser() {
+func (s *AuthService) ensureAdminUser() error {
 	var user models.User
 	result := s.db.Where("username = ?", s.config.AdminUsername).First(&user)
 	
 	hashedPassword, err := crypto.HashPassword(s.config.AdminPassword)
 	if err != nil {
-		panic("Failed to hash admin password: " + err.Error())
+		return fmt.Errorf("failed to hash admin password: %w", err)
 	}
 
 	if result.Error == gorm.ErrRecordNotFound {
@@ -61,14 +66,17 @@ func (s *AuthService) ensureAdminUser() {
 		}
 		
 		if err := s.db.Create(&user).Error; err != nil {
-			panic("Failed to create admin user: " + err.Error())
+			return fmt.Errorf("failed to create admin user: %w", err)
 		}
+		log.Printf("Admin user '%s' created", s.config.AdminUsername)
 	} else {
 		// Update password if it changed (always update to ensure consistency)
 		if err := s.db.Model(&user).Update("password_hash", hashedPassword).Error; err != nil {
-			panic("Failed to update admin password: " + err.Error())
+			return fmt.Errorf("failed to update admin password: %w", err)
 		}
 	}
+	
+	return nil
 }
 
 // Login authenticates a user and returns a JWT token

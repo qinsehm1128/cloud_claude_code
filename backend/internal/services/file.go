@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -153,7 +154,10 @@ func (s *FileService) parseFindOutput(output, basePath string) ([]FileInfo, erro
 
 		// Parse size
 		var size int64
-		fmt.Sscanf(sizeStr, "%d", &size)
+		if _, err := fmt.Sscanf(sizeStr, "%d", &size); err != nil {
+			log.Printf("Warning: failed to parse file size '%s': %v", sizeStr, err)
+			size = 0
+		}
 
 		// Parse timestamp (Unix timestamp with decimal)
 		var modTime time.Time

@@ -48,7 +48,11 @@ func main() {
 	}
 
 	// Initialize services
-	authService := services.NewAuthService(db, cfg)
+	authService, err := services.NewAuthService(db, cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize auth service: %v", err)
+	}
+	
 	githubService := services.NewGitHubService(db, cfg)
 	claudeConfigService := services.NewClaudeConfigService(db, cfg)
 	portService := services.NewPortService(db)
@@ -76,10 +80,8 @@ func main() {
 	}
 	defer terminalService.Close()
 
-	// Display generated credentials if applicable
-	if cfg.AdminUsername != "" && cfg.AdminPassword != "" {
-		log.Printf("Admin credentials - Username: %s, Password: %s", cfg.AdminUsername, cfg.AdminPassword)
-	}
+	// Log startup info (without sensitive credentials)
+	log.Printf("Admin user: %s (password configured via .env)", cfg.AdminUsername)
 
 	// Setup Gin router
 	if cfg.Environment == "production" {
@@ -101,8 +103,8 @@ func main() {
 	portHandler := handlers.NewPortHandler(portService)
 	proxyHandler := handlers.NewProxyHandler(containerService, db)
 
-	// Public routes
-	router.POST("/api/auth/login", authHandler.Login)
+	// Public routes (with rate limiting for login)
+	router.POST("/api/auth/login", middleware.LoginRateLimit(), authHandler.Login)
 	router.POST("/api/auth/logout", authHandler.Logout)
 
 	// Protected routes

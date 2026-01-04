@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,35 @@ var (
 	ErrContainerAlreadyExists  = errors.New("container already exists")
 	ErrNoGitHubTokenConfigured = errors.New("GitHub token not configured")
 	ErrContainerNotReady       = errors.New("container initialization not complete")
+	ErrInvalidContainerName    = errors.New("invalid container name")
+	ErrInvalidCPULimit         = errors.New("invalid CPU limit")
+	ErrInvalidMemoryLimit      = errors.New("invalid memory limit")
 )
+
+// Container name validation regex (Docker naming rules)
+var containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
+// validateContainerName validates the container name
+func validateContainerName(name string) error {
+	if len(name) < 1 || len(name) > 63 {
+		return fmt.Errorf("%w: name must be 1-63 characters", ErrInvalidContainerName)
+	}
+	if !containerNameRegex.MatchString(name) {
+		return fmt.Errorf("%w: name can only contain alphanumeric characters, underscores, dots, and hyphens", ErrInvalidContainerName)
+	}
+	return nil
+}
+
+// validateResourceLimits validates CPU and memory limits
+func validateResourceLimits(cpuLimit float64, memoryLimit int64) error {
+	if cpuLimit < 0 || cpuLimit > 64 {
+		return fmt.Errorf("%w: must be between 0 and 64 cores", ErrInvalidCPULimit)
+	}
+	if memoryLimit < 0 || memoryLimit > 128*1024 { // Max 128GB
+		return fmt.Errorf("%w: must be between 0 and 131072 MB", ErrInvalidMemoryLimit)
+	}
+	return nil
+}
 
 // ContainerService handles container operations
 type ContainerService struct {
@@ -32,6 +61,11 @@ type ContainerService struct {
 	claudeService *ClaudeConfigService
 	githubService *GitHubService
 	initTasks     sync.Map // map[uint]context.CancelFunc
+	
+	// Goroutine lifecycle management
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewContainerService creates a new ContainerService
@@ -41,17 +75,46 @@ func NewContainerService(db *gorm.DB, cfg *config.Config, claudeService *ClaudeC
 		return nil, err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &ContainerService{
 		db:            db,
 		config:        cfg,
 		dockerClient:  dockerClient,
 		claudeService: claudeService,
 		githubService: githubService,
+		ctx:           ctx,
+		cancel:        cancel,
 	}, nil
 }
 
-// Close closes the container service
+// Close closes the container service and waits for all goroutines to finish
 func (s *ContainerService) Close() error {
+	// Cancel all running goroutines
+	s.cancel()
+	
+	// Cancel all init tasks
+	s.initTasks.Range(func(key, value interface{}) bool {
+		if cancel, ok := value.(context.CancelFunc); ok {
+			cancel()
+		}
+		return true
+	})
+	
+	// Wait for all goroutines to finish (with timeout)
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	
+	select {
+	case <-done:
+		// All goroutines finished
+	case <-time.After(10 * time.Second):
+		log.Println("Warning: timeout waiting for container service goroutines to finish")
+	}
+	
 	return s.dockerClient.Close()
 }
 
@@ -84,6 +147,16 @@ type CreateContainerInput struct {
 
 // CreateContainer creates a new container and automatically starts initialization
 func (s *ContainerService) CreateContainer(ctx context.Context, input CreateContainerInput) (*models.Container, error) {
+	// Validate container name
+	if err := validateContainerName(input.Name); err != nil {
+		return nil, err
+	}
+
+	// Validate resource limits
+	if err := validateResourceLimits(input.CPULimit, input.MemoryLimit); err != nil {
+		return nil, err
+	}
+
 	// Check if GitHub token is configured
 	if !s.githubService.HasToken() {
 		return nil, ErrNoGitHubTokenConfigured
@@ -238,8 +311,12 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	// Serialize port mappings to JSON for storage
 	portMappingsJSON := ""
 	if len(input.PortMappings) > 0 {
-		jsonBytes, _ := json.Marshal(input.PortMappings)
-		portMappingsJSON = string(jsonBytes)
+		jsonBytes, err := json.Marshal(input.PortMappings)
+		if err != nil {
+			log.Printf("Warning: failed to marshal port mappings: %v", err)
+		} else {
+			portMappingsJSON = string(jsonBytes)
+		}
 	}
 
 	// Calculate actual memory and CPU values for storage
@@ -322,7 +399,15 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	}
 
 	// Auto-start the container and begin initialization
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
+		select {
+		case <-s.ctx.Done():
+			log.Printf("Container %d auto-start cancelled: service shutting down", dbContainer.ID)
+			return
+		default:
+		}
 		if err := s.startAndInitialize(dbContainer.ID); err != nil {
 			log.Printf("Failed to auto-start container %d: %v", dbContainer.ID, err)
 		}
@@ -603,9 +688,17 @@ func (s *ContainerService) StartContainer(ctx context.Context, id uint) error {
 
 	// Start code-server if enabled (runs in background)
 	if container.EnableCodeServer {
+		s.wg.Add(1)
 		go func() {
-			// Wait a moment for container to fully start
-			time.Sleep(2 * time.Second)
+			defer s.wg.Done()
+			
+			// Wait a moment for container to fully start, but check for shutdown
+			select {
+			case <-s.ctx.Done():
+				log.Printf("code-server start cancelled for container %d: service shutting down", id)
+				return
+			case <-time.After(2 * time.Second):
+			}
 			
 			startCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

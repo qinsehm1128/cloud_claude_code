@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"cc-platform/internal/constants"
 	"cc-platform/internal/models"
 
 	"gorm.io/gorm"
@@ -89,42 +90,49 @@ func (s *PortService) RemoveAllPorts(containerID uint) error {
 	return s.db.Where("container_id = ?", containerID).Delete(&models.ContainerPort{}).Error
 }
 
-// ListAllPorts lists all exposed ports across all containers
+// PortWithContainerInfo is used for JOIN query results
+type PortWithContainerInfo struct {
+	ID               uint   `gorm:"column:id"`
+	ContainerID      uint   `gorm:"column:container_id"`
+	Port             int    `gorm:"column:port"`
+	Name             string `gorm:"column:name"`
+	Protocol         string `gorm:"column:protocol"`
+	AutoCreated      bool   `gorm:"column:auto_created"`
+	ContainerName    string `gorm:"column:container_name"`
+	CodeServerDomain string `gorm:"column:code_server_domain"`
+}
+
+// ListAllPorts lists all exposed ports across all containers using JOIN query
 func (s *PortService) ListAllPorts() ([]PortInfo, error) {
-	var ports []models.ContainerPort
-	if err := s.db.Find(&ports).Error; err != nil {
+	var results []PortWithContainerInfo
+
+	// Use JOIN to avoid N+1 query
+	err := s.db.Table("container_ports").
+		Select("container_ports.id, container_ports.container_id, container_ports.port, container_ports.name, container_ports.protocol, container_ports.auto_created, containers.name as container_name, containers.code_server_domain").
+		Joins("LEFT JOIN containers ON container_ports.container_id = containers.id").
+		Find(&results).Error
+
+	if err != nil {
 		return nil, err
 	}
 
-	// Get container names and code-server domains
-	containerNames := make(map[uint]string)
-	containerCodeDomains := make(map[uint]string)
-	var containers []models.Container
-	if err := s.db.Select("id", "name", "code_server_domain").Find(&containers).Error; err != nil {
-		return nil, err
-	}
-	for _, c := range containers {
-		containerNames[c.ID] = c.Name
-		containerCodeDomains[c.ID] = c.CodeServerDomain
-	}
-
-	// Build result
-	result := make([]PortInfo, len(ports))
-	for i, p := range ports {
-		result[i] = PortInfo{
-			ID:               p.ID,
-			ContainerID:      p.ContainerID,
-			ContainerName:    containerNames[p.ContainerID],
-			Port:             p.Port,
-			Name:             p.Name,
-			Protocol:         p.Protocol,
-			AutoCreated:      p.AutoCreated,
-			ProxyURL:         "", // Will be set by frontend based on current host
-			CodeServerDomain: containerCodeDomains[p.ContainerID],
+	// Convert to PortInfo
+	portInfos := make([]PortInfo, len(results))
+	for i, r := range results {
+		portInfos[i] = PortInfo{
+			ID:               r.ID,
+			ContainerID:      r.ContainerID,
+			ContainerName:    r.ContainerName,
+			Port:             r.Port,
+			Name:             r.Name,
+			Protocol:         r.Protocol,
+			AutoCreated:      r.AutoCreated,
+			ProxyURL:         "",
+			CodeServerDomain: r.CodeServerDomain,
 		}
 	}
 
-	return result, nil
+	return portInfos, nil
 }
 
 // GetPort gets a specific port mapping
@@ -141,41 +149,16 @@ func (s *PortService) GetPort(containerID uint, port int) (*models.ContainerPort
 
 // CleanupOrphanedPorts removes ports for containers that no longer exist
 func (s *PortService) CleanupOrphanedPorts() (int, error) {
-	// Get all container IDs that exist
-	var containers []models.Container
-	if err := s.db.Select("id").Find(&containers).Error; err != nil {
-		return 0, err
-	}
-	
-	existingIDs := make(map[uint]bool)
-	for _, c := range containers {
-		existingIDs[c.ID] = true
-	}
-	
-	// Get all ports
-	var ports []models.ContainerPort
-	if err := s.db.Find(&ports).Error; err != nil {
-		return 0, err
-	}
-	
-	// Find orphaned ports
-	var orphanedIDs []uint
-	for _, p := range ports {
-		if !existingIDs[p.ContainerID] {
-			orphanedIDs = append(orphanedIDs, p.ID)
-		}
-	}
-	
-	if len(orphanedIDs) == 0 {
-		return 0, nil
-	}
-	
-	// Delete orphaned ports
-	result := s.db.Delete(&models.ContainerPort{}, orphanedIDs)
+	// Use subquery to find orphaned ports
+	result := s.db.Exec(`
+		DELETE FROM container_ports 
+		WHERE container_id NOT IN (SELECT id FROM containers)
+	`)
+
 	if result.Error != nil {
 		return 0, result.Error
 	}
-	
+
 	return int(result.RowsAffected), nil
 }
 
@@ -184,7 +167,14 @@ func (s *PortService) StartCleanupRoutine(ctx context.Context, interval time.Dur
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		
+
+		// Run cleanup immediately on start
+		if count, err := s.CleanupOrphanedPorts(); err != nil {
+			log.Printf("Initial port cleanup error: %v", err)
+		} else if count > 0 {
+			log.Printf("Initial cleanup: removed %d orphaned port records", count)
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -200,4 +190,9 @@ func (s *PortService) StartCleanupRoutine(ctx context.Context, interval time.Dur
 			}
 		}
 	}()
+}
+
+// CleanupInterval returns the recommended cleanup interval
+func CleanupInterval() time.Duration {
+	return constants.PortCleanupInterval
 }
