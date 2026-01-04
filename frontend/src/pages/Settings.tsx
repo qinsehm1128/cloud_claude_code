@@ -107,7 +107,7 @@ export default function Settings() {
         <TabsList>
           <TabsTrigger value="github">GitHub</TabsTrigger>
           <TabsTrigger value="environment">Environment Variables</TabsTrigger>
-          <TabsTrigger value="automation">Automation</TabsTrigger>
+          {/* Automation tab hidden - configure in terminal panel instead */}
         </TabsList>
 
         <TabsContent value="github">
@@ -212,9 +212,10 @@ DEBUG=true`}
           </Card>
         </TabsContent>
 
-        <TabsContent value="automation">
+        {/* Automation tab content hidden - configure in terminal panel instead */}
+        {/* <TabsContent value="automation">
           <AutomationSettings />
-        </TabsContent>
+        </TabsContent> */}
       </Tabs>
     </div>
   )
