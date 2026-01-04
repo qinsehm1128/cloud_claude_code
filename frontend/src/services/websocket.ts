@@ -1,5 +1,5 @@
 export interface TerminalMessage {
-  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session' | 'close'
+  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session' | 'close' | 'monitoring_status' | 'task_update' | 'strategy_triggered'
   data?: string
   cols?: number
   rows?: number
@@ -8,6 +8,47 @@ export interface TerminalMessage {
   total_size?: number
   chunk_index?: number
   total_chunks?: number
+  // Monitoring fields
+  monitoring?: MonitoringStatusMessage
+  task?: TaskUpdateMessage
+  strategy?: StrategyTriggeredMessage
+}
+
+export interface MonitoringStatusMessage {
+  enabled: boolean
+  silenceDuration: number
+  threshold: number
+  strategy: string
+  queueSize: number
+  currentTask?: {
+    id: number
+    text: string
+    status: string
+  }
+}
+
+export interface TaskUpdateMessage {
+  action: 'added' | 'removed' | 'updated' | 'reordered' | 'cleared'
+  task?: {
+    id: number
+    text: string
+    status: string
+    order: number
+  }
+  tasks?: Array<{
+    id: number
+    text: string
+    status: string
+    order: number
+  }>
+}
+
+export interface StrategyTriggeredMessage {
+  strategy: string
+  action: string
+  success: boolean
+  timestamp: string
+  error?: string
 }
 
 export interface HistoryLoadProgress {
@@ -44,6 +85,9 @@ export class TerminalWebSocket {
   private onHistoryChunk?: (data: string, chunkIndex: number, totalChunks: number) => void
   private onHistoryEnd?: () => void
   private onHistoryProgress?: (progress: HistoryLoadProgress) => void
+  private onMonitoringStatus?: (status: MonitoringStatusMessage) => void
+  private onTaskUpdate?: (update: TaskUpdateMessage) => void
+  private onStrategyTriggered?: (event: StrategyTriggeredMessage) => void
 
   constructor(
     containerId: string,
@@ -57,6 +101,9 @@ export class TerminalWebSocket {
       onHistoryChunk?: (data: string, chunkIndex: number, totalChunks: number) => void
       onHistoryEnd?: () => void
       onHistoryProgress?: (progress: HistoryLoadProgress) => void
+      onMonitoringStatus?: (status: MonitoringStatusMessage) => void
+      onTaskUpdate?: (update: TaskUpdateMessage) => void
+      onStrategyTriggered?: (event: StrategyTriggeredMessage) => void
     },
     sessionId?: string
   ) {
@@ -71,6 +118,9 @@ export class TerminalWebSocket {
     this.onHistoryChunk = callbacks.onHistoryChunk
     this.onHistoryEnd = callbacks.onHistoryEnd
     this.onHistoryProgress = callbacks.onHistoryProgress
+    this.onMonitoringStatus = callbacks.onMonitoringStatus
+    this.onTaskUpdate = callbacks.onTaskUpdate
+    this.onStrategyTriggered = callbacks.onStrategyTriggered
   }
 
   connect() {
@@ -160,6 +210,24 @@ export class TerminalWebSocket {
             loading: false,
             percent: 100,
           })
+          return
+        }
+
+        // Handle monitoring status updates
+        if (msg.type === 'monitoring_status' && msg.monitoring) {
+          this.onMonitoringStatus?.(msg.monitoring)
+          return
+        }
+
+        // Handle task updates
+        if (msg.type === 'task_update' && msg.task) {
+          this.onTaskUpdate?.(msg.task as unknown as TaskUpdateMessage)
+          return
+        }
+
+        // Handle strategy triggered events
+        if (msg.type === 'strategy_triggered' && msg.strategy) {
+          this.onStrategyTriggered?.(msg.strategy as unknown as StrategyTriggeredMessage)
           return
         }
         

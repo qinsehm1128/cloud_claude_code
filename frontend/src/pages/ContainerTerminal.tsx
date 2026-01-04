@@ -9,6 +9,9 @@ import {
   AlertCircle,
   PanelLeftClose,
   PanelLeft,
+  PanelRightClose,
+  PanelRight,
+  ListTodo,
 } from 'lucide-react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
@@ -19,6 +22,10 @@ import { Progress } from '@/components/ui/progress'
 import { TerminalWebSocket, HistoryLoadProgress } from '@/services/websocket'
 import { containerApi } from '@/services/api'
 import FileBrowser from '@/components/FileManager/FileBrowser'
+import { MonitoringStatusBar, MonitoringStatus } from '@/components/Automation/MonitoringStatusBar'
+import { QuickConfigPopover, MonitoringConfig } from '@/components/Automation/QuickConfigPopover'
+import { TaskPanel, Task } from '@/components/Automation/TaskPanel'
+import { TaskEditor } from '@/components/Automation/TaskEditor'
 import 'xterm/css/xterm.css'
 
 interface Container {
@@ -71,7 +78,21 @@ export default function ContainerTerminal() {
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeKey, setActiveKey] = useState<string>('')
   const [filePanelOpen, setFilePanelOpen] = useState(false)
+  const [taskPanelOpen, setTaskPanelOpen] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus>({
+    enabled: false,
+    silenceDuration: 0,
+    threshold: 30,
+    strategy: 'webhook',
+    queueSize: 0,
+  })
+  const [monitoringConfig, setMonitoringConfig] = useState<MonitoringConfig>({
+    silenceThreshold: 30,
+    activeStrategy: 'webhook',
+  })
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [nextTaskId, setNextTaskId] = useState(1)
   const initializedRef = useRef(false)
 
   useEffect(() => {
@@ -279,7 +300,7 @@ export default function ContainerTerminal() {
     initTerminal()
   }, [activeKey, container, containerId, tabs])
 
-  // Refit terminal when file panel toggles
+  // Refit terminal when file panel or task panel toggles
   useEffect(() => {
     const timer = setTimeout(() => {
       tabs.forEach(tab => {
@@ -289,7 +310,7 @@ export default function ContainerTerminal() {
       })
     }, 300) // Wait for transition
     return () => clearTimeout(timer)
-  }, [filePanelOpen, tabs])
+  }, [filePanelOpen, taskPanelOpen, tabs])
 
   useEffect(() => {
     const handleResize = () => {
@@ -330,6 +351,95 @@ export default function ContainerTerminal() {
       activeTab.ws.send(escapedPath)
     }
   }, [tabs, activeKey])
+
+  // Handle monitoring toggle
+  const handleMonitoringToggle = useCallback(async () => {
+    if (!containerId) return
+    try {
+      const newEnabled = !monitoringStatus.enabled
+      // TODO: Call monitoring API when implemented
+      // await monitoringApi.toggle(containerId, newEnabled)
+      setMonitoringStatus(prev => ({ ...prev, enabled: newEnabled }))
+    } catch (err) {
+      console.error('Failed to toggle monitoring:', err)
+    }
+  }, [containerId, monitoringStatus.enabled])
+
+  // Handle monitoring config save
+  const handleConfigSave = useCallback(async (config: MonitoringConfig) => {
+    if (!containerId) return
+    try {
+      // TODO: Call monitoring API when implemented
+      // await monitoringApi.updateConfig(containerId, config)
+      setMonitoringConfig(config)
+      setMonitoringStatus(prev => ({
+        ...prev,
+        threshold: config.silenceThreshold,
+        strategy: config.activeStrategy,
+      }))
+    } catch (err) {
+      console.error('Failed to save monitoring config:', err)
+    }
+  }, [containerId])
+
+  // Listen for WebSocket monitoring status updates
+  useEffect(() => {
+    const activeTab = tabs.find(t => t.key === activeKey)
+    if (!activeTab?.ws) return
+
+    // TODO: Add monitoring message handler when WebSocket service is extended
+    // The WebSocket will send monitoring_status messages that update the state
+  }, [tabs, activeKey])
+
+  // Task handlers
+  const handleAddTask = useCallback((text: string) => {
+    const newTask: Task = {
+      id: nextTaskId,
+      text,
+      status: 'pending',
+      order: tasks.length,
+    }
+    setTasks(prev => [...prev, newTask])
+    setNextTaskId(prev => prev + 1)
+    setMonitoringStatus(prev => ({ ...prev, queueSize: prev.queueSize + 1 }))
+    // TODO: Call task API when implemented
+  }, [nextTaskId, tasks.length])
+
+  const handleRemoveTask = useCallback((id: number) => {
+    setTasks(prev => prev.filter(t => t.id !== id))
+    setMonitoringStatus(prev => ({ ...prev, queueSize: Math.max(0, prev.queueSize - 1) }))
+    // TODO: Call task API when implemented
+  }, [])
+
+  const handleReorderTasks = useCallback((taskIds: number[]) => {
+    setTasks(prev => {
+      const taskMap = new Map(prev.map(t => [t.id, t]))
+      return taskIds.map((id, index) => ({
+        ...taskMap.get(id)!,
+        order: index,
+      }))
+    })
+    // TODO: Call task API when implemented
+  }, [])
+
+  const handleClearTasks = useCallback(() => {
+    setTasks([])
+    setMonitoringStatus(prev => ({ ...prev, queueSize: 0 }))
+    // TODO: Call task API when implemented
+  }, [])
+
+  const handleImportTasks = useCallback((texts: string[]) => {
+    const newTasks: Task[] = texts.map((text, index) => ({
+      id: nextTaskId + index,
+      text,
+      status: 'pending',
+      order: tasks.length + index,
+    }))
+    setTasks(prev => [...prev, ...newTasks])
+    setNextTaskId(prev => prev + texts.length)
+    setMonitoringStatus(prev => ({ ...prev, queueSize: prev.queueSize + texts.length }))
+    // TODO: Call task API when implemented
+  }, [nextTaskId, tasks.length])
 
   if (loading) {
     return (
@@ -407,6 +517,24 @@ export default function ContainerTerminal() {
                 <PanelLeft className="h-4 w-4 mr-2" />
               )}
               Files
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setTaskPanelOpen(!taskPanelOpen)}
+            >
+              {taskPanelOpen ? (
+                <PanelRightClose className="h-4 w-4 mr-2" />
+              ) : (
+                <PanelRight className="h-4 w-4 mr-2" />
+              )}
+              <ListTodo className="h-4 w-4 mr-1" />
+              Tasks
+              {tasks.filter(t => t.status === 'pending').length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-primary-foreground rounded-full">
+                  {tasks.filter(t => t.status === 'pending').length}
+                </span>
+              )}
             </Button>
             <Button variant="outline" size="sm" onClick={() => addNewTab()}>
               <Plus className="h-4 w-4 mr-2" />
@@ -517,6 +645,56 @@ export default function ContainerTerminal() {
               style={{ padding: '8px' }}
             />
           ))}
+        </div>
+
+        {/* Monitoring Status Bar */}
+        <QuickConfigPopover
+          config={monitoringConfig}
+          onSave={handleConfigSave}
+        >
+          <div className="hidden" />
+        </QuickConfigPopover>
+        <MonitoringStatusBar
+          status={monitoringStatus}
+          onToggle={handleMonitoringToggle}
+          onOpenSettings={() => setTaskPanelOpen(true)}
+        />
+      </div>
+
+      {/* Task Panel - Right sidebar */}
+      <div 
+        className={`h-full bg-card border-l flex flex-col transition-all duration-300 ${
+          taskPanelOpen ? 'w-80' : 'w-0'
+        } overflow-hidden`}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
+          <h3 className="font-medium text-sm">任务队列</h3>
+          <div className="flex items-center gap-1">
+            <TaskEditor
+              tasks={tasks}
+              onImport={handleImportTasks}
+              onClear={handleClearTasks}
+            />
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-7 w-7 p-0"
+              onClick={() => setTaskPanelOpen(false)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          {taskPanelOpen && (
+            <TaskPanel
+              tasks={tasks}
+              onAddTask={handleAddTask}
+              onRemoveTask={handleRemoveTask}
+              onReorderTasks={handleReorderTasks}
+              onClearTasks={handleClearTasks}
+            />
+          )}
         </div>
       </div>
     </div>

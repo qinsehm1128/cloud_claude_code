@@ -41,6 +41,14 @@ RUN if [ "$INSTALL_CODE_SERVER" = "true" ]; then \
         echo "Skipping code-server installation"; \
     fi
 
+# Copy and install PTY Automation extension (only if code-server is installed)
+COPY --chown=developer:developer extensions/ /tmp/extensions/
+RUN if [ "$INSTALL_CODE_SERVER" = "true" ] && [ -f /tmp/extensions/pty-automation-monitor.vsix ]; then \
+        echo "Installing PTY Automation extension..." && \
+        code-server --install-extension /tmp/extensions/pty-automation-monitor.vsix; \
+    fi && \
+    rm -rf /tmp/extensions
+
 # Create non-root user 'developer' with sudo privileges
 RUN useradd -m -s /bin/bash -G sudo developer \
     && echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers

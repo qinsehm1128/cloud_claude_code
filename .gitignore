@@ -10,6 +10,9 @@
 backend/server.exe
 backend/server
 bin/
+docker/extensions/*.vsix
+vscode-extension/out/
+vscode-extension/*.vsix
 
 # Logs
 logs/

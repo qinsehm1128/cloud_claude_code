@@ -141,3 +141,103 @@ const (
 	LogStageInit    = "init"
 	LogStageReady   = "ready"
 )
+
+// ==================== PTY Automation Monitoring Models ====================
+
+// MonitoringConfig represents automation monitoring configuration for a container
+type MonitoringConfig struct {
+	gorm.Model
+	ContainerID      uint    `gorm:"index" json:"container_id"`
+	Enabled          bool    `gorm:"default:false" json:"enabled"`
+	SilenceThreshold int     `gorm:"default:30" json:"silence_threshold"` // Seconds (5-300)
+	ActiveStrategy   string  `gorm:"default:'webhook'" json:"active_strategy"` // webhook, injection, queue, ai
+
+	// Webhook configuration
+	WebhookURL     string `gorm:"type:text" json:"webhook_url,omitempty"`
+	WebhookHeaders string `gorm:"type:text" json:"webhook_headers,omitempty"` // JSON format
+
+	// Injection configuration
+	InjectionCommand string `gorm:"type:text" json:"injection_command,omitempty"`
+
+	// Queue configuration
+	UserPromptTemplate string `gorm:"type:text" json:"user_prompt_template,omitempty"`
+
+	// AI configuration
+	AIEndpoint      string  `gorm:"type:text" json:"ai_endpoint,omitempty"`
+	AIAPIKey        string  `gorm:"type:text" json:"ai_api_key,omitempty"` // Encrypted
+	AIModel         string  `gorm:"default:'gpt-4'" json:"ai_model,omitempty"`
+	AISystemPrompt  string  `gorm:"type:text" json:"ai_system_prompt,omitempty"`
+	AITemperature   float64 `gorm:"default:0.7" json:"ai_temperature"`
+	AITimeout       int     `gorm:"default:30" json:"ai_timeout"` // Seconds
+	AIDefaultAction string  `gorm:"default:'skip'" json:"ai_default_action,omitempty"` // skip, inject, notify
+
+	// Context buffer configuration
+	ContextBufferSize int `gorm:"default:8192" json:"context_buffer_size"` // Bytes
+}
+
+// Task represents a task in the automation queue
+type Task struct {
+	gorm.Model
+	ContainerID uint       `gorm:"index" json:"container_id"`
+	OrderIndex  int        `gorm:"index" json:"order_index"`
+	Text        string     `gorm:"type:text;not null" json:"text"`
+	Status      TaskStatus `gorm:"default:'pending'" json:"status"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// TaskStatus represents the status of a task
+type TaskStatus string
+
+const (
+	TaskStatusPending    TaskStatus = "pending"
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusRunning    TaskStatus = "running" // Alias for in_progress
+	TaskStatusCompleted  TaskStatus = "completed"
+	TaskStatusSkipped    TaskStatus = "skipped"
+	TaskStatusFailed     TaskStatus = "failed"
+)
+
+// AutomationLog represents a log entry for automation operations
+type AutomationLog struct {
+	gorm.Model
+	ContainerID    uint   `gorm:"index" json:"container_id"`
+	SessionID      string `gorm:"index" json:"session_id"`
+	StrategyType   string `json:"strategy_type"` // webhook, injection, queue, ai
+	ActionTaken    string `json:"action_taken"`  // inject, skip, notify, complete, webhook_sent
+	Command        string `gorm:"type:text" json:"command,omitempty"`
+	ContextSnippet string `gorm:"type:text" json:"context_snippet,omitempty"`
+	AIResponse     string `gorm:"type:text" json:"ai_response,omitempty"` // JSON format
+	Result         string `json:"result"`                                  // success, failed, skipped
+	ErrorMessage   string `gorm:"type:text" json:"error_message,omitempty"`
+}
+
+// GlobalAutomationConfig represents global automation settings
+type GlobalAutomationConfig struct {
+	gorm.Model
+	Key   string `gorm:"uniqueIndex;not null" json:"key"`
+	Value string `gorm:"type:text" json:"value"`
+}
+
+// Strategy type constants
+const (
+	StrategyWebhook   = "webhook"
+	StrategyInjection = "injection"
+	StrategyQueue     = "queue"
+	StrategyAI        = "ai"
+)
+
+// AI action constants
+const (
+	AIActionInject   = "inject"
+	AIActionSkip     = "skip"
+	AIActionNotify   = "notify"
+	AIActionComplete = "complete"
+)
+
+// Automation log result constants
+const (
+	AutomationResultSuccess = "success"
+	AutomationResultFailed  = "failed"
+	AutomationResultSkipped = "skipped"
+)

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	// WebSocket message types
+	// WebSocket message types - Terminal
 	MessageTypeInput   = "input"
 	MessageTypeOutput  = "output"
 	MessageTypeResize  = "resize"
@@ -24,6 +24,20 @@ const (
 	MessageTypeHistoryEnd   = "history_end"
 	MessageTypeSession = "session"
 	MessageTypeClose   = "close" // Client requests to close session permanently
+
+	// WebSocket message types - Monitoring
+	MessageTypeMonitoringStatus      = "monitoring_status"
+	MessageTypeMonitoringEnable      = "monitoring_enable"
+	MessageTypeMonitoringDisable     = "monitoring_disable"
+	MessageTypeMonitoringConfigUpdate = "monitoring_config_update"
+	MessageTypeMonitoringError       = "monitoring_error"
+	MessageTypeStrategyTriggered     = "strategy_triggered"
+
+	// WebSocket message types - Task Queue
+	MessageTypeTaskUpdate  = "task_update"
+	MessageTypeTaskAdd     = "task_add"
+	MessageTypeTaskRemove  = "task_remove"
+	MessageTypeTaskReorder = "task_reorder"
 
 	// WebSocket settings
 	writeWait      = 10 * time.Second
@@ -46,6 +60,46 @@ type TerminalMessage struct {
 	TotalSize int64  `json:"total_size,omitempty"` // Total history size for progress
 	ChunkIndex int   `json:"chunk_index,omitempty"` // Current chunk index
 	TotalChunks int  `json:"total_chunks,omitempty"` // Total number of chunks
+
+	// Monitoring fields
+	MonitoringData *MonitoringStatusData `json:"monitoring_data,omitempty"`
+	Config         map[string]interface{} `json:"config,omitempty"`
+
+	// Task fields
+	Tasks   []TaskData `json:"tasks,omitempty"`
+	Task    *TaskData  `json:"task,omitempty"`
+	TaskID  uint       `json:"task_id,omitempty"`
+	TaskIDs []uint     `json:"task_ids,omitempty"`
+
+	// Strategy triggered fields
+	StrategyData *StrategyTriggeredData `json:"strategy_data,omitempty"`
+}
+
+// MonitoringStatusData represents monitoring status in WebSocket messages
+type MonitoringStatusData struct {
+	Enabled         bool   `json:"enabled"`
+	SilenceDuration int    `json:"silence_duration"` // Seconds
+	Threshold       int    `json:"threshold"`
+	Strategy        string `json:"strategy"`
+	QueueSize       int    `json:"queue_size"`
+	CurrentTask     *TaskData `json:"current_task,omitempty"`
+}
+
+// TaskData represents a task in WebSocket messages
+type TaskData struct {
+	ID          uint   `json:"id"`
+	Text        string `json:"text"`
+	Status      string `json:"status"`
+	OrderIndex  int    `json:"order_index"`
+}
+
+// StrategyTriggeredData represents strategy execution info
+type StrategyTriggeredData struct {
+	Strategy string `json:"strategy"`
+	Action   string `json:"action"`
+	Command  string `json:"command,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Success  bool   `json:"success"`
 }
 
 // TerminalService handles WebSocket terminal connections

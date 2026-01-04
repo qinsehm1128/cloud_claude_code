@@ -4,12 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"cc-platform/internal/config"
 	"cc-platform/internal/database"
 	"cc-platform/internal/handlers"
 	"cc-platform/internal/middleware"
+	"cc-platform/internal/monitoring"
 	"cc-platform/internal/services"
 	"cc-platform/internal/terminal"
 
@@ -80,6 +85,13 @@ func main() {
 	}
 	defer terminalService.Close()
 
+	// Initialize monitoring service
+	monitoringService := services.NewMonitoringService(db, terminalService)
+	defer monitoringService.Close()
+
+	// Initialize cleanup manager for graceful shutdown
+	cleanupManager := monitoring.NewCleanupManager(monitoringService.GetManager())
+
 	// Log startup info (without sensitive credentials)
 	log.Printf("Admin user: %s (password configured via .env)", cfg.AdminUsername)
 
@@ -102,6 +114,7 @@ func main() {
 	terminalHandler := handlers.NewTerminalHandler(terminalService, containerService, authService)
 	portHandler := handlers.NewPortHandler(portService)
 	proxyHandler := handlers.NewProxyHandler(containerService, db)
+	automationLogsHandler := handlers.NewAutomationLogsHandler(db)
 
 	// Public routes (with rate limiting for login)
 	router.POST("/api/auth/login", middleware.LoginRateLimit(), authHandler.Login)
@@ -156,6 +169,14 @@ func main() {
 
 		// Terminal sessions route
 		protected.GET("/terminals/:id/sessions", terminalHandler.GetSessions)
+
+		// Automation logs routes
+		protected.GET("/logs/automation", automationLogsHandler.ListLogs)
+		protected.GET("/logs/automation/stats", automationLogsHandler.GetLogStats)
+		protected.GET("/logs/automation/export", automationLogsHandler.ExportLogs)
+		protected.DELETE("/logs/automation/cleanup", automationLogsHandler.DeleteOldLogs)
+		protected.GET("/logs/automation/:id", automationLogsHandler.GetLog)
+		protected.GET("/logs/automation/container/:containerId", automationLogsHandler.GetLogsByContainer)
 	}
 
 	// WebSocket routes (with JWT query param auth)
@@ -169,11 +190,41 @@ func main() {
 		proxyGroup.Any("/:id/:port/*path", proxyHandler.ProxyRequest)
 	}
 
-	// Start server
+	// Start server with graceful shutdown
 	port := cfg.Port
 	
-	log.Printf("Server starting on 0.0.0.0:%d", port)
-	if err := router.Run(fmt.Sprintf("0.0.0.0:%d", port)); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	srv := &http.Server{
+		Addr:    fmt.Sprintf("0.0.0.0:%d", port),
+		Handler: router,
 	}
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("Server starting on 0.0.0.0:%d", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal for graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	// Graceful shutdown with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	// Cleanup monitoring sessions
+	if err := cleanupManager.GracefulShutdown(10 * time.Second); err != nil {
+		log.Printf("Warning: Monitoring cleanup error: %v", err)
+	}
+
+	// Shutdown HTTP server
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exited")
 }

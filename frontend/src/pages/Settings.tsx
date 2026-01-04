@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { settingsApi } from '@/services/api'
+import AutomationSettings from './AutomationSettings'
 
 export default function Settings() {
   const [githubToken, setGithubToken] = useState('')
@@ -106,6 +107,7 @@ export default function Settings() {
         <TabsList>
           <TabsTrigger value="github">GitHub</TabsTrigger>
           <TabsTrigger value="environment">Environment Variables</TabsTrigger>
+          <TabsTrigger value="automation">自动化</TabsTrigger>
         </TabsList>
 
         <TabsContent value="github">
@@ -208,6 +210,10 @@ DEBUG=true`}
               </form>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="automation">
+          <AutomationSettings />
         </TabsContent>
       </Tabs>
     </div>

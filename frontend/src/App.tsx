@@ -8,6 +8,7 @@ import Repositories from './pages/Repositories'
 import ContainerTerminal from './pages/ContainerTerminal'
 import Ports from './pages/Ports'
 import DockerContainers from './pages/DockerContainers'
+import AutomationLogs from './pages/AutomationLogs'
 import { Loader2 } from 'lucide-react'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -42,6 +43,7 @@ function App() {
           <Route path="repositories" element={<Repositories />} />
           <Route path="ports" element={<Ports />} />
           <Route path="docker" element={<DockerContainers />} />
+          <Route path="automation-logs" element={<AutomationLogs />} />
           <Route path="terminal/:containerId" element={<ContainerTerminal />} />
         </Route>
       </Routes>
