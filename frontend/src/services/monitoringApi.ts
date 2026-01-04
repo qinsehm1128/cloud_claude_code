@@ -89,21 +89,39 @@ export const taskQueueApi = {
   add: (containerId: number, text: string) =>
     api.post<Task>(`/tasks/${containerId}`, { text }),
 
+  // Update a task
+  update: (containerId: number, taskId: number, data: { text?: string; status?: string }) =>
+    api.put(`/tasks/${containerId}/${taskId}`, data),
+
   // Remove a task
   remove: (containerId: number, taskId: number) =>
     api.delete(`/tasks/${containerId}/${taskId}`),
 
   // Reorder tasks
   reorder: (containerId: number, taskIds: number[]) =>
-    api.put(`/tasks/${containerId}/reorder`, { task_ids: taskIds }),
+    api.post(`/tasks/${containerId}/reorder`, { task_ids: taskIds }),
 
   // Clear all tasks
   clear: (containerId: number) =>
-    api.delete(`/tasks/${containerId}`),
+    api.delete(`/tasks/${containerId}/clear`),
 
-  // Import tasks (batch add)
-  import: (containerId: number, texts: string[]) =>
-    api.post<Task[]>(`/tasks/${containerId}/import`, { texts }),
+  // Clear completed tasks
+  clearCompleted: (containerId: number) =>
+    api.delete(`/tasks/${containerId}/clear-completed`),
+
+  // Get task count
+  getCount: (containerId: number) =>
+    api.get<{ total: number; pending: number }>(`/tasks/${containerId}/count`),
+
+  // Import tasks (batch add) - adds tasks one by one
+  import: async (containerId: number, texts: string[]) => {
+    const tasks: Task[] = []
+    for (const text of texts) {
+      const response = await api.post<Task>(`/tasks/${containerId}`, { text })
+      tasks.push(response.data)
+    }
+    return { data: tasks }
+  },
 }
 
 export default monitoringApi

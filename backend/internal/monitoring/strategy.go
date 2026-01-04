@@ -145,9 +145,15 @@ func (e *DefaultStrategyEngine) logExecution(session *MonitoringSession, strateg
 		logResult = models.AutomationResultFailed
 	}
 
+	// Get session ID safely
+	sessionID := ""
+	if session.PTYSession != nil {
+		sessionID = session.PTYSession.ID
+	}
+
 	log := &models.AutomationLog{
 		ContainerID:    session.ContainerID,
-		SessionID:      session.PTYSession.ID,
+		SessionID:      sessionID,
 		StrategyType:   strategyType,
 		ActionTaken:    result.Action,
 		Command:        result.Command,
