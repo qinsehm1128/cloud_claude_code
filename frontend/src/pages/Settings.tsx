@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { settingsApi } from '@/services/api'
-import AutomationSettings from './AutomationSettings'
+// import AutomationSettings from './AutomationSettings'
 
 export default function Settings() {
   const [githubToken, setGithubToken] = useState('')
