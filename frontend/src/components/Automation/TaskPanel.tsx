@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   Plus,
   Trash2,
@@ -66,6 +66,8 @@ export function TaskPanel({
   const [newTaskText, setNewTaskText] = useState('');
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
+  // Track IME composition state to avoid triggering on Enter during Chinese input
+  const isComposingRef = useRef(false);
 
   const handleAddTask = useCallback(() => {
     if (newTaskText.trim()) {
@@ -74,10 +76,23 @@ export function TaskPanel({
     }
   }, [newTaskText, onAddTask]);
 
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(() => {
+    isComposingRef.current = false;
+  }, []);
+
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // Ignore Enter during IME composition (e.g., Chinese input)
+      if (isComposingRef.current) {
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+        e.stopPropagation();
         handleAddTask();
       }
     },
@@ -163,6 +178,8 @@ export function TaskPanel({
             value={newTaskText}
             onChange={(e) => setNewTaskText(e.target.value)}
             onKeyDown={handleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             placeholder="Enter new task..."
             className="flex-1"
           />

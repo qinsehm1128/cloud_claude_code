@@ -37,8 +37,8 @@ func (s *InjectionStrategy) Execute(ctx context.Context, session *MonitoringSess
 	// Expand placeholders
 	command := s.expandPlaceholders(session.Config.InjectionCommand, session)
 
-	// Normalize newlines
-	command = NormalizeNewline(command)
+	// Remove trailing newlines - we'll send them separately
+	command = strings.TrimRight(command, "\r\n")
 
 	// Check context cancellation
 	select {
@@ -47,8 +47,23 @@ func (s *InjectionStrategy) Execute(ctx context.Context, session *MonitoringSess
 	default:
 	}
 
-	// Write to PTY using WriteToPTY method which handles nil PTYSession
+	// Write command text to PTY (without newline)
 	err := session.WriteToPTY([]byte(command))
+	if err != nil {
+		return &StrategyResult{
+			Action:       "inject",
+			Command:      command,
+			Success:      false,
+			ErrorMessage: err.Error(),
+			Timestamp:    time.Now(),
+		}, err
+	}
+
+	// Small delay to let the terminal process the input before sending Enter
+	time.Sleep(150 * time.Millisecond)
+
+	// Now send the Enter key (use \r which is what xterm.js sends for Enter)
+	err = session.WriteToPTY([]byte("\r"))
 	if err != nil {
 		return &StrategyResult{
 			Action:       "inject",

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"cc-platform/internal/docker"
@@ -148,7 +149,25 @@ func (s *MonitoringService) initializeQueueStrategy() {
 		if session == nil {
 			return fmt.Errorf("no monitoring session for container %d", containerID)
 		}
-		return session.WriteToPTY([]byte(command + "\n"))
+		
+		// Remove trailing newlines from command - we'll send them separately
+		command = strings.TrimRight(command, "\r\n")
+		
+		// Write the command text first (without newline)
+		if err := session.WriteToPTY([]byte(command)); err != nil {
+			return err
+		}
+		
+		// Small delay to let the terminal process the input before sending Enter
+		// This is needed because some terminals (like Claude Code) need time to process
+		time.Sleep(150 * time.Millisecond)
+		
+		// Now send the Enter key (use \r which is what xterm.js sends for Enter)
+		if err := session.WriteToPTY([]byte("\r")); err != nil {
+			return err
+		}
+		
+		return nil
 	}
 
 	// Create notify handler for queue empty notifications
