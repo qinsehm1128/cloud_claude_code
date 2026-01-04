@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { 
   LayoutDashboard, 
   Settings, 
-  FolderGit2,
+  // FolderGit2,
   Terminal,
   LogOut,
   ChevronLeft,
