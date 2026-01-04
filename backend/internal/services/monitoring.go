@@ -1,8 +1,11 @@
 package services
 
 import (
+	"context"
 	"fmt"
+	"time"
 
+	"cc-platform/internal/docker"
 	"cc-platform/internal/models"
 	"cc-platform/internal/monitoring"
 	"cc-platform/internal/terminal"
@@ -17,6 +20,7 @@ type MonitoringService struct {
 	strategyEngine  *monitoring.DefaultStrategyEngine
 	terminalService *terminal.TerminalService
 	taskService     *TaskQueueService
+	dockerClient    *docker.Client
 }
 
 // NewMonitoringService creates a new monitoring service.
@@ -28,12 +32,28 @@ func NewMonitoringService(db *gorm.DB, terminalService *terminal.TerminalService
 	// Connect strategy engine to manager
 	manager.SetStrategyEngine(strategyEngine)
 
+	// Create Docker client for executing commands in containers
+	dockerClient, err := docker.NewClient()
+	if err != nil {
+		fmt.Printf("[MonitoringService] Warning: failed to create Docker client: %v\n", err)
+	}
+
 	service := &MonitoringService{
 		db:              db,
 		manager:         manager,
 		strategyEngine:  strategyEngine,
 		terminalService: terminalService,
 		taskService:     taskService,
+		dockerClient:    dockerClient,
+	}
+
+	// Set up execInContainer function for Claude process detection
+	if dockerClient != nil {
+		manager.SetExecInContainer(func(dockerID string, cmd []string) (string, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return dockerClient.ExecInContainer(ctx, dockerID, cmd)
+		})
 	}
 
 	// Initialize queue strategy with task service
@@ -313,6 +333,9 @@ func (s *MonitoringService) ListStrategies() []monitoring.StrategyInfo {
 // Close shuts down the monitoring service.
 func (s *MonitoringService) Close() {
 	s.manager.Close()
+	if s.dockerClient != nil {
+		s.dockerClient.Close()
+	}
 }
 
 // OnPTYOutput forwards PTY output to the monitoring manager.
