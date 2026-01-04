@@ -38,6 +38,11 @@ func Initialize(dbPath string) (*gorm.DB, error) {
 		&models.ContainerPort{},
 		&models.TerminalSession{},
 		&models.TerminalHistory{},
+		// PTY Automation Monitoring models
+		&models.MonitoringConfig{},
+		&models.Task{},
+		&models.AutomationLog{},
+		&models.GlobalAutomationConfig{},
 	); err != nil {
 		return nil, err
 	}
