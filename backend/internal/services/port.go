@@ -107,9 +107,11 @@ func (s *PortService) ListAllPorts() ([]PortInfo, error) {
 	var results []PortWithContainerInfo
 
 	// Use JOIN to avoid N+1 query
+	// Note: Must filter out soft-deleted records since we use Table() which bypasses GORM's auto-filter
 	err := s.db.Table("container_ports").
 		Select("container_ports.id, container_ports.container_id, container_ports.port, container_ports.name, container_ports.protocol, container_ports.auto_created, containers.name as container_name, containers.code_server_domain").
 		Joins("LEFT JOIN containers ON container_ports.container_id = containers.id").
+		Where("container_ports.deleted_at IS NULL").
 		Find(&results).Error
 
 	if err != nil {

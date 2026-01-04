@@ -750,8 +750,8 @@ func (s *ContainerService) StopContainer(ctx context.Context, id uint) error {
 		Where("container_id = ?", id).
 		Update("active", false)
 
-	// Remove port records (will be re-added on restart)
-	s.db.Where("container_id = ?", id).Delete(&models.ContainerPort{})
+	// Remove port records (will be re-added on restart, use Unscoped for hard delete)
+	s.db.Unscoped().Where("container_id = ?", id).Delete(&models.ContainerPort{})
 
 	// Update status
 	now := time.Now()
@@ -779,11 +779,11 @@ func (s *ContainerService) DeleteContainer(ctx context.Context, id uint) error {
 	}
 
 	// Clean up related resources
-	// Delete port records
-	s.db.Where("container_id = ?", id).Delete(&models.ContainerPort{})
+	// Delete port records (use Unscoped for hard delete since we use raw table query)
+	s.db.Unscoped().Where("container_id = ?", id).Delete(&models.ContainerPort{})
 	
 	// Delete terminal sessions
-	s.db.Where("container_id = ?", id).Delete(&models.TerminalSession{})
+	s.db.Unscoped().Where("container_id = ?", id).Delete(&models.TerminalSession{})
 	
 	// Delete terminal history
 	s.db.Where("session_id IN (SELECT session_id FROM terminal_sessions WHERE container_id = ?)", id).
