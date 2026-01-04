@@ -809,15 +809,27 @@ func (s *ContainerService) GetContainer(id uint) (*models.Container, error) {
 }
 
 // GetContainerByDockerID gets a container by Docker ID
+// Supports both full (64 char) and short (12 char) Docker IDs
 func (s *ContainerService) GetContainerByDockerID(dockerID string) (*models.Container, error) {
 	var container models.Container
-	if err := s.db.Where("docker_id = ?", dockerID).First(&container).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrContainerNotFound
-		}
-		return nil, err
+	
+	// Try exact match first
+	if err := s.db.Where("docker_id = ?", dockerID).First(&container).Error; err == nil {
+		return &container, nil
 	}
-	return &container, nil
+	
+	// Try prefix match for short Docker IDs (at least 12 characters)
+	if len(dockerID) >= 12 {
+		if err := s.db.Where("docker_id LIKE ?", dockerID+"%").First(&container).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrContainerNotFound
+			}
+			return nil, err
+		}
+		return &container, nil
+	}
+	
+	return nil, ErrContainerNotFound
 }
 
 // ListContainers lists all containers

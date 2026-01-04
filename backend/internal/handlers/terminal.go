@@ -44,23 +44,38 @@ func NewTerminalHandler(
 
 // HandleWebSocket handles WebSocket terminal connections
 func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
-	// Get container ID from URL
+	// Get container ID from URL - can be either database ID (numeric) or Docker ID (hex string)
 	containerIDStr := c.Param("id")
-	containerID, err := parseID(containerIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid container ID"})
-		return
-	}
+	
+	var container *models.Container
+	var containerID uint
+	var err error
 
-	// Verify container exists and is running
-	container, err := h.containerService.GetContainer(containerID)
-	if err != nil {
-		if err == services.ErrContainerNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+	// Try to parse as numeric database ID first
+	containerID, err = parseID(containerIDStr)
+	if err == nil {
+		// It's a numeric ID, look up by database ID
+		container, err = h.containerService.GetContainer(containerID)
+		if err != nil {
+			if err == services.ErrContainerNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get container"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get container"})
-		return
+	} else {
+		// It's not a numeric ID, try to look up by Docker ID
+		container, err = h.containerService.GetContainerByDockerID(containerIDStr)
+		if err != nil {
+			if err == services.ErrContainerNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get container"})
+			return
+		}
+		containerID = container.ID
 	}
 
 	if container.Status != models.ContainerStatusRunning {
