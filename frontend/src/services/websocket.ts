@@ -240,16 +240,50 @@ export class TerminalWebSocket {
 
     this.ws.onclose = () => {
       this.onDisconnect()
-      this.attemptReconnect()
+      // Don't reconnect if:
+      // - We manually disconnected (maxReconnectAttempts = 0)
+      // - Server returned 404 (container not found) - code 1006 with specific error
+      // - Server returned 401 (unauthorized)
+      if (this.maxReconnectAttempts > 0) {
+        this.attemptReconnect()
+      }
     }
 
     this.ws.onerror = () => {
-      this.onError('WebSocket connection error')
+      // Check if this might be a 404/401 error by trying to fetch container status
+      this.checkContainerExists().then(exists => {
+        if (!exists) {
+          // Container doesn't exist, stop reconnecting
+          this.maxReconnectAttempts = 0
+          this.onError('Container not found or deleted')
+        } else {
+          this.onError('WebSocket connection error')
+        }
+      })
     }
   }
 
-  private attemptReconnect() {
+  private async checkContainerExists(): Promise<boolean> {
+    try {
+      const response = await fetch(`/api/containers/${this.containerId}`, {
+        credentials: 'include'
+      })
+      return response.ok
+    } catch {
+      return false
+    }
+  }
+
+  private async attemptReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      // Check if container still exists before reconnecting
+      const exists = await this.checkContainerExists()
+      if (!exists) {
+        this.maxReconnectAttempts = 0
+        this.onError('Container not found or deleted')
+        return
+      }
+      
       this.reconnectAttempts++
       const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
       setTimeout(() => this.connect(), delay)

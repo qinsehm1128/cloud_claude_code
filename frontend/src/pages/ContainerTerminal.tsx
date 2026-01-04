@@ -248,6 +248,14 @@ export default function ContainerTerminal() {
           },
           onError: (err) => {
             console.error(err)
+            // If container not found, navigate back to dashboard
+            if (err.includes('not found') || err.includes('deleted')) {
+              term.write('\r\n\x1b[31mContainer not found or has been deleted.\x1b[0m\r\n')
+              // Navigate after a short delay to let user see the message
+              setTimeout(() => {
+                navigate('/')
+              }, 2000)
+            }
           },
           onSessionId: (sessionId) => {
             setTabs(prev => {
