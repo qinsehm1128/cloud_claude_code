@@ -54,17 +54,21 @@ RUN su - developer -c "git config --global init.defaultBranch main" \
     && su - developer -c "git config --global user.name 'Developer'"
 
 # Copy and install PTY Automation extension (only if code-server is installed)
-# Simply copy the .vsix to code-server extensions directory
+# Use code-server CLI to install extension properly
 COPY extensions/ /tmp/extensions/
 RUN if [ "$INSTALL_CODE_SERVER" = "true" ] && [ -f /tmp/extensions/pty-automation-monitor.vsix ]; then \
         echo "Installing PTY Automation extension..." && \
+        # Install as root first, then fix permissions
+        code-server --install-extension /tmp/extensions/pty-automation-monitor.vsix --force && \
+        # Move extension to developer user's directory
         mkdir -p /home/developer/.local/share/code-server/extensions && \
-        cd /home/developer/.local/share/code-server/extensions && \
-        unzip -q /tmp/extensions/pty-automation-monitor.vsix -d pty-automation-monitor && \
-        mv pty-automation-monitor/extension/* pty-automation-monitor/ 2>/dev/null || true && \
-        rm -rf pty-automation-monitor/extension pty-automation-monitor/\[Content_Types\].xml 2>/dev/null || true && \
+        if [ -d /root/.local/share/code-server/extensions ]; then \
+            cp -r /root/.local/share/code-server/extensions/* /home/developer/.local/share/code-server/extensions/ 2>/dev/null || true; \
+        fi && \
         chown -R developer:developer /home/developer/.local && \
-        echo "Extension installed to /home/developer/.local/share/code-server/extensions/pty-automation-monitor"; \
+        echo "Extension installed successfully"; \
+    else \
+        echo "Skipping extension installation (code-server=$INSTALL_CODE_SERVER, vsix exists=$(test -f /tmp/extensions/pty-automation-monitor.vsix && echo yes || echo no))"; \
     fi && \
     rm -rf /tmp/extensions
 
