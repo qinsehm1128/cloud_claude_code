@@ -335,8 +335,8 @@ func (m *Manager) EnableMonitoringForPTY(ptySessionID string) error {
 
 // EnableMonitoring enables monitoring for a container.
 func (m *Manager) EnableMonitoring(containerID uint) error {
-	session := m.GetSession(containerID)
-	if session == nil {
+	sessions := m.GetSessionsForContainer(containerID)
+	if len(sessions) == 0 {
 		return fmt.Errorf("monitoring session not found for container %d", containerID)
 	}
 
@@ -347,8 +347,12 @@ func (m *Manager) EnableMonitoring(containerID uint) error {
 		return fmt.Errorf("failed to update monitoring config: %w", err)
 	}
 
-	session.Enable()
-	fmt.Printf("[Manager] Monitoring enabled for container %d\n", containerID)
+	// Enable ALL sessions for this container
+	for _, session := range sessions {
+		session.Enable()
+		fmt.Printf("[Manager] Monitoring enabled for PTY %s (container %d)\n", session.PTYSessionID, containerID)
+	}
+	
 	return nil
 }
 
@@ -372,19 +376,26 @@ func (m *Manager) DisableMonitoringForPTY(ptySessionID string) error {
 
 // DisableMonitoring disables monitoring for a container.
 func (m *Manager) DisableMonitoring(containerID uint) error {
-	session := m.GetSession(containerID)
-	if session == nil {
-		return fmt.Errorf("monitoring session not found for container %d", containerID)
-	}
-
-	// Update database
+	sessions := m.GetSessionsForContainer(containerID)
+	
+	// Update database first
 	if err := m.db.Model(&models.MonitoringConfig{}).
 		Where("container_id = ?", containerID).
 		Update("enabled", false).Error; err != nil {
 		return fmt.Errorf("failed to update monitoring config: %w", err)
 	}
 
-	session.Disable()
+	if len(sessions) == 0 {
+		fmt.Printf("[Manager] Monitoring disabled for container %d (no active sessions)\n", containerID)
+		return nil
+	}
+
+	// Disable ALL sessions for this container
+	for _, session := range sessions {
+		session.Disable()
+		fmt.Printf("[Manager] Monitoring disabled for PTY %s (container %d)\n", session.PTYSessionID, containerID)
+	}
+	
 	return nil
 }
 

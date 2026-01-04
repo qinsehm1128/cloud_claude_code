@@ -29,6 +29,9 @@ type PTYOutputCallback func(containerID uint, ptySessionID string, data []byte)
 // PTYSessionCreatedCallback is called when a new PTY session is created
 type PTYSessionCreatedCallback func(containerID uint, dockerID string, session *PTYSession)
 
+// PTYSessionClosedCallback is called when a PTY session is closed
+type PTYSessionClosedCallback func(containerID uint, ptySessionID string)
+
 // PTYManager manages PTY sessions for containers
 type PTYManager struct {
 	db             *gorm.DB
@@ -42,6 +45,9 @@ type PTYManager struct {
 	
 	// Callback for session creation
 	onSessionCreated PTYSessionCreatedCallback
+	
+	// Callback for session closure
+	onSessionClosed PTYSessionClosedCallback
 }
 
 // PTYSession represents an active PTY session that persists across WebSocket reconnections
@@ -140,6 +146,20 @@ func (m *PTYManager) GetSessionCreatedCallback() PTYSessionCreatedCallback {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.onSessionCreated
+}
+
+// SetSessionClosedCallback sets the callback for PTY session closure
+func (m *PTYManager) SetSessionClosedCallback(callback PTYSessionClosedCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onSessionClosed = callback
+}
+
+// GetSessionClosedCallback returns the current session closed callback
+func (m *PTYManager) GetSessionClosedCallback() PTYSessionClosedCallback {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.onSessionClosed
 }
 
 // restoreSessions restores session metadata from database (not the actual PTY connections)
@@ -386,12 +406,14 @@ func (m *PTYManager) ResizeSession(ctx context.Context, sessionID string, cols, 
 // CloseSession closes a PTY session
 func (m *PTYManager) CloseSession(sessionID string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	session, exists := m.sessions[sessionID]
 	if !exists {
+		m.mu.Unlock()
 		return nil
 	}
+
+	// Get container ID before closing
+	containerDBID := session.containerDBID
 
 	// Flush history
 	m.historyManager.FlushSession(sessionID)
@@ -399,10 +421,21 @@ func (m *PTYManager) CloseSession(sessionID string) error {
 	session.Close()
 	delete(m.sessions, sessionID)
 	
+	// Get callback before releasing lock
+	callback := m.onSessionClosed
+	m.mu.Unlock()
+	
 	// Update database
 	m.db.Model(&models.TerminalSession{}).
 		Where("session_id = ?", sessionID).
 		Update("active", false)
+	
+	// Notify monitoring service that session is closed
+	if callback != nil {
+		callback(containerDBID, sessionID)
+	}
+	
+	fmt.Printf("[PTYManager] Session %s closed, notified monitoring\n", sessionID)
 	
 	return nil
 }

@@ -669,40 +669,42 @@ export default function ContainerTerminal() {
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Terminal Tabs - using custom tab buttons instead of Radix Tabs to avoid TabsContent requirement */}
         <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50 flex-shrink-0">
-          <Tabs value={activeKey} onValueChange={setActiveKey} className="flex-1">
-            <TabsList className="h-8 bg-transparent p-0 gap-1">
-              {tabs.map((tab) => (
-                <TabsTrigger
-                  key={tab.key}
-                  value={tab.key}
-                  className="h-8 px-3 data-[state=active]:bg-secondary rounded-md gap-2"
-                >
+          <div className="flex-1 flex gap-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveKey(tab.key)}
+                className={`h-8 px-3 rounded-md gap-2 inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-colors ${
+                  activeKey === tab.key
+                    ? 'bg-secondary text-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    tab.connected ? 'bg-green-500' : 'bg-red-500'
+                  }`}
+                />
+                {tab.label}
+                {tab.historyLoading && (
+                  <span className="text-xs text-blue-400">{tab.historyProgress}%</span>
+                )}
+                {tabs.length > 1 && (
                   <span
-                    className={`w-2 h-2 rounded-full ${
-                      tab.connected ? 'bg-green-500' : 'bg-red-500'
-                    }`}
-                  />
-                  {tab.label}
-                  {tab.historyLoading && (
-                    <span className="text-xs text-blue-400">{tab.historyProgress}%</span>
-                  )}
-                  {tabs.length > 1 && (
-                    <button
-                      className="ml-1 hover:bg-muted rounded p-0.5"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        removeTab(tab.key)
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
+                    className="ml-1 hover:bg-muted rounded p-0.5"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      removeTab(tab.key)
+                    }}
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
           <Button variant="ghost" size="sm" onClick={() => addNewTab()}>
             <Plus className="h-4 w-4" />
           </Button>

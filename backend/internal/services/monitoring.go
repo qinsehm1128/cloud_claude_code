@@ -70,6 +70,11 @@ func NewMonitoringService(db *gorm.DB, terminalService *terminal.TerminalService
 		terminalService.SetSessionCreatedCallback(func(containerID uint, dockerID string, ptySession *terminal.PTYSession) {
 			service.OnPTYSessionCreated(containerID, dockerID, ptySession)
 		})
+		
+		// Set up session closed callback to clean up monitoring session
+		terminalService.SetSessionClosedCallback(func(containerID uint, ptySessionID string) {
+			service.OnPTYSessionClosed(containerID, ptySessionID)
+		})
 	}
 
 	// Restore enabled monitoring sessions for running containers
@@ -258,14 +263,7 @@ func (s *MonitoringService) EnableMonitoring(containerID uint, config *models.Mo
 
 // DisableMonitoring disables monitoring for a container.
 func (s *MonitoringService) DisableMonitoring(containerID uint) error {
-	// Update database
-	if err := s.db.Model(&models.MonitoringConfig{}).
-		Where("container_id = ?", containerID).
-		Update("enabled", false).Error; err != nil {
-		return fmt.Errorf("failed to update monitoring config: %w", err)
-	}
-
-	// Disable in manager
+	// Disable in manager (this also updates the database)
 	return s.manager.DisableMonitoring(containerID)
 }
 
@@ -418,4 +416,11 @@ func (s *MonitoringService) InitializeSession(containerID uint, dockerID string,
 // CleanupSession removes a monitoring session.
 func (s *MonitoringService) CleanupSession(containerID uint) {
 	s.manager.RemoveSession(containerID)
+}
+
+// OnPTYSessionClosed is called when a PTY session is closed.
+// It removes the corresponding monitoring session.
+func (s *MonitoringService) OnPTYSessionClosed(containerID uint, ptySessionID string) {
+	fmt.Printf("[MonitoringService] PTY session %s closed, removing monitoring session\n", ptySessionID)
+	s.manager.RemoveSessionByPTY(ptySessionID)
 }

@@ -135,6 +135,11 @@ func (s *TerminalService) SetSessionCreatedCallback(callback PTYSessionCreatedCa
 	s.ptyManager.SetSessionCreatedCallback(callback)
 }
 
+// SetSessionClosedCallback sets the callback for PTY session closure
+func (s *TerminalService) SetSessionClosedCallback(callback PTYSessionClosedCallback) {
+	s.ptyManager.SetSessionClosedCallback(callback)
+}
+
 // GetPTYManager returns the PTY manager for direct access
 func (s *TerminalService) GetPTYManager() *PTYManager {
 	return s.ptyManager
