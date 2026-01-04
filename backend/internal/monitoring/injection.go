@@ -47,18 +47,8 @@ func (s *InjectionStrategy) Execute(ctx context.Context, session *MonitoringSess
 	default:
 	}
 
-	// Write to PTY
-	if session.PTYSession == nil {
-		return &StrategyResult{
-			Action:       "inject",
-			Command:      command,
-			Success:      false,
-			ErrorMessage: "PTY session not available",
-			Timestamp:    time.Now(),
-		}, fmt.Errorf("PTY session not available")
-	}
-
-	_, err := session.PTYSession.Write([]byte(command))
+	// Write to PTY using WriteToPTY method which handles nil PTYSession
+	err := session.WriteToPTY([]byte(command))
 	if err != nil {
 		return &StrategyResult{
 			Action:       "inject",
@@ -92,9 +82,15 @@ func (s *InjectionStrategy) Validate(config *models.MonitoringConfig) error {
 // - {silence_duration}: Silence duration in seconds
 // - {docker_id}: Docker container ID
 func (s *InjectionStrategy) expandPlaceholders(command string, session *MonitoringSession) string {
+	// Use PTYSessionID instead of PTYSession.ID to avoid nil pointer
+	sessionID := session.PTYSessionID
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("container-%d", session.ContainerID)
+	}
+
 	replacements := map[string]string{
 		"{container_id}":     fmt.Sprintf("%d", session.ContainerID),
-		"{session_id}":       session.PTYSession.ID,
+		"{session_id}":       sessionID,
 		"{timestamp}":        fmt.Sprintf("%d", time.Now().Unix()),
 		"{silence_duration}": fmt.Sprintf("%d", int(session.GetSilenceDuration().Seconds())),
 		"{docker_id}":        session.DockerID,

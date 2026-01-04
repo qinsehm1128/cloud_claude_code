@@ -29,6 +29,12 @@ type Manager struct {
 	// Context for graceful shutdown
 	ctx        context.Context
 	cancelFunc context.CancelFunc
+
+	// Session cleanup configuration
+	sessionTimeout    time.Duration // Maximum idle time before session cleanup
+	cleanupInterval   time.Duration // How often to run cleanup
+	cleanupStopChan   chan struct{} // Signal to stop cleanup goroutine
+	cleanupWg         sync.WaitGroup
 }
 
 // StrategyEngine interface for strategy execution
@@ -36,15 +42,128 @@ type StrategyEngine interface {
 	Execute(ctx context.Context, session *MonitoringSession) error
 }
 
+// DefaultSessionTimeout is the default maximum idle time before session cleanup (30 minutes)
+const DefaultSessionTimeout = 30 * time.Minute
+
+// DefaultCleanupInterval is the default interval for running cleanup (5 minutes)
+const DefaultCleanupInterval = 5 * time.Minute
+
 // NewManager creates a new monitoring manager.
 func NewManager(db *gorm.DB) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &Manager{
-		db:         db,
-		sessions:   make(map[string]*MonitoringSession),
-		ctx:        ctx,
-		cancelFunc: cancel,
+	m := &Manager{
+		db:              db,
+		sessions:        make(map[string]*MonitoringSession),
+		ctx:             ctx,
+		cancelFunc:      cancel,
+		sessionTimeout:  DefaultSessionTimeout,
+		cleanupInterval: DefaultCleanupInterval,
+		cleanupStopChan: make(chan struct{}),
+	}
+
+	// Start background cleanup goroutine
+	m.startCleanupRoutine()
+
+	return m
+}
+
+// NewManagerWithConfig creates a new monitoring manager with custom timeout configuration.
+func NewManagerWithConfig(db *gorm.DB, sessionTimeout, cleanupInterval time.Duration) *Manager {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	if sessionTimeout <= 0 {
+		sessionTimeout = DefaultSessionTimeout
+	}
+	if cleanupInterval <= 0 {
+		cleanupInterval = DefaultCleanupInterval
+	}
+
+	m := &Manager{
+		db:              db,
+		sessions:        make(map[string]*MonitoringSession),
+		ctx:             ctx,
+		cancelFunc:      cancel,
+		sessionTimeout:  sessionTimeout,
+		cleanupInterval: cleanupInterval,
+		cleanupStopChan: make(chan struct{}),
+	}
+
+	// Start background cleanup goroutine
+	m.startCleanupRoutine()
+
+	return m
+}
+
+// startCleanupRoutine starts the background goroutine for cleaning up stale sessions.
+func (m *Manager) startCleanupRoutine() {
+	m.cleanupWg.Add(1)
+	go func() {
+		defer m.cleanupWg.Done()
+		ticker := time.NewTicker(m.cleanupInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-m.cleanupStopChan:
+				return
+			case <-m.ctx.Done():
+				return
+			case <-ticker.C:
+				m.cleanupStaleSessions()
+			}
+		}
+	}()
+}
+
+// cleanupStaleSessions removes sessions that have been idle for too long.
+// Also cleans up stale subscribers within active sessions.
+// Note: Sessions with monitoring enabled are NEVER cleaned up to ensure continuous monitoring.
+func (m *Manager) cleanupStaleSessions() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	var staleSessionIDs []string
+	totalStaleSubscribers := 0
+
+	for id, session := range m.sessions {
+		// First, clean up stale subscribers in this session
+		staleCount := session.CleanupStaleSubscribers()
+		totalStaleSubscribers += staleCount
+
+		// Skip sessions with monitoring enabled - they should never be cleaned up
+		if session.IsEnabled() {
+			continue
+		}
+
+		// Check if session has been idle for too long
+		idleTime := now.Sub(session.GetLastActivityTime())
+		if idleTime > m.sessionTimeout {
+			staleSessionIDs = append(staleSessionIDs, id)
+		}
+	}
+
+	// Clean up stale sessions
+	for _, id := range staleSessionIDs {
+		if session, exists := m.sessions[id]; exists {
+			fmt.Printf("[Manager] Cleaning up stale session %s (idle for %v)\n", id, m.sessionTimeout)
+			session.Close()
+			delete(m.sessions, id)
+		}
+	}
+
+	if len(staleSessionIDs) > 0 || totalStaleSubscribers > 0 {
+		fmt.Printf("[Manager] Cleanup: %d stale sessions, %d stale subscribers\n", len(staleSessionIDs), totalStaleSubscribers)
+	}
+}
+
+// SetSessionTimeout updates the session timeout configuration.
+func (m *Manager) SetSessionTimeout(timeout time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if timeout > 0 {
+		m.sessionTimeout = timeout
 	}
 }
 
@@ -371,8 +490,16 @@ func (m *Manager) BroadcastNotification(containerID uint, notificationType strin
 
 // Close shuts down the monitoring manager and all sessions.
 func (m *Manager) Close() {
+	// Signal cleanup goroutine to stop
+	close(m.cleanupStopChan)
+
+	// Cancel context
 	m.cancelFunc()
 
+	// Wait for cleanup goroutine to finish
+	m.cleanupWg.Wait()
+
+	// Clean up all sessions
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -408,6 +535,11 @@ func (m *Manager) loadOrCreateConfig(containerID uint) (*models.MonitoringConfig
 
 // onSilenceThreshold is called when a session's silence threshold is reached.
 func (m *Manager) onSilenceThreshold(session *MonitoringSession) {
+	// Check if session is closed before proceeding
+	if session.IsClosed() {
+		return
+	}
+
 	m.mu.RLock()
 	engine := m.strategyEngine
 	m.mu.RUnlock()
@@ -422,10 +554,23 @@ func (m *Manager) onSilenceThreshold(session *MonitoringSession) {
 		return
 	}
 
-	// Execute strategy in background
+	// Execute strategy in background with proper context handling
 	go func() {
+		// Double-check session is still valid
+		if session.IsClosed() {
+			return
+		}
+
+		// Use session's context combined with manager's context
 		ctx, cancel := context.WithTimeout(m.ctx, session.GetThreshold())
 		defer cancel()
+
+		// Also check session context
+		select {
+		case <-session.Context().Done():
+			return
+		default:
+		}
 
 		if err := engine.Execute(ctx, session); err != nil {
 			fmt.Printf("Strategy execution failed for PTY %s (container %d): %v\n", session.PTYSessionID, session.ContainerID, err)

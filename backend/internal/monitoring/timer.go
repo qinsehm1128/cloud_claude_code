@@ -53,16 +53,16 @@ func (s *MonitoringSession) resetTimer() {
 // onTimerExpired is called when the silence threshold is reached.
 func (s *MonitoringSession) onTimerExpired() {
 	s.stateMu.Lock()
-	
-	// Check if still enabled (might have been disabled while timer was running)
-	if !s.enabled {
+
+	// Check if closed or disabled (might have been disabled/closed while timer was running)
+	if s.closed || !s.enabled {
 		s.stateMu.Unlock()
 		return
 	}
 
 	// Update silence duration
 	s.silenceDuration = time.Since(s.lastOutputTime)
-	
+
 	// Get callback
 	callback := s.onSilenceThreshold
 	s.stateMu.Unlock()
@@ -72,9 +72,9 @@ func (s *MonitoringSession) onTimerExpired() {
 		callback(s)
 	}
 
-	// Restart timer for next check (if still enabled)
+	// Restart timer for next check (if still enabled and not closed)
 	s.stateMu.Lock()
-	if s.enabled {
+	if s.enabled && !s.closed {
 		s.startTimer()
 	}
 	s.stateMu.Unlock()

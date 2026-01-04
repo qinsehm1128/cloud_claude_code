@@ -52,10 +52,16 @@ func (s *WebhookStrategy) Execute(ctx context.Context, session *MonitoringSessio
 		}, fmt.Errorf("webhook URL not configured")
 	}
 
+	// Use PTYSessionID instead of PTYSession.ID to avoid nil pointer
+	sessionID := session.PTYSessionID
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("container-%d", session.ContainerID)
+	}
+
 	// Build payload
 	payload := WebhookPayload{
 		ContainerID:     session.ContainerID,
-		SessionID:       session.PTYSession.ID,
+		SessionID:       sessionID,
 		SilenceDuration: int(session.GetSilenceDuration().Seconds()),
 		LastOutput:      session.GetLastOutput(500),
 		Timestamp:       time.Now().Unix(),

@@ -222,9 +222,15 @@ func (a *QueueStrategyAdapter) Execute(ctx context.Context, session *MonitoringS
 		}, fmt.Errorf("queue strategy not initialized")
 	}
 
+	// Use PTYSessionID instead of PTYSession.ID to avoid nil pointer
+	sessionID := session.PTYSessionID
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("container-%d", session.ContainerID)
+	}
+
 	strategyCtx := &StrategyContext{
 		ContainerID:   session.ContainerID,
-		SessionID:     fmt.Sprintf("%d", session.PTYSession.ID),
+		SessionID:     sessionID,
 		ContextBuffer: session.GetLastOutput(4096),
 		Config:        session.Config,
 	}

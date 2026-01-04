@@ -76,6 +76,10 @@ type PTYSession struct {
 	lastActive  time.Time
 	createdAt   time.Time
 	
+	// Monitoring protection - if true, session won't be cleaned up due to timeout
+	monitoringProtected bool
+	monitoringMu        sync.RWMutex
+	
 	// Context for cleanup
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -166,6 +170,11 @@ func (m *PTYManager) cleanupInactiveSessions() {
 
 	now := time.Now()
 	for id, session := range m.sessions {
+		// Skip sessions protected by monitoring
+		if session.IsMonitoringProtected() {
+			continue
+		}
+
 		session.clientsMu.RLock()
 		clientCount := len(session.clients)
 		session.clientsMu.RUnlock()
@@ -556,6 +565,20 @@ type SessionInfo struct {
 	CreatedAt   time.Time `json:"created_at"`
 	LastActive  time.Time `json:"last_active"`
 	Running     bool      `json:"running"`
+}
+
+// SetMonitoringProtected sets whether this session is protected from timeout cleanup
+func (s *PTYSession) SetMonitoringProtected(protected bool) {
+	s.monitoringMu.Lock()
+	defer s.monitoringMu.Unlock()
+	s.monitoringProtected = protected
+}
+
+// IsMonitoringProtected returns whether this session is protected from timeout cleanup
+func (s *PTYSession) IsMonitoringProtected() bool {
+	s.monitoringMu.RLock()
+	defer s.monitoringMu.RUnlock()
+	return s.monitoringProtected
 }
 
 // GetInfo returns session information

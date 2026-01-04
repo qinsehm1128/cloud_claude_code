@@ -61,10 +61,12 @@ type MonitoringSession struct {
 	enabled          bool
 	silenceDuration  time.Duration
 	lastOutputTime   time.Time
+	lastActivityTime time.Time // Last time any activity occurred (for cleanup)
 	lastAction       *ActionSummary
 	lastNotification *NotificationInfo
 	claudeDetected   bool   // Whether Claude Code process is detected in this PTY
 	claudePID        string // PID of detected Claude process (for tracking)
+	closed           bool   // Whether session has been closed
 
 	// Silence timer
 	silenceTimer *time.Timer
@@ -79,8 +81,9 @@ type MonitoringSession struct {
 	cancelFunc context.CancelFunc
 
 	// Client subscribers for status updates
-	subscribers map[string]chan MonitoringStatus
-	subMu       sync.RWMutex
+	subscribers     map[string]chan MonitoringStatus
+	subscriberTimes map[string]time.Time // Track last successful send time per subscriber
+	subMu           sync.RWMutex
 
 	// Strategy trigger callback
 	onSilenceThreshold func(session *MonitoringSession)
@@ -105,18 +108,22 @@ func NewMonitoringSession(containerID uint, dockerID string, ptySessionID string
 		bufferSize = 8192 // Default 8KB
 	}
 
+	now := time.Now()
 	session := &MonitoringSession{
-		ContainerID:    containerID,
-		DockerID:       dockerID,
-		PTYSessionID:   ptySessionID,
-		PTYSession:     ptySession,
-		Config:         config,
-		enabled:        false,
-		lastOutputTime: time.Now(),
-		contextBuffer:  NewRingBuffer(bufferSize),
-		ctx:            ctx,
-		cancelFunc:     cancel,
-		subscribers:    make(map[string]chan MonitoringStatus),
+		ContainerID:      containerID,
+		DockerID:         dockerID,
+		PTYSessionID:     ptySessionID,
+		PTYSession:       ptySession,
+		Config:           config,
+		enabled:          false,
+		lastOutputTime:   now,
+		lastActivityTime: now,
+		closed:           false,
+		contextBuffer:    NewRingBuffer(bufferSize),
+		ctx:              ctx,
+		cancelFunc:       cancel,
+		subscribers:      make(map[string]chan MonitoringStatus),
+		subscriberTimes:  make(map[string]time.Time),
 	}
 
 	return session
@@ -135,6 +142,12 @@ func (s *MonitoringSession) Enable() {
 	s.lastOutputTime = time.Now()
 	s.silenceDuration = 0
 	s.startTimer()
+	
+	// Protect PTY session from timeout cleanup
+	if s.PTYSession != nil {
+		s.PTYSession.SetMonitoringProtected(true)
+	}
+	
 	s.broadcastStatus()
 }
 
@@ -149,6 +162,12 @@ func (s *MonitoringSession) Disable() {
 
 	s.enabled = false
 	s.stopTimer()
+	
+	// Remove PTY session protection
+	if s.PTYSession != nil {
+		s.PTYSession.SetMonitoringProtected(false)
+	}
+	
 	s.broadcastStatus()
 }
 
@@ -165,19 +184,47 @@ func (s *MonitoringSession) OnOutput(data []byte) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 
+	// Check if session is closed
+	if s.closed {
+		return
+	}
+
 	// Update context buffer
 	s.bufferMu.Lock()
 	s.contextBuffer.Write(data)
 	s.bufferMu.Unlock()
 
-	// Reset silence tracking
-	s.lastOutputTime = time.Now()
+	// Reset silence tracking and update activity time
+	now := time.Now()
+	s.lastOutputTime = now
+	s.lastActivityTime = now
 	s.silenceDuration = 0
 
 	// Reset timer if enabled
 	if s.enabled {
 		s.resetTimer()
 	}
+}
+
+// GetLastActivityTime returns the last activity time for cleanup purposes.
+func (s *MonitoringSession) GetLastActivityTime() time.Time {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.lastActivityTime
+}
+
+// UpdateActivityTime manually updates the activity time (e.g., for subscriptions).
+func (s *MonitoringSession) UpdateActivityTime() {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.lastActivityTime = time.Now()
+}
+
+// IsClosed returns whether the session has been closed.
+func (s *MonitoringSession) IsClosed() bool {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.closed
 }
 
 // DetectClaudeProcess checks if Claude Code process is running in this PTY session.
@@ -260,18 +307,30 @@ func (s *MonitoringSession) SetExecInContainer(fn func(cmd []string) (string, er
 
 // StartClaudeDetection starts a background goroutine to periodically check for Claude process.
 func (s *MonitoringSession) StartClaudeDetection(interval time.Duration) {
+	// Check if already closed before starting
+	if s.IsClosed() {
+		return
+	}
+
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		// Initial detection
-		s.DetectClaudeProcess()
+		if !s.IsClosed() {
+			s.DetectClaudeProcess()
+		}
 
 		for {
 			select {
 			case <-s.ctx.Done():
+				fmt.Printf("[Session] Claude detection stopped for session %s\n", s.PTYSessionID)
 				return
 			case <-ticker.C:
+				// Check if session is closed before detection
+				if s.IsClosed() {
+					return
+				}
 				s.DetectClaudeProcess()
 			}
 		}
@@ -373,11 +432,23 @@ func (s *MonitoringSession) SetLastAction(action *ActionSummary) {
 
 // Subscribe adds a subscriber for status updates.
 func (s *MonitoringSession) Subscribe(clientID string) chan MonitoringStatus {
+	// Check if session is closed
+	if s.IsClosed() {
+		return nil
+	}
+
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 
+	now := time.Now()
 	ch := make(chan MonitoringStatus, 10)
 	s.subscribers[clientID] = ch
+	s.subscriberTimes[clientID] = now
+
+	// Update activity time when someone subscribes
+	s.stateMu.Lock()
+	s.lastActivityTime = now
+	s.stateMu.Unlock()
 
 	// Send current status immediately
 	go func() {
@@ -398,17 +469,67 @@ func (s *MonitoringSession) Unsubscribe(clientID string) {
 	if ch, ok := s.subscribers[clientID]; ok {
 		close(ch)
 		delete(s.subscribers, clientID)
+		delete(s.subscriberTimes, clientID)
 	}
+}
+
+// SubscriberTimeout is the maximum time a subscriber can be inactive before cleanup
+const SubscriberTimeout = 5 * time.Minute
+
+// CleanupStaleSubscribers removes subscribers that haven't received updates for too long.
+// This prevents memory leaks from disconnected clients that didn't call Unsubscribe.
+func (s *MonitoringSession) CleanupStaleSubscribers() int {
+	if s.IsClosed() {
+		return 0
+	}
+
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+
+	now := time.Now()
+	var staleIDs []string
+
+	for clientID, lastTime := range s.subscriberTimes {
+		if now.Sub(lastTime) > SubscriberTimeout {
+			staleIDs = append(staleIDs, clientID)
+		}
+	}
+
+	for _, clientID := range staleIDs {
+		if ch, ok := s.subscribers[clientID]; ok {
+			close(ch)
+			delete(s.subscribers, clientID)
+			delete(s.subscriberTimes, clientID)
+		}
+	}
+
+	if len(staleIDs) > 0 {
+		fmt.Printf("[Session] Cleaned up %d stale subscribers for session %s\n", len(staleIDs), s.PTYSessionID)
+	}
+
+	return len(staleIDs)
+}
+
+// GetSubscriberCount returns the number of active subscribers.
+func (s *MonitoringSession) GetSubscriberCount() int {
+	s.subMu.RLock()
+	defer s.subMu.RUnlock()
+	return len(s.subscribers)
 }
 
 // Close cleans up all resources associated with this session.
 func (s *MonitoringSession) Close() {
 	s.stateMu.Lock()
+	if s.closed {
+		s.stateMu.Unlock()
+		return // Already closed, avoid double cleanup
+	}
+	s.closed = true
 	s.enabled = false
 	s.stopTimer()
 	s.stateMu.Unlock()
 
-	// Cancel context
+	// Cancel context (this will stop the Claude detection goroutine)
 	s.cancelFunc()
 
 	// Close all subscriber channels
@@ -416,6 +537,7 @@ func (s *MonitoringSession) Close() {
 	for id, ch := range s.subscribers {
 		close(ch)
 		delete(s.subscribers, id)
+		delete(s.subscriberTimes, id)
 	}
 	s.subMu.Unlock()
 
@@ -423,6 +545,8 @@ func (s *MonitoringSession) Close() {
 	s.bufferMu.Lock()
 	s.contextBuffer.Clear()
 	s.bufferMu.Unlock()
+
+	fmt.Printf("[Session] Closed session %s for container %d\n", s.PTYSessionID, s.ContainerID)
 }
 
 // Context returns the session's context for cancellation.
@@ -483,14 +607,18 @@ func (s *MonitoringSession) broadcastStatus() {
 		LastAction:      s.lastAction,
 	}
 
-	s.subMu.RLock()
-	defer s.subMu.RUnlock()
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
 
-	for _, ch := range s.subscribers {
+	now := time.Now()
+	for clientID, ch := range s.subscribers {
 		select {
 		case ch <- status:
+			// Successfully sent, update timestamp
+			s.subscriberTimes[clientID] = now
 		default:
-			// Channel full, skip
+			// Channel full, skip but don't update timestamp
+			// Subscriber will be cleaned up if it stays full too long
 		}
 	}
 }

@@ -19,6 +19,7 @@ type DockerEventListener struct {
 	cancelFunc   context.CancelFunc
 	wg           sync.WaitGroup
 	running      bool
+	closed       bool // Whether Close has been called
 	mu           sync.Mutex
 }
 
@@ -42,6 +43,10 @@ func NewDockerEventListener(manager *Manager) (*DockerEventListener, error) {
 // Start begins listening for Docker events.
 func (l *DockerEventListener) Start() error {
 	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		return fmt.Errorf("listener has been closed")
+	}
 	if l.running {
 		l.mu.Unlock()
 		return nil
@@ -59,21 +64,43 @@ func (l *DockerEventListener) Start() error {
 // Stop stops listening for Docker events.
 func (l *DockerEventListener) Stop() {
 	l.mu.Lock()
-	if !l.running {
+	if l.closed {
 		l.mu.Unlock()
 		return
 	}
+	wasRunning := l.running
 	l.running = false
+	l.closed = true
 	l.mu.Unlock()
 
+	// Cancel context to stop the listener goroutine
 	l.cancelFunc()
-	l.wg.Wait()
 
-	if l.dockerClient != nil {
-		l.dockerClient.Close()
+	// Wait for listener goroutine if it was running
+	if wasRunning {
+		l.wg.Wait()
 	}
 
-	log.Println("[DockerEventListener] Stopped listening for Docker events")
+	// Always close the Docker client
+	if l.dockerClient != nil {
+		l.dockerClient.Close()
+		l.dockerClient = nil
+	}
+
+	log.Println("[DockerEventListener] Stopped and cleaned up Docker event listener")
+}
+
+// Close is an alias for Stop to implement io.Closer interface.
+func (l *DockerEventListener) Close() error {
+	l.Stop()
+	return nil
+}
+
+// IsRunning returns whether the listener is currently running.
+func (l *DockerEventListener) IsRunning() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.running && !l.closed
 }
 
 // listen is the main event loop.
