@@ -67,7 +67,15 @@ log_header() { echo -e "${BOLD}$1${NC}"; }
 
 # 显示标题
 show_header() {
-    clear
+    # 在 Windows Git Bash 环境下，clear 可能导致输出问题
+    # 使用更可靠的方式：清屏后强制刷新输出
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$(uname -s)" =~ MINGW ]]; then
+        # Windows 环境：使用 printf 输出换行代替 clear，避免清屏问题
+        printf '\n\n\n'
+    else
+        clear
+    fi
+
     echo -e "${CYAN}+============================================================+${NC}"
     echo -e "${CYAN}|${NC}  ${BOLD}Claude Code Container Platform${NC}                       ${CYAN}|${NC}"
     echo -e "${CYAN}|${NC}  ${MAGENTA}统一部署向导${NC} v${VERSION}                                ${CYAN}|${NC}"

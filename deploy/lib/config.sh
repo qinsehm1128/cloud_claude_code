@@ -301,6 +301,17 @@ quick_config_check() {
         fi
     fi
 
+    # 配置完整时，显示确认信息
+    echo ""
+    log_header ">>> 第 2 步：配置检查"
+    show_separator
+    echo ""
+    log_success "环境配置已完成"
+    echo ""
+    show_separator
+    echo ""
+    press_enter
+
     return 0
 }
 
