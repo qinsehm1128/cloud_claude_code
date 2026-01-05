@@ -57,7 +57,7 @@ verify_http_endpoint() {
 # 运行部署验证
 run_deployment_verification() {
     show_header
-    log_header "${ICON_CHECK} 第 6 步：部署验证"
+    log_header ">>> 第 6 步：部署验证"
     show_separator
     echo ""
 

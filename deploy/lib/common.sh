@@ -16,17 +16,17 @@ MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-ICON_CHECK="✓"
-ICON_CROSS="✗"
-ICON_ARROW="→"
-ICON_STAR="★"
-ICON_INFO="ℹ"
-ICON_WARN="⚠"
-ICON_ROCKET="🚀"
-ICON_GEAR="⚙"
-ICON_KEY="🔑"
-ICON_PACKAGE="📦"
-ICON_WRENCH="🔧"
+ICON_CHECK="[OK]"
+ICON_CROSS="[X]"
+ICON_ARROW="->"
+ICON_STAR="*"
+ICON_INFO="[i]"
+ICON_WARN="[!]"
+ICON_ROCKET=">>>"
+ICON_GEAR="[*]"
+ICON_KEY="[K]"
+ICON_PACKAGE="[P]"
+ICON_WRENCH="[W]"
 
 # ============================================
 # 全局变量
@@ -68,16 +68,16 @@ log_header() { echo -e "${BOLD}$1${NC}"; }
 # 显示标题
 show_header() {
     clear
-    echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}  ${BOLD}Claude Code Container Platform${NC}                       ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  ${MAGENTA}统一部署向导${NC} v${VERSION}                                ${CYAN}║${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${CYAN}+============================================================+${NC}"
+    echo -e "${CYAN}|${NC}  ${BOLD}Claude Code Container Platform${NC}                       ${CYAN}|${NC}"
+    echo -e "${CYAN}|${NC}  ${MAGENTA}统一部署向导${NC} v${VERSION}                                ${CYAN}|${NC}"
+    echo -e "${CYAN}+============================================================+${NC}"
     echo ""
 }
 
 # 显示分隔线
 show_separator() {
-    echo -e "${CYAN}──────────────────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}------------------------------------------------------------${NC}"
 }
 
 # 显示进度条
@@ -90,8 +90,8 @@ show_progress() {
     local empty=$((10 - filled))
 
     local bar=""
-    for ((i=0; i<filled; i++)); do bar+="▓"; done
-    for ((i=0; i<empty; i++)); do bar+="░"; done
+    for ((i=0; i<filled; i++)); do bar+="#"; done
+    for ((i=0; i<empty; i++)); do bar+="-"; done
 
     echo -ne "\r  [${bar}] ${percent}% ${message}  "
     [ $current -eq $total ] && echo ""

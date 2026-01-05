@@ -66,7 +66,7 @@ confirm_deployment_plan() {
     local mode=$1
 
     show_header
-    log_header "${ICON_INFO} 第 4 步：确认部署计划"
+    log_header ">>> 第 4 步：确认部署计划"
     show_separator
     echo ""
 
@@ -138,7 +138,7 @@ confirm_deployment_plan() {
 # ============================================
 execute_quick_deploy() {
     show_header
-    log_header "${ICON_ROCKET} 第 5 步：执行部署"
+    log_header ">>> 第 5 步：执行部署"
     show_separator
     echo ""
 
@@ -195,7 +195,7 @@ execute_quick_deploy() {
 # ============================================
 execute_dev_deploy() {
     show_header
-    log_header "${ICON_PACKAGE} 第 5 步：构建开发环境"
+    log_header ">>> 第 5 步：构建开发环境"
     show_separator
     echo ""
 
@@ -227,7 +227,7 @@ execute_dev_deploy() {
 # ============================================
 execute_prod_deploy() {
     show_header
-    log_header "${ICON_PACKAGE} 第 5 步：执行生产部署"
+    log_header ">>> 第 5 步：执行生产部署"
     show_separator
     echo ""
 
@@ -292,7 +292,7 @@ execute_prod_deploy() {
 execute_custom_deploy() {
     while true; do
         show_header
-        log_header "${ICON_GEAR} 自定义部署步骤"
+        log_header ">>> 自定义部署步骤"
         show_separator
         echo ""
 
@@ -356,7 +356,7 @@ execute_custom_deploy() {
 # ============================================
 show_completion() {
     show_header
-    log_header "${ICON_CHECK} 第 7 步：部署完成"
+    log_header ">>> 第 7 步：部署完成"
     show_separator
     echo ""
 

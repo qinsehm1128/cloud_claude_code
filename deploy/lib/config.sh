@@ -30,7 +30,7 @@ check_env_complete() {
 # 配置向导主流程
 run_config_wizard() {
     show_header
-    log_header "${ICON_GEAR} 第 2 步：配置向导"
+    log_header ">>> 第 2 步：配置向导"
     show_separator
     echo ""
 
@@ -279,7 +279,7 @@ EOF
 quick_config_check() {
     if ! check_env_complete; then
         show_header
-        log_header "${ICON_WARN} 配置检查"
+        log_header "[!] 配置检查"
         show_separator
         echo ""
 
