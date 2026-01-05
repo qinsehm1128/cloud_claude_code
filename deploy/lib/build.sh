@@ -131,11 +131,16 @@ install_files() {
         fi
 
         # 处理配置文件
-        if [ ! -f "$BACKEND_DIR/.env" ]; then
-            if [ -f "$SCRIPT_ROOT/$ENV_FILE" ]; then
-                sudo cp "$SCRIPT_ROOT/$ENV_FILE" "$BACKEND_DIR/.env"
-                log_info "已复制配置文件"
+        if [ -f "$SCRIPT_ROOT/$ENV_FILE" ]; then
+            # 如果目标目录已有配置文件，先备份
+            if [ -f "$BACKEND_DIR/.env" ]; then
+                sudo cp "$BACKEND_DIR/.env" "$BACKEND_DIR/.env.backup.$(date +%Y%m%d_%H%M%S)"
+                log_info "已备份现有配置文件"
             fi
+
+            # 复制新配置文件
+            sudo cp "$SCRIPT_ROOT/$ENV_FILE" "$BACKEND_DIR/.env"
+            log_success "已更新配置文件"
         fi
 
         log_success "后端已安装"
