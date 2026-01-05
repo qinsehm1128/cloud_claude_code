@@ -43,17 +43,19 @@ show_welcome() {
 # 选择部署模式
 # ============================================
 select_deployment_mode() {
-    # 不调用 show_header，避免在 Windows 环境下的清屏/缓冲问题
-    echo ""
-    log_header ">>> 第 3 步：选择部署模式"
-    show_separator
-    echo ""
+    # 将所有输出重定向到 stderr，避免被命令替换 $(...) 捕获
+    {
+        echo ""
+        log_header ">>> 第 3 步：选择部署模式"
+        show_separator
+        echo ""
 
-    show_menu "请选择部署模式" \
-        "[*] 快速一键部署 (推荐新手)" \
-        "[D] 开发环境模式 (仅构建，不部署)" \
-        "[P] 生产环境模式 (完整部署)" \
-        "[C] 自定义部署步骤"
+        show_menu "请选择部署模式" \
+            "[*] 快速一键部署 (推荐新手)" \
+            "[D] 开发环境模式 (仅构建，不部署)" \
+            "[P] 生产环境模式 (完整部署)" \
+            "[C] 自定义部署步骤"
+    } >&2
 
     local choice=$(read_choice 4)
 
