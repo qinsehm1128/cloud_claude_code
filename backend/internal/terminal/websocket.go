@@ -147,6 +147,9 @@ func (s *TerminalService) GetPTYManager() *PTYManager {
 
 // HandleConnection handles a new WebSocket connection
 func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.Conn, dockerID string, containerID uint, sessionID string) error {
+	// Create a mutex to protect WebSocket writes
+	var writeMu sync.Mutex
+
 	// Configure WebSocket
 	conn.SetReadLimit(maxMessageSize)
 	conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -162,7 +165,13 @@ func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.
 	// Get or create PTY session
 	session, isExisting, err := s.ptyManager.GetOrCreateSession(ctx, dockerID, containerID, sessionID, cols, rows)
 	if err != nil {
-		s.sendError(conn, fmt.Sprintf("Failed to create terminal session: %v", err))
+		// No writeMu yet, so directly write error (only this goroutine at this point)
+		msg := TerminalMessage{
+			Type:  MessageTypeError,
+			Error: fmt.Sprintf("Failed to create terminal session: %v", err),
+		}
+		conn.SetWriteDeadline(time.Now().Add(writeWait))
+		conn.WriteJSON(msg)
 		return err
 	}
 
@@ -170,14 +179,14 @@ func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.
 	clientID := uuid.New().String()
 
 	// Send session ID to client
-	s.sendMessage(conn, TerminalMessage{
+	s.sendMessageWithLock(conn, &writeMu, TerminalMessage{
 		Type:      MessageTypeSession,
 		SessionID: session.ID,
 	})
 
 	// If reconnecting to existing session, send history in chunks
 	if isExisting {
-		go s.sendHistoryInChunks(conn, session)
+		go s.sendHistoryInChunks(conn, &writeMu, session)
 	}
 
 	// Register as client to receive output
@@ -193,16 +202,16 @@ func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.
 
 	// Read from session output channel and send to WebSocket
 	go func() {
-		errChan <- s.forwardOutputToWebSocket(conn, outputChan, done)
+		errChan <- s.forwardOutputToWebSocket(conn, &writeMu, outputChan, done)
 	}()
 
 	// Read from WebSocket and write to PTY
 	go func() {
-		errChan <- s.readFromWebSocket(ctx, conn, session)
+		errChan <- s.readFromWebSocket(ctx, conn, &writeMu, session)
 	}()
 
 	// Start ping ticker
-	go s.pingLoop(conn, done)
+	go s.pingLoop(conn, &writeMu, done)
 
 	// Wait for error or context cancellation
 	select {
@@ -216,50 +225,51 @@ func (s *TerminalService) HandleConnection(ctx context.Context, conn *websocket.
 
 // sendHistoryInChunks sends history data in chunks for large histories
 // Uses adaptive flow control instead of fixed delays
-func (s *TerminalService) sendHistoryInChunks(conn *websocket.Conn, session *PTYSession) {
+func (s *TerminalService) sendHistoryInChunks(conn *websocket.Conn, writeMu *sync.Mutex, session *PTYSession) {
 	history := session.GetHistory()
 	if len(history) == 0 {
 		return
 	}
-	
+
 	totalSize := int64(len(history))
 	totalChunks := (len(history) + historyChunkSize - 1) / historyChunkSize
-	
+
 	// Send history start message
-	s.sendMessage(conn, TerminalMessage{
+	s.sendMessageWithLock(conn, writeMu, TerminalMessage{
 		Type:        MessageTypeHistoryStart,
 		TotalSize:   totalSize,
 		TotalChunks: totalChunks,
 	})
-	
+
 	// Send history in chunks with adaptive flow control
 	// For small histories (< 5 chunks), send without delay
 	// For larger histories, use minimal delay only when needed
 	const fastChunkThreshold = 5
-	
+
 	for i := 0; i < len(history); i += historyChunkSize {
 		end := i + historyChunkSize
 		if end > len(history) {
 			end = len(history)
 		}
-		
+
 		chunkIndex := i / historyChunkSize
-		
-		// Set write deadline for each chunk
+
+		// Protect write with mutex
+		writeMu.Lock()
 		conn.SetWriteDeadline(time.Now().Add(writeWait))
-		
 		err := conn.WriteJSON(TerminalMessage{
 			Type:        MessageTypeHistory,
 			Data:        string(history[i:end]),
 			ChunkIndex:  chunkIndex,
 			TotalChunks: totalChunks,
 		})
-		
+		writeMu.Unlock()
+
 		if err != nil {
 			// Client disconnected or write failed, stop sending
 			return
 		}
-		
+
 		// Only add minimal delay for large histories to prevent buffer overflow
 		// Skip delay for small histories or last few chunks
 		if totalChunks > fastChunkThreshold && chunkIndex < totalChunks-fastChunkThreshold {
@@ -268,15 +278,15 @@ func (s *TerminalService) sendHistoryInChunks(conn *websocket.Conn, session *PTY
 			time.Sleep(1 * time.Millisecond)
 		}
 	}
-	
+
 	// Send history end message
-	s.sendMessage(conn, TerminalMessage{
+	s.sendMessageWithLock(conn, writeMu, TerminalMessage{
 		Type: MessageTypeHistoryEnd,
 	})
 }
 
 // forwardOutputToWebSocket forwards PTY output to WebSocket
-func (s *TerminalService) forwardOutputToWebSocket(conn *websocket.Conn, outputChan chan []byte, done chan struct{}) error {
+func (s *TerminalService) forwardOutputToWebSocket(conn *websocket.Conn, writeMu *sync.Mutex, outputChan chan []byte, done chan struct{}) error {
 	for {
 		select {
 		case <-done:
@@ -289,8 +299,11 @@ func (s *TerminalService) forwardOutputToWebSocket(conn *websocket.Conn, outputC
 				Type: MessageTypeOutput,
 				Data: string(data),
 			}
+			writeMu.Lock()
 			conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := conn.WriteJSON(msg); err != nil {
+			err := conn.WriteJSON(msg)
+			writeMu.Unlock()
+			if err != nil {
 				return err
 			}
 		}
@@ -298,7 +311,7 @@ func (s *TerminalService) forwardOutputToWebSocket(conn *websocket.Conn, outputC
 }
 
 // readFromWebSocket reads from WebSocket and writes to PTY
-func (s *TerminalService) readFromWebSocket(ctx context.Context, conn *websocket.Conn, session *PTYSession) error {
+func (s *TerminalService) readFromWebSocket(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, session *PTYSession) error {
 	for {
 		var msg TerminalMessage
 		if err := conn.ReadJSON(&msg); err != nil {
@@ -317,7 +330,7 @@ func (s *TerminalService) readFromWebSocket(ctx context.Context, conn *websocket
 		case MessageTypeResize:
 			if msg.Cols > 0 && msg.Rows > 0 {
 				if err := s.ptyManager.ResizeSession(ctx, session.ID, msg.Cols, msg.Rows); err != nil {
-					s.sendError(conn, fmt.Sprintf("Failed to resize terminal: %v", err))
+					s.sendErrorWithLock(conn, writeMu, fmt.Sprintf("Failed to resize terminal: %v", err))
 				}
 			}
 
@@ -336,7 +349,7 @@ func (s *TerminalService) readFromWebSocket(ctx context.Context, conn *websocket
 }
 
 // pingLoop sends periodic ping messages
-func (s *TerminalService) pingLoop(conn *websocket.Conn, done chan struct{}) {
+func (s *TerminalService) pingLoop(conn *websocket.Conn, writeMu *sync.Mutex, done chan struct{}) {
 	ticker := time.NewTicker(pingPeriod)
 	defer ticker.Stop()
 
@@ -345,8 +358,11 @@ func (s *TerminalService) pingLoop(conn *websocket.Conn, done chan struct{}) {
 		case <-done:
 			return
 		case <-ticker.C:
+			writeMu.Lock()
 			conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			err := conn.WriteMessage(websocket.PingMessage, nil)
+			writeMu.Unlock()
+			if err != nil {
 				return
 			}
 		}
@@ -359,8 +375,28 @@ func (s *TerminalService) sendMessage(conn *websocket.Conn, msg TerminalMessage)
 	conn.WriteJSON(msg)
 }
 
+// sendMessageWithLock sends a message to the WebSocket with mutex protection
+func (s *TerminalService) sendMessageWithLock(conn *websocket.Conn, writeMu *sync.Mutex, msg TerminalMessage) {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	conn.SetWriteDeadline(time.Now().Add(writeWait))
+	conn.WriteJSON(msg)
+}
+
 // sendError sends an error message to the WebSocket
 func (s *TerminalService) sendError(conn *websocket.Conn, errMsg string) {
+	msg := TerminalMessage{
+		Type:  MessageTypeError,
+		Error: errMsg,
+	}
+	conn.SetWriteDeadline(time.Now().Add(writeWait))
+	conn.WriteJSON(msg)
+}
+
+// sendErrorWithLock sends an error message to the WebSocket with mutex protection
+func (s *TerminalService) sendErrorWithLock(conn *websocket.Conn, writeMu *sync.Mutex, errMsg string) {
+	writeMu.Lock()
+	defer writeMu.Unlock()
 	msg := TerminalMessage{
 		Type:  MessageTypeError,
 		Error: errMsg,

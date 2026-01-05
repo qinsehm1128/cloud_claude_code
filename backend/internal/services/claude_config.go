@@ -107,10 +107,11 @@ func (s *ClaudeConfigService) HasEnvVars() bool {
 }
 
 // ParseEnvVars parses and validates environment variables from multi-line string
-// Format: VAR_NAME=value (one per line)
+// Format: VAR_NAME=value or export VAR_NAME=value (one per line)
+// Supports quoted values: VAR="value" or VAR='value'
 func (s *ClaudeConfigService) ParseEnvVars(envVarsStr string) (map[string]string, error) {
 	result := make(map[string]string)
-	
+
 	if envVarsStr == "" {
 		return result, nil
 	}
@@ -122,6 +123,10 @@ func (s *ClaudeConfigService) ParseEnvVars(envVarsStr string) (map[string]string
 			continue // Skip empty lines and comments
 		}
 
+		// Remove "export" prefix if present
+		line = strings.TrimPrefix(line, "export ")
+		line = strings.TrimSpace(line)
+
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
 			return nil, ErrInvalidEnvVarFormat
@@ -130,14 +135,38 @@ func (s *ClaudeConfigService) ParseEnvVars(envVarsStr string) (map[string]string
 		varName := strings.TrimSpace(parts[0])
 		varValue := strings.TrimSpace(parts[1])
 
+		// Validate variable name
 		if !envVarNamePattern.MatchString(varName) {
 			return nil, ErrInvalidEnvVarFormat
 		}
+
+		// Remove surrounding quotes if present (both single and double quotes)
+		varValue = unquoteValue(varValue)
 
 		result[varName] = varValue
 	}
 
 	return result, nil
+}
+
+// unquoteValue removes surrounding quotes from a value
+// Supports both single quotes ('value') and double quotes ("value")
+func unquoteValue(value string) string {
+	if len(value) < 2 {
+		return value
+	}
+
+	// Check for double quotes
+	if strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+		return value[1 : len(value)-1]
+	}
+
+	// Check for single quotes
+	if strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'") {
+		return value[1 : len(value)-1]
+	}
+
+	return value
 }
 
 // GetContainerEnvVars returns all environment variables for container creation
@@ -181,11 +210,16 @@ func (s *ClaudeConfigService) GetStartupCommand() string {
 }
 
 // ValidateEnvVarFormat validates a single environment variable line
+// Supports: VAR=value, export VAR=value, VAR="value", VAR='value'
 func ValidateEnvVarFormat(line string) bool {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") {
 		return true // Empty lines and comments are valid
 	}
+
+	// Remove "export" prefix if present
+	line = strings.TrimPrefix(line, "export ")
+	line = strings.TrimSpace(line)
 
 	parts := strings.SplitN(line, "=", 2)
 	if len(parts) != 2 {
