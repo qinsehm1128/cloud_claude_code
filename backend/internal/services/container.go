@@ -28,8 +28,9 @@ var (
 	ErrInvalidMemoryLimit      = errors.New("invalid memory limit")
 )
 
-// Container name validation regex (Docker naming rules)
-var containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+// Container name validation - allows Unicode characters including Chinese
+// Must start with alphanumeric or Unicode letter, followed by alphanumeric, Unicode, underscores, dots, or hyphens
+var containerNameRegex = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}_.-]*$`)
 
 // validateContainerName validates the container name
 func validateContainerName(name string) error {
@@ -37,7 +38,7 @@ func validateContainerName(name string) error {
 		return fmt.Errorf("%w: name must be 1-63 characters", ErrInvalidContainerName)
 	}
 	if !containerNameRegex.MatchString(name) {
-		return fmt.Errorf("%w: name can only contain alphanumeric characters, underscores, dots, and hyphens", ErrInvalidContainerName)
+		return fmt.Errorf("%w: name can only contain letters (including Unicode), numbers, underscores, dots, and hyphens", ErrInvalidContainerName)
 	}
 	return nil
 }
