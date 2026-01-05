@@ -394,8 +394,22 @@ restore_backup() {
 # ============================================
 
 # 初始化脚本根目录
+# 向上遍历查找包含 frontend 和 backend 的项目根目录
 init_script_root() {
-    SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[1]}")" && cd .. && pwd)"
+    local current_dir="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
+    
+    # 向上查找项目根目录（最多5层）
+    local search_dir="$current_dir"
+    for i in 1 2 3 4 5; do
+        if [ -d "$search_dir/frontend" ] && [ -d "$search_dir/backend" ]; then
+            SCRIPT_ROOT="$search_dir"
+            return 0
+        fi
+        search_dir="$(dirname "$search_dir")"
+    done
+    
+    # 如果找不到，使用当前目录的父目录作为回退
+    SCRIPT_ROOT="$(cd "$current_dir" && cd .. && pwd)"
 }
 
 # 检查是否在项目根目录
