@@ -228,92 +228,72 @@ run_config_wizard() {
         log_info "已备份现有配置"
     fi
 
-    # 生成配置文件
-    cat > "$SCRIPT_ROOT/$ENV_FILE" << EOF
-# Claude Code Container Platform - Environment Configuration
-# 环境配置文件
-#
-# 此文件由配置向导自动生成
-# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
+    # 使用 printf 生成配置文件，避免 heredoc 的编码和变量展开问题
+    local env_file="$SCRIPT_ROOT/$ENV_FILE"
 
-# ============================================
-# 基础配置
-# ============================================
+    {
+        printf '# Claude Code Container Platform - Environment Configuration\n'
+        printf '# Generated: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+        printf '# Encoding: UTF-8 (No BOM)\n'
+        printf '\n'
 
-# 后端服务端口
-PORT=$PORT
+        printf '# ============================================\n'
+        printf '# Basic Configuration\n'
+        printf '# ============================================\n'
+        printf '\n'
+        printf 'PORT=%s\n' "$PORT"
+        printf 'FRONTEND_PORT=%s\n' "$FRONTEND_PORT"
+        printf '\n'
 
-# 前端开发服务器端口 (仅开发环境使用)
-FRONTEND_PORT=$FRONTEND_PORT
+        printf '# ============================================\n'
+        printf '# Admin Account\n'
+        printf '# ============================================\n'
+        printf '\n'
+        printf 'ADMIN_USERNAME=%s\n' "$ADMIN_USERNAME"
+        printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
+        printf '\n'
 
-# ============================================
-# 管理员账户
-# ============================================
+        printf '# ============================================\n'
+        printf '# Security Configuration\n'
+        printf '# ============================================\n'
+        printf '\n'
+        printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
+        printf '\n'
 
-# 管理员用户名
-ADMIN_USERNAME=$ADMIN_USERNAME
+        printf '# ============================================\n'
+        printf '# Docker Configuration\n'
+        printf '# ============================================\n'
+        printf '\n'
+        printf 'AUTO_START_TRAEFIK=%s\n' "$AUTO_START_TRAEFIK"
+        printf '\n'
 
-# 管理员密码
-ADMIN_PASSWORD=$ADMIN_PASSWORD
+        # 条件输出 CODE_SERVER_BASE_DOMAIN
+        if [ -n "$CODE_SERVER_BASE_DOMAIN" ]; then
+            printf 'CODE_SERVER_BASE_DOMAIN=%s\n' "$CODE_SERVER_BASE_DOMAIN"
+        else
+            printf '# CODE_SERVER_BASE_DOMAIN=code.example.com\n'
+        fi
+        printf '\n'
 
-# ============================================
-# 安全配置
-# ============================================
+        printf '# ============================================\n'
+        printf '# Optional Configuration\n'
+        printf '# ============================================\n'
+        printf '\n'
+        printf '# DATA_DIR=./data\n'
+        printf '# LOG_DIR=./logs\n'
+        printf '# DATABASE_PATH=./data/cc-platform.db\n'
+        printf '# LOG_LEVEL=info\n'
+        printf '# DOCKER_NETWORK=cc-network\n'
+        printf '# IMAGE_PREFIX=cc\n'
+        printf '# CONTAINER_MEMORY_LIMIT=2g\n'
+        printf '# CONTAINER_CPU_LIMIT=2\n'
+        printf '# TRAEFIK_HTTP_PORT_START=38000\n'
+        printf '# TRAEFIK_HTTP_PORT_END=39000\n'
+        printf '# NODE_ENV=production\n'
+        printf '# DEBUG=false\n'
+    } > "$env_file"
 
-# JWT 密钥 (用于生成和验证 JWT token)
-JWT_SECRET=$JWT_SECRET
-
-# ============================================
-# Docker 配置
-# ============================================
-
-# 是否自动启动 Traefik (容器反向代理)
-AUTO_START_TRAEFIK=$AUTO_START_TRAEFIK
-
-# Code-Server 子域名基础域名
-${CODE_SERVER_BASE_DOMAIN:+CODE_SERVER_BASE_DOMAIN=$CODE_SERVER_BASE_DOMAIN}
-${CODE_SERVER_BASE_DOMAIN:-# CODE_SERVER_BASE_DOMAIN=code.example.com}
-
-# ============================================
-# 其他可选配置
-# ============================================
-
-# 数据目录 (默认: ./data)
-# DATA_DIR=./data
-
-# 日志目录 (默认: ./logs)
-# LOG_DIR=./logs
-
-# 数据库文件路径
-# DATABASE_PATH=./data/cc-platform.db
-
-# 日志级别 (debug, info, warn, error)
-# LOG_LEVEL=info
-
-# Docker 网络名称
-# DOCKER_NETWORK=cc-network
-
-# 容器镜像前缀
-# IMAGE_PREFIX=cc
-
-# 容器默认内存限制 (默认: 2g)
-# CONTAINER_MEMORY_LIMIT=2g
-
-# 容器默认 CPU 限制 (默认: 2)
-# CONTAINER_CPU_LIMIT=2
-
-# Traefik HTTP 端口范围 (默认: 38000-39000)
-# TRAEFIK_HTTP_PORT_START=38000
-# TRAEFIK_HTTP_PORT_END=39000
-
-# 环境类型 (development, production)
-# NODE_ENV=production
-
-# 是否启用调试模式
-# DEBUG=false
-EOF
-
-    chmod 600 "$SCRIPT_ROOT/$ENV_FILE"
+    chmod 600 "$env_file"
     log_success "配置已保存到 $ENV_FILE"
 
     # 保存部署配置

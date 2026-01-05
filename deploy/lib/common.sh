@@ -119,10 +119,10 @@ read_input() {
 
     if [ -n "$default" ]; then
         read -p "$(echo -e ${CYAN}${prompt}${NC} [${YELLOW}${default}${NC}]: )" result
-        echo "${result:-$default}"
+        printf '%s' "${result:-$default}"
     else
         read -p "$(echo -e ${CYAN}${prompt}${NC}: )" result
-        echo "$result"
+        printf '%s' "$result"
     fi
 }
 
@@ -132,8 +132,8 @@ read_password() {
     local password
 
     read -s -p "$(echo -e ${CYAN}${prompt}${NC}: )" password
-    echo
-    echo "$password"
+    echo >&2
+    printf '%s' "$password"
 }
 
 # 读取确认
