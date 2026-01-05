@@ -257,11 +257,26 @@ load_deploy_config() {
 
 # 保存部署配置
 save_deploy_config() {
-    cat > "$SCRIPT_ROOT/$CONFIG_FILE" << EOF
-# 部署配置
-FRONTEND_DIR="$FRONTEND_DIR"
-BACKEND_DIR="$BACKEND_DIR"
-EOF
+    # 使用纯 ASCII 输出，避免编码问题
+    # 直接写入变量值，不使用中文注释
+    local config_file="$SCRIPT_ROOT/$CONFIG_FILE"
+
+    # 确保父目录存在
+    local config_dir="$(dirname "$config_file")"
+    [ -d "$config_dir" ] || mkdir -p "$config_dir"
+
+    # 写入配置（使用 printf，避免 cat heredoc 的编码问题）
+    {
+        printf '# Deployment Configuration\n'
+        printf '# Generated: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+        printf '# Encoding: UTF-8 (No BOM)\n'
+        printf '\n'
+        printf 'FRONTEND_DIR="%s"\n' "$FRONTEND_DIR"
+        printf 'BACKEND_DIR="%s"\n' "$BACKEND_DIR"
+    } > "$config_file"
+
+    # 设置合适的权限
+    chmod 644 "$config_file" 2>/dev/null || true
 }
 
 # 加载环境配置
@@ -312,6 +327,42 @@ validate_domain() {
     fi
 }
 
+# 清理路径（移除尾部斜杠，规范化路径）
+sanitize_path() {
+    local path="$1"
+
+    # 移除尾部的斜杠
+    path="${path%/}"
+
+    # 移除路径两端的空格
+    path=$(echo "$path" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+    # 在 Windows 环境下，转换反斜杠为正斜杠
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$(uname -s)" =~ MINGW ]]; then
+        path="${path//\\//}"
+    fi
+
+    echo "$path"
+}
+
+# 验证路径
+validate_path() {
+    local path="$1"
+
+    # 检查路径是否为空
+    if [ -z "$path" ]; then
+        return 1
+    fi
+
+    # 检查路径是否包含非法字符
+    # 允许：字母、数字、斜杠、下划线、连字符、点、空格、冒号（Windows 驱动器）
+    if [[ ! "$path" =~ ^[a-zA-Z0-9/_.\[:space:\]:-]+$ ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
 # ============================================
 # 备份和回滚函数
 # ============================================
@@ -338,13 +389,15 @@ create_backup() {
     # 备份配置
     [ -f "$SCRIPT_ROOT/$ENV_FILE" ] && cp "$SCRIPT_ROOT/$ENV_FILE" "$backup_path/"
 
-    # 保存备份信息
-    cat > "$backup_path/info.txt" << EOF
-备份时间: $(date '+%Y-%m-%d %H:%M:%S')
-前端目录: $FRONTEND_DIR
-后端目录: $BACKEND_DIR
-服务状态: $(systemctl is-active $SERVICE_NAME 2>/dev/null || echo "未知")
-EOF
+    # 保存备份信息（使用 printf 避免编码问题）
+    {
+        printf 'Backup Information\n'
+        printf '==================\n'
+        printf 'Backup Time: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+        printf 'Frontend Dir: %s\n' "$FRONTEND_DIR"
+        printf 'Backend Dir: %s\n' "$BACKEND_DIR"
+        printf 'Service Status: %s\n' "$(systemctl is-active $SERVICE_NAME 2>/dev/null || echo 'unknown')"
+    } > "$backup_path/info.txt"
 
     log_success "备份完成: $backup_name"
     echo "$backup_name"

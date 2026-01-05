@@ -54,11 +54,31 @@ run_config_wizard() {
 
     # 前端部署目录
     local default_frontend_dir="${FRONTEND_DIR:-/var/www/cc-platform}"
-    FRONTEND_DIR=$(read_input "前端部署目录 (Nginx 静态文件目录)" "$default_frontend_dir")
+    while true; do
+        local input_frontend_dir=$(read_input "前端部署目录 (Nginx 静态文件目录)" "$default_frontend_dir")
+        FRONTEND_DIR=$(sanitize_path "$input_frontend_dir")
+
+        if validate_path "$FRONTEND_DIR"; then
+            break
+        else
+            log_error "路径包含非法字符，请重新输入"
+            log_info "允许的字符: 字母、数字、斜杠 /、下划线 _、连字符 -、点 .、空格、冒号 :"
+        fi
+    done
 
     # 后端部署目录
     local default_backend_dir="${BACKEND_DIR:-/opt/cc-platform}"
-    BACKEND_DIR=$(read_input "后端部署目录 (后端程序安装目录)" "$default_backend_dir")
+    while true; do
+        local input_backend_dir=$(read_input "后端部署目录 (后端程序安装目录)" "$default_backend_dir")
+        BACKEND_DIR=$(sanitize_path "$input_backend_dir")
+
+        if validate_path "$BACKEND_DIR"; then
+            break
+        else
+            log_error "路径包含非法字符，请重新输入"
+            log_info "允许的字符: 字母、数字、斜杠 /、下划线 _、连字符 -、点 .、空格、冒号 :"
+        fi
+    done
 
     echo ""
 
