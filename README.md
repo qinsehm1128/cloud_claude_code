@@ -171,26 +171,32 @@ start-dev.bat
 
 > 📖 **For production deployment, see the [Deployment Guide](deploy/README.md)**
 
-### ⚡ Quick Deploy
+### 🚀 Interactive Deployment Wizard (Recommended)
 
 ```bash
-# 🚀 One-command full deployment
-./deploy.sh --full-deploy
-
-# 📁 Custom directories
-./deploy.sh --full-deploy \
-    --frontend-dir /var/www/mysite.com \
-    --backend-dir /opt/myapp
+# Launch interactive deployment wizard
+./deploy.sh
 ```
 
-### 📋 Deployment Commands
+The interactive wizard guides you through the entire deployment process with:
 
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh --build` | 🔨 Build frontend and backend |
-| `./deploy.sh --install` | 📥 Install to deploy directories |
-| `./deploy.sh --setup-service` | ⚙️ Create systemd service |
-| `./deploy.sh --full-deploy` | 🚀 All of the above + start |
+- ✅ **Environment Check** - Automatic dependency verification
+- ⚙️ **Configuration Wizard** - Step-by-step .env setup with validation
+- 🎯 **Deployment Modes** - Choose from 4 deployment strategies
+- 📊 **Progress Display** - Real-time progress tracking
+- ✅ **Automatic Verification** - Post-deployment health checks
+- 🔄 **Rollback Support** - Automatic rollback on failure
+
+### 📋 Deployment Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| 🚀 **Quick Deploy** | One-click complete deployment | First-time setup, quick production |
+| 💻 **Development** | Build only, no installation | Local development |
+| 📦 **Production** | Full deployment with backup | Production updates |
+| ⚙️ **Custom** | Step-by-step manual control | Advanced users |
+
+**Estimated Time:** 3-5 minutes
 
 > 📖 **[View Full Deployment Guide →](deploy/README.md)**
 

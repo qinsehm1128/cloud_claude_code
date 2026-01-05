@@ -8,294 +8,227 @@
 
 ## ⚡ Quick Start
 
-### 🎯 Interactive Deployment (Recommended for Beginners)
+### 🚀 One-Click Deployment (Recommended)
 
-Use the new interactive deployment wizard with a friendly menu interface:
+Use the new unified deployment script with progressive wizard:
 
 ```bash
-# Run interactive deployment wizard
-./deploy-interactive.sh
-
-# Or configure environment first
-./config-wizard.sh
+./deploy.sh
 ```
 
-**Interactive Deployment Features:**
-- ✨ Menu-driven, no need to memorize command parameters
-- 🔍 Auto-detect system status and dependencies
-- 📝 Smart configuration wizard with default suggestions
-- 🎨 Progressive guidance, step-by-step deployment
-- ✅ Configuration validation to avoid common errors
-
-**Main Features:**
-1. **Quick One-Click Deploy** - Automatic complete deployment
-2. **Development Environment** - Start dev servers
-3. **Production Deployment** - Build and deploy production version
-4. **Configuration Wizard** - Easy .env file configuration
-5. **Build Management** - Manage frontend/backend builds
-6. **Service Management** - Start/stop/restart services
-7. **System Status** - View current deployment status
+That's it! The script will guide you through all the steps automatically.
 
 ---
 
-### 🛠️ Development Mode
+## ✨ Deployment Script Features
 
-```bash
-# Start frontend dev server + backend
-./start-dev.sh
+### 🎯 Progressive Guided Flow
 
-# Backend only
-./start-dev.sh --backend
+```
+Step 1: Environment Check ✓
+├─ Detect dependencies (Node.js, Go, Docker)
+├─ Check disk space
+├─ Check port availability
+└─ Smart suggestions and fixes
 
-# Frontend only
-./start-dev.sh --frontend
+Step 2: Configuration Wizard ✓
+├─ Detect existing configuration
+├─ Smart default values
+├─ Configuration validation
+└─ Security key generation
+
+Step 3: Select Deployment Mode
+  1. 🚀 Quick One-Click Deploy (Recommended)
+  2. 💻 Development Mode
+  3. 📦 Production Mode
+  4. ⚙️  Custom Deployment Steps
+
+Step 4: Confirm Deployment Plan
+├─ Display operations to be performed
+├─ Estimated time
+└─ User confirmation
+
+Step 5: Execute Deployment ⏳
+├─ [▓▓▓▓▓▓▓▓░░] 80%
+├─ Real-time progress display
+└─ Automatic error handling
+
+Step 6: Deployment Verification ✅
+├─ Service status check
+├─ Port listening check
+├─ API health check
+└─ File integrity check
+
+Step 7: Completion Tips
+├─ Access URLs
+├─ Next steps suggestions
+└─ Common commands
 ```
 
-### 🚀 Production Mode
+### 💡 Core Features
+
+✅ **Smart Environment Check** - Auto-detect missing dependencies with installation suggestions
+✅ **Configuration Wizard** - Interactive configuration with validation and defaults
+✅ **Multiple Deployment Modes** - Adapt to different scenarios
+✅ **Deployment Verification** - Automatic health checks and problem diagnosis
+✅ **Rollback Mechanism** - Auto-rollback on deployment failure
+✅ **Progress Indicators** - Real-time deployment progress display
+✅ **Backup Management** - Automatic backups, keep last 3 deployments
+
+---
+
+## 📖 Usage Guide
+
+### Basic Usage
 
 ```bash
-# Build frontend to specified directory, then run backend
-./start-dev.sh --prod --deploy-dir /var/www/example.com
+# Launch interactive deployment wizard
+./deploy.sh
+
+# Show help information
+./deploy.sh --help
+
+# Show version information
+./deploy.sh --version
 ```
 
-This mode will:
-1. Build frontend production version
-2. Copy to specified directory
-3. Run backend directly (go run, not binary)
+### Deployment Modes
 
-Ideal for quick server testing with nginx pointing to frontend directory.
+#### 1. 🚀 Quick One-Click Deploy (Recommended)
+
+**Best for:** First-time deployment, quick production setup
+
+**Includes:**
+- Build frontend and backend
+- Install to deployment directories
+- Configure systemd service
+- Start and verify service
+
+**Estimated time:** 3-5 minutes
+
+#### 2. 💻 Development Mode
+
+**Best for:** Development and debugging
+
+**Includes:**
+- Build frontend and backend only
+- Generate dist and bin directories
+
+**Excludes:**
+- No system directory deployment
+- No service configuration
+
+**Estimated time:** 2-3 minutes
+
+#### 3. 📦 Production Mode
+
+**Best for:** Production environment
+
+**Includes:**
+- Automatic backup before deployment
+- Complete build and deployment
+- Auto-rollback on failure
+- Full verification
+
+**Estimated time:** 3-5 minutes
+
+#### 4. ⚙️ Custom Deployment Steps
+
+**Best for:** Advanced users
+
+**Optional steps:**
+- Build frontend/backend
+- Clean build artifacts
+- Install files
+- Configure service
+- Start/stop/restart service
 
 ---
 
 ## 📁 Directory Structure
 
-Supports frontend/backend separation:
-
-| Directory | Purpose | Default |
-|-----------|---------|---------|
-| 🎨 Frontend | Nginx static files | `/var/www/example.com` |
-| 🔧 Backend | Backend program & config | `/opt/cc-platform` |
+Post-deployment file structure:
 
 ```
-/var/www/example.com/        # Frontend
+Frontend Directory (default: /var/www/example.com)
 ├── index.html
 ├── assets/
 └── ...
 
-/opt/cc-platform/            # Backend
-├── cc-server                # Executable
-├── .env                     # Configuration
-├── data/                    # Data directory
+Backend Directory (default: /opt/cc-platform)
+├── cc-server           # Executable
+├── .env                # Configuration
+├── data/               # Data directory
 │   └── cc-platform.db
-├── logs/                    # Log directory
+├── logs/               # Log directory
 │   └── backend.log
-└── docker/                  # Docker related
+└── docker/             # Docker related
     └── build-base.sh
+
+Backup Directory (.deploy-backups)
+├── backup_20260105_120000/
+├── backup_20260105_130000/
+└── backup_20260105_140000/
 ```
 
 ---
 
-## 🎯 Interactive Deployment Tools
+## ⚙️ Configuration
 
-### 📋 deploy-interactive.sh - Interactive Deployment Wizard
+### Environment Variables (.env)
 
-Provides a friendly menu-driven interface, suitable for beginners and quick deployments:
+The configuration wizard automatically generates the `.env` file with:
 
 ```bash
-./deploy-interactive.sh
+# Basic Configuration
+PORT=8080                           # Backend port
+FRONTEND_PORT=3000                  # Frontend dev port
+
+# Admin Account
+ADMIN_USERNAME=admin                # Admin username
+ADMIN_PASSWORD=your_password        # Admin password
+
+# Security Configuration
+JWT_SECRET=your_jwt_secret          # JWT secret key
+
+# Docker Configuration
+AUTO_START_TRAEFIK=false            # Auto-start Traefik
+CODE_SERVER_BASE_DOMAIN=            # Code-Server domain
 ```
 
-**Main Menu Options:**
-1. 🚀 **Quick One-Click Deploy** - Complete all deployment steps automatically
-2. 💻 **Development Environment** - Start dev servers (frontend/backend)
-3. 🏭 **Production Deployment** - Complete/custom deployment workflow
-4. ⚙️ **Configuration Wizard** - Set deployment directories and parameters
-5. 🔨 **Build Management** - Build frontend/backend/clean
-6. 🔧 **Service Management** - Start/stop/restart/view logs
-7. 📊 **System Status** - Check dependencies and deployment status
-8. 📚 **Help Documentation** - Quick reference guide
-
-### 🔧 config-wizard.sh - Configuration Wizard
-
-Easy configuration of `.env` environment file:
+### Deployment Directories (.deploy-config)
 
 ```bash
-./config-wizard.sh
-```
-
-**Configuration Options:**
-1. **Run Full Configuration Wizard** - Step-by-step parameter configuration
-2. **Configure Admin Password Only** - Quick password modification
-3. **Regenerate JWT Secret** - Update security key
-4. **Configure Code-Server Domain** - Set subdomain access
-5. **View Current Configuration** - Display existing settings
-6. **Create Config from Example** - Quick initialization
-
-**Auto Configuration Features:**
-- ✅ Smart default value suggestions
-- ✅ Input validation (ports/domains)
-- ✅ Auto-generate security keys
-- ✅ Configuration summary confirmation
-- ✅ Auto-backup existing configuration
-
----
-
-## 🚀 Command-Line Deployment (Advanced Users)
-
-### 🎯 One-Command Full Deployment
-
-```bash
-# Build + Install + Configure service + Enable + Start
-./deploy.sh --full-deploy
-
-# With custom directories
-./deploy.sh --full-deploy \
-    --frontend-dir /var/www/mysite.com \
-    --backend-dir /opt/myapp
-```
-
-### 📋 Step-by-Step Deployment
-
-```bash
-# 1. Build
-./deploy.sh --build
-
-# 2. Install files
-./deploy.sh --install
-
-# 3. Configure systemd service
-./deploy.sh --setup-service
-
-# 4. Enable and start service
-./deploy.sh --enable-service --start-service
-```
-
----
-
-## 📚 Command Reference
-
-### 🔨 Build Options
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh --build` | Build frontend and backend |
-| `./deploy.sh --frontend` | Build frontend only |
-| `./deploy.sh --backend` | Build backend only |
-| `./deploy.sh --clean` | Clean build artifacts |
-
-### 📥 Deploy Options
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh --install` | Install to default directories |
-| `./deploy.sh --frontend-dir /path --install` | Specify frontend directory |
-| `./deploy.sh --backend-dir /path --install` | Specify backend directory |
-
-### ⚙️ Service Management
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh --setup-service` | Generate systemd service file |
-| `./deploy.sh --enable-service` | Enable auto-start on boot |
-| `./deploy.sh --start-service` | Start service |
-| `./deploy.sh --stop-service` | Stop service |
-| `./deploy.sh --restart-service` | Restart service |
-| `./deploy.sh --status` | View service status |
-
-### 🔗 Combined Commands
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh --deploy` | Build + Install + Configure service |
-| `./deploy.sh --full-deploy` | All of the above + Enable + Start |
-
----
-
-## 🌍 Environment Variables
-
-Preset directories via environment variables:
-
-```bash
-export FRONTEND_DIR=/var/www/mysite.com
-export BACKEND_DIR=/opt/myapp
-./deploy.sh --deploy
+FRONTEND_DIR=/var/www/example.com   # Frontend deployment directory
+BACKEND_DIR=/opt/cc-platform        # Backend deployment directory
 ```
 
 ---
 
 ## 🌐 Nginx Configuration
 
-Add `deploy/nginx.conf` content to your nginx configuration.
-
-### 📝 Key Settings
-
-| Setting | Value |
-|---------|-------|
-| Frontend static files | `root /var/www/example.com;` |
-| Backend proxy | `proxy_pass http://127.0.0.1:8080;` |
+After deployment, configure Nginx:
 
 ```bash
-# Edit nginx config
-vim /etc/nginx/sites-available/example.com.conf
+# Copy example configuration
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/example.com.conf
 
-# Reload nginx
-nginx -s reload
+# Edit configuration
+sudo vim /etc/nginx/sites-available/example.com.conf
+
+# Create symbolic link
+sudo ln -s /etc/nginx/sites-available/example.com.conf /etc/nginx/sites-enabled/
+
+# Test configuration
+sudo nginx -t
+
+# Reload Nginx
+sudo nginx -s reload
 ```
 
-### 💻 Code-Server Subdomain Routing
-
-To enable code-server subdomain access (like VS Code Codespaces):
-
-#### 1️⃣ DNS Configuration
-
-Add wildcard A record:
-```
-*.code.example.com -> Server IP
-```
-
-#### 2️⃣ Nginx Configuration
-
-Add subdomain server block (see second server block in `deploy/nginx.conf`)
-
-#### 3️⃣ Environment Variables
-
-Set in `.env`:
-```bash
-CODE_SERVER_BASE_DOMAIN=code.example.com
-```
-
-#### 4️⃣ Traefik
-
-Ensure Traefik is running (containers auto-register routes):
-```bash
-AUTO_START_TRAEFIK=true
-```
-
-After setup, created containers are accessible via `{container-name}.code.example.com`.
-
----
-
-## ⚙️ Configuration
-
-Edit `/opt/cc-platform/.env`:
-
-```bash
-# Required
-PORT=8080
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your_secure_password
-JWT_SECRET=your_jwt_secret_key
-
-# Optional
-AUTO_START_TRAEFIK=false
-CODE_SERVER_BASE_DOMAIN=code.example.com
-```
-
-### 🔐 Generate Secure Key
-
-```bash
-openssl rand -hex 32
-```
+Key configuration items:
+- Frontend static files: `root /var/www/example.com;`
+- Backend proxy: `proxy_pass http://127.0.0.1:8080;`
 
 ---
 
@@ -307,66 +240,20 @@ openssl rand -hex 32
 # Check status
 sudo systemctl status cc-platform
 
-# Start/Stop/Restart
+# Start service
 sudo systemctl start cc-platform
+
+# Stop service
 sudo systemctl stop cc-platform
+
+# Restart service
 sudo systemctl restart cc-platform
 
 # View logs
 sudo journalctl -u cc-platform -f
-# Or
+
+# Or view file logs
 tail -f /opt/cc-platform/logs/backend.log
-```
-
-### Manual Run (Debug)
-
-```bash
-cd /opt/cc-platform
-./cc-server
-```
-
----
-
-## 🐳 Docker Base Image
-
-Build Docker base image on first deployment:
-
-```bash
-cd /opt/cc-platform/docker
-./build-base.sh
-```
-
-This creates:
-- `cc-base:latest` - Base image
-- `cc-base:with-code-server` - Image with code-server
-
----
-
-## ❓ Troubleshooting
-
-### 🔴 502 Bad Gateway
-
-- Check if backend is running: `systemctl status cc-platform`
-- Verify port configuration consistency
-
-### 🔴 WebSocket Connection Failed
-
-- Ensure nginx config includes WebSocket support
-- Check `proxy_set_header Upgrade` settings
-
-### 🔴 Permission Issues
-
-- Backend needs Docker access: ensure user is in docker group
-- Or run as root user
-
-### 🔴 Service Start Failed
-
-```bash
-# View detailed logs
-journalctl -u cc-platform -n 100 --no-pager
-
-# Run manually to see errors
-cd /opt/cc-platform && ./cc-server
 ```
 
 ---
@@ -377,12 +264,88 @@ cd /opt/cc-platform && ./cc-server
 # Pull latest code
 git pull
 
-# Redeploy
-./deploy.sh --deploy --restart-service
+# Re-run deployment script
+./deploy.sh
+
+# Select "Quick One-Click Deploy" or "Production Mode"
+```
+
+The system will automatically:
+- Create backup
+- Build new version
+- Stop old service
+- Deploy new version
+- Start service
+- Verify deployment
+
+If it fails, you can rollback to the backup.
+
+---
+
+## ❓ Troubleshooting
+
+### Deployment Failed?
+
+1. Check error messages
+2. View logs: `sudo journalctl -u cc-platform -n 50`
+3. Verify configuration: `cat /opt/cc-platform/.env`
+4. Rollback to backup if available
+
+### How to Rollback?
+
+Backups are located in `.deploy-backups/` directory:
+
+```bash
+# List available backups
+ls -la .deploy-backups/
+
+# Manual rollback (select in deployment script)
+# Or manually restore files
+```
+
+### Service Won't Start?
+
+```bash
+# View detailed errors
+sudo systemctl status cc-platform
+sudo journalctl -u cc-platform -n 100
+
+# Check if port is in use
+sudo lsof -i :8080
+
+# Run manually to see errors
+cd /opt/cc-platform
+./cc-server
+```
+
+### Frontend 502 Error?
+
+1. Check if backend service is running
+2. Verify Nginx configuration
+3. Check if port numbers are correct
+4. View Nginx error logs
+
+---
+
+## 🐳 Docker Base Image
+
+First-time deployment requires building the Docker base image:
+
+```bash
+cd /opt/cc-platform/docker
+./build-base.sh
 ```
 
 ---
 
+## 📚 More Information
+
+- Project Documentation: [README.md](../README.md)
+- Deployment Script Source: `deploy/`
+- Issue Reporting: [GitHub Issues](https://github.com/qinsehm1128/cloud_claude_code/issues)
+
+---
+
 <p align="center">
-  <a href="../README.md">← Back to Main README</a>
+  <a href="../README.md">← Back to Main Documentation</a>
 </p>
