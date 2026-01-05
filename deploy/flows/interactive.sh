@@ -430,7 +430,8 @@ run_interactive_flow() {
         exit 1
     fi
 
-    # 重新加载配置
+    # 重新加载配置（环境变量和部署目录）
+    load_deploy_config
     load_env_config
 
     # 步骤 3: 选择模式

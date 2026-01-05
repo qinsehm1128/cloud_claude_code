@@ -43,6 +43,26 @@ run_config_wizard() {
     fi
 
     # ============================================
+    # 部署目录配置
+    # ============================================
+    log_header "部署目录配置"
+    show_separator
+    echo ""
+
+    log_info "配置应用程序的部署目录"
+    echo ""
+
+    # 前端部署目录
+    local default_frontend_dir="${FRONTEND_DIR:-/var/www/cc-platform}"
+    FRONTEND_DIR=$(read_input "前端部署目录 (Nginx 静态文件目录)" "$default_frontend_dir")
+
+    # 后端部署目录
+    local default_backend_dir="${BACKEND_DIR:-/opt/cc-platform}"
+    BACKEND_DIR=$(read_input "后端部署目录 (后端程序安装目录)" "$default_backend_dir")
+
+    echo ""
+
+    # ============================================
     # 基础配置
     # ============================================
     log_header "基础配置"
@@ -143,6 +163,11 @@ run_config_wizard() {
     show_separator
     log_header "配置摘要"
     show_separator
+    echo ""
+
+    echo -e "${BOLD}部署目录:${NC}"
+    echo -e "  前端目录:       ${YELLOW}$FRONTEND_DIR${NC}"
+    echo -e "  后端目录:       ${YELLOW}$BACKEND_DIR${NC}"
     echo ""
 
     echo -e "${BOLD}基础配置:${NC}"
@@ -270,6 +295,10 @@ EOF
 
     chmod 600 "$SCRIPT_ROOT/$ENV_FILE"
     log_success "配置已保存到 $ENV_FILE"
+
+    # 保存部署配置
+    save_deploy_config
+    log_success "部署配置已保存到 $CONFIG_FILE"
 
     echo ""
     return 0
