@@ -8,6 +8,36 @@
 
 ## ⚡ Quick Start
 
+### 🎯 Interactive Deployment (Recommended for Beginners)
+
+Use the new interactive deployment wizard with a friendly menu interface:
+
+```bash
+# Run interactive deployment wizard
+./deploy-interactive.sh
+
+# Or configure environment first
+./config-wizard.sh
+```
+
+**Interactive Deployment Features:**
+- ✨ Menu-driven, no need to memorize command parameters
+- 🔍 Auto-detect system status and dependencies
+- 📝 Smart configuration wizard with default suggestions
+- 🎨 Progressive guidance, step-by-step deployment
+- ✅ Configuration validation to avoid common errors
+
+**Main Features:**
+1. **Quick One-Click Deploy** - Automatic complete deployment
+2. **Development Environment** - Start dev servers
+3. **Production Deployment** - Build and deploy production version
+4. **Configuration Wizard** - Easy .env file configuration
+5. **Build Management** - Manage frontend/backend builds
+6. **Service Management** - Start/stop/restart services
+7. **System Status** - View current deployment status
+
+---
+
 ### 🛠️ Development Mode
 
 ```bash
@@ -65,7 +95,52 @@ Supports frontend/backend separation:
 
 ---
 
-## 🚀 Quick Deployment
+## 🎯 Interactive Deployment Tools
+
+### 📋 deploy-interactive.sh - Interactive Deployment Wizard
+
+Provides a friendly menu-driven interface, suitable for beginners and quick deployments:
+
+```bash
+./deploy-interactive.sh
+```
+
+**Main Menu Options:**
+1. 🚀 **Quick One-Click Deploy** - Complete all deployment steps automatically
+2. 💻 **Development Environment** - Start dev servers (frontend/backend)
+3. 🏭 **Production Deployment** - Complete/custom deployment workflow
+4. ⚙️ **Configuration Wizard** - Set deployment directories and parameters
+5. 🔨 **Build Management** - Build frontend/backend/clean
+6. 🔧 **Service Management** - Start/stop/restart/view logs
+7. 📊 **System Status** - Check dependencies and deployment status
+8. 📚 **Help Documentation** - Quick reference guide
+
+### 🔧 config-wizard.sh - Configuration Wizard
+
+Easy configuration of `.env` environment file:
+
+```bash
+./config-wizard.sh
+```
+
+**Configuration Options:**
+1. **Run Full Configuration Wizard** - Step-by-step parameter configuration
+2. **Configure Admin Password Only** - Quick password modification
+3. **Regenerate JWT Secret** - Update security key
+4. **Configure Code-Server Domain** - Set subdomain access
+5. **View Current Configuration** - Display existing settings
+6. **Create Config from Example** - Quick initialization
+
+**Auto Configuration Features:**
+- ✅ Smart default value suggestions
+- ✅ Input validation (ports/domains)
+- ✅ Auto-generate security keys
+- ✅ Configuration summary confirmation
+- ✅ Auto-backup existing configuration
+
+---
+
+## 🚀 Command-Line Deployment (Advanced Users)
 
 ### 🎯 One-Command Full Deployment
 
