@@ -43,7 +43,8 @@ show_welcome() {
 # 选择部署模式
 # ============================================
 select_deployment_mode() {
-    show_header
+    # 不调用 show_header，避免在 Windows 环境下的清屏/缓冲问题
+    echo ""
     log_header ">>> 第 3 步：选择部署模式"
     show_separator
     echo ""
@@ -65,7 +66,8 @@ select_deployment_mode() {
 confirm_deployment_plan() {
     local mode=$1
 
-    show_header
+    # 不调用 show_header，避免在 Windows 环境下的清屏/缓冲问题
+    echo ""
     log_header ">>> 第 4 步：确认部署计划"
     show_separator
     echo ""
@@ -137,7 +139,8 @@ confirm_deployment_plan() {
 # 执行快速部署
 # ============================================
 execute_quick_deploy() {
-    show_header
+    # 不调用 show_header，避免在 Windows 环境下的清屏/缓冲问题
+    echo ""
     log_header ">>> 第 5 步：执行部署"
     show_separator
     echo ""
@@ -194,7 +197,8 @@ execute_quick_deploy() {
 # 执行开发环境部署
 # ============================================
 execute_dev_deploy() {
-    show_header
+    # 不调用 show_header，避免在 Windows 环境下的清屏/缓冲问题
+    echo ""
     log_header ">>> 第 5 步：构建开发环境"
     show_separator
     echo ""
@@ -226,7 +230,8 @@ execute_dev_deploy() {
 # 执行生产环境部署
 # ============================================
 execute_prod_deploy() {
-    show_header
+    # 不调用 show_header，避免在 Windows 环境下的清屏/缓冲问题
+    echo ""
     log_header ">>> 第 5 步：执行生产部署"
     show_separator
     echo ""
@@ -291,7 +296,8 @@ execute_prod_deploy() {
 # ============================================
 execute_custom_deploy() {
     while true; do
-        show_header
+        # 不调用 show_header，避免在 Windows 环境下的清屏/缓冲问题
+        echo ""
         log_header ">>> 自定义部署步骤"
         show_separator
         echo ""
@@ -313,7 +319,8 @@ execute_custom_deploy() {
             return 0
         fi
 
-        show_header
+        # 执行操作时不清屏，保持输出连续性
+        echo ""
 
         case $choice in
             1)
@@ -355,7 +362,8 @@ execute_custom_deploy() {
 # 完成提示
 # ============================================
 show_completion() {
-    show_header
+    # 不调用 show_header，避免在 Windows 环境下的清屏/缓冲问题
+    echo ""
     log_header ">>> 第 7 步：部署完成"
     show_separator
     echo ""
