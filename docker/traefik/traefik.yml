@@ -1,0 +1,76 @@
+# Traefik Static Configuration
+# This file configures Traefik as a reverse proxy for container services
+# 
+# NOTE: This file is for manual docker-compose deployment.
+# When using AUTO_START_TRAEFIK=true, the backend creates Traefik dynamically
+# with auto-assigned ports (38000+ range) to avoid conflicts.
+
+api:
+  dashboard: true
+  insecure: true  # Dashboard accessible at dashboard port
+
+entryPoints:
+  # Main HTTP entry point for domain-based routing
+  # Using port 80 inside container, mapped to high port on host
+  web:
+    address: ":80"
+  
+  # Dashboard/API entry point
+  # Using port 8080 inside container for dashboard
+  traefik:
+    address: ":8080"
+  
+  # Direct port access range (30001-30020)
+  # Using high ports to avoid conflicts with common services
+  direct-30001:
+    address: ":30001"
+  direct-30002:
+    address: ":30002"
+  direct-30003:
+    address: ":30003"
+  direct-30004:
+    address: ":30004"
+  direct-30005:
+    address: ":30005"
+  direct-30006:
+    address: ":30006"
+  direct-30007:
+    address: ":30007"
+  direct-30008:
+    address: ":30008"
+  direct-30009:
+    address: ":30009"
+  direct-30010:
+    address: ":30010"
+  direct-30011:
+    address: ":30011"
+  direct-30012:
+    address: ":30012"
+  direct-30013:
+    address: ":30013"
+  direct-30014:
+    address: ":30014"
+  direct-30015:
+    address: ":30015"
+  direct-30016:
+    address: ":30016"
+  direct-30017:
+    address: ":30017"
+  direct-30018:
+    address: ":30018"
+  direct-30019:
+    address: ":30019"
+  direct-30020:
+    address: ":30020"
+
+providers:
+  # Docker provider - auto-discovers containers with traefik labels
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false  # Only expose containers with traefik.enable=true
+    network: "traefik-net"   # Traefik network for container communication
+
+log:
+  level: INFO
+
+accessLog: {}

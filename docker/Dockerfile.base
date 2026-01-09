@@ -1,0 +1,86 @@
+# Base image for Claude Code containers
+# Ubuntu 22.04 + Node.js 20 + Claude Code + Git
+# Optional: code-server (Web VS Code)
+
+FROM ubuntu:22.04
+
+# Build argument for code-server installation
+ARG INSTALL_CODE_SERVER=false
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    sudo \
+    ca-certificates \
+    gnupg \
+    wget \
+    vim \
+    htop \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20.x LTS
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify Node.js installation
+RUN node --version && npm --version
+
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install code-server (Web VS Code) - only if INSTALL_CODE_SERVER=true
+RUN if [ "$INSTALL_CODE_SERVER" = "true" ]; then \
+        echo "Installing code-server..." && \
+        curl -fsSL https://code-server.dev/install.sh | sh; \
+    else \
+        echo "Skipping code-server installation"; \
+    fi
+
+# Create non-root user 'developer' with sudo privileges
+RUN useradd -m -s /bin/bash -G sudo developer \
+    && echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Create workspace directory
+RUN mkdir -p /workspace && chown developer:developer /workspace
+
+# Set Git configuration for developer user
+RUN su - developer -c "git config --global init.defaultBranch main" \
+    && su - developer -c "git config --global user.email 'developer@container.local'" \
+    && su - developer -c "git config --global user.name 'Developer'"
+
+# Copy and install PTY Automation extension (only if code-server is installed)
+# Use code-server CLI to install extension properly
+COPY extensions/ /tmp/extensions/
+RUN if [ "$INSTALL_CODE_SERVER" = "true" ] && [ -f /tmp/extensions/pty-automation-monitor.vsix ]; then \
+        echo "Installing PTY Automation extension..." && \
+        # Install as root first, then fix permissions
+        code-server --install-extension /tmp/extensions/pty-automation-monitor.vsix --force && \
+        # Move extension to developer user's directory
+        mkdir -p /home/developer/.local/share/code-server/extensions && \
+        if [ -d /root/.local/share/code-server/extensions ]; then \
+            cp -r /root/.local/share/code-server/extensions/* /home/developer/.local/share/code-server/extensions/ 2>/dev/null || true; \
+        fi && \
+        chown -R developer:developer /home/developer/.local && \
+        echo "Extension installed successfully"; \
+    else \
+        echo "Skipping extension installation (code-server=$INSTALL_CODE_SERVER, vsix exists=$(test -f /tmp/extensions/pty-automation-monitor.vsix && echo yes || echo no))"; \
+    fi && \
+    rm -rf /tmp/extensions
+
+# Set working directory
+WORKDIR /workspace
+
+# Switch to non-root user
+USER developer
+
+# Set environment variables
+ENV HOME=/home/developer
+ENV PATH="/home/developer/.local/bin:${PATH}"
+
+# Default command
+CMD ["/bin/bash"]

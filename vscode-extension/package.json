@@ -1,0 +1,104 @@
+{
+  "name": "pty-automation-monitor",
+  "displayName": "PTY Automation Monitor",
+  "description": "Monitor and control PTY automation from VS Code",
+  "version": "0.1.0",
+  "publisher": "cloud-claude-code",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ptyAutomation.toggleMonitoring",
+        "title": "PTY: Toggle Monitoring"
+      },
+      {
+        "command": "ptyAutomation.openTaskPanel",
+        "title": "PTY: Open Task Panel"
+      },
+      {
+        "command": "ptyAutomation.openSettings",
+        "title": "PTY: Open Settings"
+      },
+      {
+        "command": "ptyAutomation.changeStrategy",
+        "title": "PTY: Change Strategy"
+      },
+      {
+        "command": "ptyAutomation.reconnect",
+        "title": "PTY: Reconnect to Server"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ptyAutomation.toggleMonitoring",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      },
+      {
+        "command": "ptyAutomation.openTaskPanel",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t"
+      }
+    ],
+    "configuration": {
+      "title": "PTY Automation Monitor",
+      "properties": {
+        "ptyAutomation.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "URL of the PTY automation server"
+        },
+        "ptyAutomation.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to server on startup"
+        },
+        "ptyAutomation.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show monitoring status in status bar"
+        },
+        "ptyAutomation.defaultStrategy": {
+          "type": "string",
+          "enum": ["webhook", "injection", "queue", "ai"],
+          "default": "webhook",
+          "description": "Default automation strategy"
+        },
+        "ptyAutomation.silenceThreshold": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "maximum": 300,
+          "description": "Silence threshold in seconds"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  }
+}
