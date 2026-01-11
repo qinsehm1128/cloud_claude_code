@@ -6,7 +6,7 @@ import { CommandInput } from './CommandInput'
 import { QuickKeys } from './QuickKeys'
 import { CommandHistory } from './CommandHistory'
 import { useCommandHistory } from '@/hooks/useCommandHistory'
-import { generateKeySequence } from '@/utils/keySequence'
+
 
 export interface MobileKeyboardProps {
   onSendCommand: (command: string) => void
@@ -30,9 +30,10 @@ export function MobileKeyboard({
   onSendCommand,
   onSendKeys,
   visible,
-  onVisibilityChange,
+  onVisibilityChange: _onVisibilityChange,
   connected = true,
 }: MobileKeyboardProps) {
+  // Note: _onVisibilityChange is kept in props for API consistency but visibility is managed by parent
   const [state, setState] = useState<MobileKeyboardState>({
     collapsed: false,
     ctrlActive: false,

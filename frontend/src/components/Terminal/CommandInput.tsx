@@ -60,7 +60,7 @@ export function CommandInput({
   }, [ctrlActive, altActive, onSubmit, onSendKeys, onModifierUsed])
 
   // Handle paste events
-  const handlePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = useCallback((_e: ClipboardEvent<HTMLTextAreaElement>) => {
     // Allow default paste behavior - the onChange will handle the update
   }, [])
 
