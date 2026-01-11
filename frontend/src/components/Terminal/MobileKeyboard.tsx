@@ -131,8 +131,11 @@ export function MobileKeyboard({
     <div
       className={cn(
         'border-t bg-card transition-all duration-200',
-        'max-h-[40vh] portrait:max-h-[40vh] landscape:max-h-[50vh]',
-        state.collapsed ? 'h-auto' : 'h-auto'
+        'flex-shrink-0 overflow-hidden',
+        // 限制最大高度，防止占用过多屏幕空间
+        state.collapsed 
+          ? 'max-h-16' 
+          : 'max-h-[35vh] portrait:max-h-[35vh] landscape:max-h-[40vh]'
       )}
     >
       {/* Collapse/Expand Header */}
@@ -172,7 +175,7 @@ export function MobileKeyboard({
 
       {/* Expanded: Show full keyboard */}
       {!state.collapsed && (
-        <div className="flex flex-col gap-2 p-2">
+        <div className="flex flex-col gap-2 p-2 overflow-y-auto">
           {/* Quick Keys area */}
           <QuickKeys
             onKeyPress={handleSendKeys}

@@ -642,39 +642,46 @@ export default function ContainerTerminal() {
       </div>
 
       {/* Main Terminal Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2 border-b bg-card flex-shrink-0">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Header - 响应式布局 */}
+        <div className="flex items-center justify-between px-2 sm:px-4 py-2 border-b bg-card flex-shrink-0 gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/')} className="shrink-0">
+              <ArrowLeft className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Back</span>
             </Button>
-            <span className="text-sm text-muted-foreground">
-              Container: <span className="text-foreground font-medium">{container?.name}</span>
+            <span className="text-xs sm:text-sm text-muted-foreground truncate">
+              <span className="hidden sm:inline">Container: </span>
+              <span className="text-foreground font-medium">{container?.name}</span>
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* Headless 按钮 - 仅桌面端显示 */}
             <Button
               variant="outline"
               size="sm"
               onClick={() => navigate(`/headless/${containerId}`)}
+              className="hidden lg:flex"
             >
               Switch to Headless
             </Button>
+            {/* 虚拟键盘按钮 */}
             <Button 
               variant={mobileKeyboardVisible ? 'default' : 'outline'}
               size="sm" 
               onClick={toggleMobileKeyboard}
               title="Toggle virtual keyboard"
+              className="px-2 sm:px-3"
             >
-              <Keyboard className="h-4 w-4 mr-2" />
-              Keyboard
+              <Keyboard className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Keyboard</span>
             </Button>
+            {/* 文件按钮 - 仅桌面端显示 */}
             <Button 
               variant="outline" 
               size="sm" 
               onClick={() => setFilePanelOpen(!filePanelOpen)}
+              className="hidden md:flex"
             >
               {filePanelOpen ? (
                 <PanelLeftClose className="h-4 w-4 mr-2" />
@@ -683,10 +690,12 @@ export default function ContainerTerminal() {
               )}
               Files
             </Button>
+            {/* 任务按钮 - 仅桌面端显示 */}
             <Button 
               variant="outline" 
               size="sm" 
               onClick={() => setTaskPanelOpen(!taskPanelOpen)}
+              className="hidden md:flex"
             >
               {taskPanelOpen ? (
                 <PanelRightClose className="h-4 w-4 mr-2" />
@@ -701,21 +710,22 @@ export default function ContainerTerminal() {
                 </span>
               )}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => addNewTab()}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Terminal
+            {/* 新终端按钮 */}
+            <Button variant="outline" size="sm" onClick={() => addNewTab()} className="px-2 sm:px-3">
+              <Plus className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">New Terminal</span>
             </Button>
           </div>
         </div>
 
-        {/* Terminal Tabs - using custom tab buttons instead of Radix Tabs to avoid TabsContent requirement */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50 flex-shrink-0">
-          <div className="flex-1 flex gap-1">
+        {/* Terminal Tabs - 响应式滚动 */}
+        <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 border-b bg-card/50 flex-shrink-0 overflow-x-auto">
+          <div className="flex-1 flex gap-1 min-w-0">
             {tabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveKey(tab.key)}
-                className={`h-8 px-3 rounded-md gap-2 inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-colors ${
+                className={`h-8 px-2 sm:px-3 rounded-md gap-1 sm:gap-2 inline-flex items-center justify-center whitespace-nowrap text-xs sm:text-sm font-medium transition-colors shrink-0 ${
                   activeKey === tab.key
                     ? 'bg-secondary text-foreground'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -751,7 +761,7 @@ export default function ContainerTerminal() {
 
         {/* Terminal Content */}
         <div 
-          className="flex-1 relative bg-[#0a0a0a] min-h-0"
+          className="flex-1 relative bg-[#0a0a0a] min-h-0 overflow-hidden"
           onDragEnter={(e) => {
             e.preventDefault()
             e.stopPropagation()
