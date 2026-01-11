@@ -13,6 +13,7 @@ import {
   PanelRight,
   ListTodo,
   Settings,
+  Keyboard,
 } from 'lucide-react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
@@ -29,6 +30,8 @@ import { MonitoringStatusBar, MonitoringStatus } from '@/components/Automation/M
 import { MonitoringConfigPanel, MonitoringConfig } from '@/components/Automation/MonitoringConfigPanel'
 import { TaskPanel, Task } from '@/components/Automation/TaskPanel'
 import { TaskEditor } from '@/components/Automation/TaskEditor'
+import { MobileKeyboard } from '@/components/Terminal/MobileKeyboard'
+import { useMobileKeyboardState } from '@/hooks/useMobileKeyboardState'
 import 'xterm/css/xterm.css'
 
 interface Container {
@@ -98,6 +101,9 @@ export default function ContainerTerminal() {
   const [tasks, setTasks] = useState<Task[]>([])
   const initializedRef = useRef(false)
   const silenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Mobile keyboard state
+  const { visible: mobileKeyboardVisible, setVisible: setMobileKeyboardVisible, toggleVisible: toggleMobileKeyboard } = useMobileKeyboardState()
 
   // Load monitoring config and tasks from backend
   useEffect(() => {
@@ -386,7 +392,7 @@ export default function ContainerTerminal() {
     initTerminal()
   }, [activeKey, container, containerId, tabs])
 
-  // Refit terminal when file panel or task panel toggles
+  // Refit terminal when file panel, task panel, or mobile keyboard toggles
   useEffect(() => {
     const timer = setTimeout(() => {
       tabs.forEach(tab => {
@@ -396,7 +402,7 @@ export default function ContainerTerminal() {
       })
     }, 300) // Wait for transition
     return () => clearTimeout(timer)
-  }, [filePanelOpen, taskPanelOpen, tabs])
+  }, [filePanelOpen, taskPanelOpen, mobileKeyboardVisible, tabs])
 
   useEffect(() => {
     const handleResize = () => {
@@ -435,6 +441,22 @@ export default function ContainerTerminal() {
       // Escape spaces and special characters in path
       const escapedPath = path.replace(/ /g, '\\ ')
       activeTab.ws.send(escapedPath)
+    }
+  }, [tabs, activeKey])
+
+  // Handle command from MobileKeyboard
+  const handleMobileKeyboardCommand = useCallback((command: string) => {
+    const activeTab = tabs.find(t => t.key === activeKey)
+    if (activeTab?.ws && activeTab.connected) {
+      activeTab.ws.send(command)
+    }
+  }, [tabs, activeKey])
+
+  // Handle key sequence from MobileKeyboard
+  const handleMobileKeyboardKeys = useCallback((keys: string) => {
+    const activeTab = tabs.find(t => t.key === activeKey)
+    if (activeTab?.ws && activeTab.connected) {
+      activeTab.ws.send(keys)
     }
   }, [tabs, activeKey])
 
@@ -641,6 +663,15 @@ export default function ContainerTerminal() {
               Switch to Headless
             </Button>
             <Button 
+              variant={mobileKeyboardVisible ? 'default' : 'outline'}
+              size="sm" 
+              onClick={toggleMobileKeyboard}
+              title="Toggle virtual keyboard"
+            >
+              <Keyboard className="h-4 w-4 mr-2" />
+              Keyboard
+            </Button>
+            <Button 
               variant="outline" 
               size="sm" 
               onClick={() => setFilePanelOpen(!filePanelOpen)}
@@ -782,6 +813,15 @@ export default function ContainerTerminal() {
             />
           ))}
         </div>
+
+        {/* Mobile Keyboard */}
+        <MobileKeyboard
+          visible={mobileKeyboardVisible}
+          onVisibilityChange={setMobileKeyboardVisible}
+          onSendCommand={handleMobileKeyboardCommand}
+          onSendKeys={handleMobileKeyboardKeys}
+          connected={activeTab?.connected ?? false}
+        />
 
         {/* Monitoring Status Bar */}
         <MonitoringStatusBar

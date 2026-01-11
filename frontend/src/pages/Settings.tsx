@@ -220,7 +220,7 @@ export default function Settings() {
     } finally {
       setSavingEnv(false)
     }
-  }
+   }
 
   const handleDeleteEnv = async (id: number) => {
     if (!confirm('Are you sure you want to delete this profile?')) return
