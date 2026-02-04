@@ -56,13 +56,15 @@ func validateResourceLimits(cpuLimit float64, memoryLimit int64) error {
 
 // ContainerService handles container operations
 type ContainerService struct {
-	db                   *gorm.DB
-	config               *config.Config
-	dockerClient         *docker.Client
-	claudeService        *ClaudeConfigService
-	githubService        *GitHubService
-	configProfileService *ConfigProfileService
-	initTasks            sync.Map // map[uint]context.CancelFunc
+	db                     *gorm.DB
+	config                 *config.Config
+	dockerClient           *docker.Client
+	claudeService          *ClaudeConfigService
+	githubService          *GitHubService
+	configProfileService   *ConfigProfileService
+	configInjectionService ConfigInjectionService
+	initTasks              sync.Map // map[uint]context.CancelFunc
+	pendingTemplateIDs     sync.Map // map[uint][]uint - stores template IDs for pending container initialization
 
 	// Goroutine lifecycle management
 	wg     sync.WaitGroup
@@ -71,7 +73,7 @@ type ContainerService struct {
 }
 
 // NewContainerService creates a new ContainerService
-func NewContainerService(db *gorm.DB, cfg *config.Config, claudeService *ClaudeConfigService, githubService *GitHubService, configProfileService *ConfigProfileService) (*ContainerService, error) {
+func NewContainerService(db *gorm.DB, cfg *config.Config, claudeService *ClaudeConfigService, githubService *GitHubService, configProfileService *ConfigProfileService, configInjectionService ConfigInjectionService) (*ContainerService, error) {
 	dockerClient, err := docker.NewClient()
 	if err != nil {
 		return nil, err
@@ -80,14 +82,15 @@ func NewContainerService(db *gorm.DB, cfg *config.Config, claudeService *ClaudeC
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &ContainerService{
-		db:                   db,
-		config:               cfg,
-		dockerClient:         dockerClient,
-		claudeService:        claudeService,
-		githubService:        githubService,
-		configProfileService: configProfileService,
-		ctx:                  ctx,
-		cancel:               cancel,
+		db:                     db,
+		config:                 cfg,
+		dockerClient:           dockerClient,
+		claudeService:          claudeService,
+		githubService:          githubService,
+		configProfileService:   configProfileService,
+		configInjectionService: configInjectionService,
+		ctx:                    ctx,
+		cancel:                 cancel,
 	}, nil
 }
 
@@ -95,7 +98,7 @@ func NewContainerService(db *gorm.DB, cfg *config.Config, claudeService *ClaudeC
 func (s *ContainerService) Close() error {
 	// Cancel all running goroutines
 	s.cancel()
-	
+
 	// Cancel all init tasks
 	s.initTasks.Range(func(key, value interface{}) bool {
 		if cancel, ok := value.(context.CancelFunc); ok {
@@ -103,21 +106,21 @@ func (s *ContainerService) Close() error {
 		}
 		return true
 	})
-	
+
 	// Wait for all goroutines to finish (with timeout)
 	done := make(chan struct{})
 	go func() {
 		s.wg.Wait()
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		// All goroutines finished
 	case <-time.After(10 * time.Second):
 		log.Println("Warning: timeout waiting for container service goroutines to finish")
 	}
-	
+
 	return s.dockerClient.Close()
 }
 
@@ -138,18 +141,25 @@ type ProxyConfig struct {
 // CreateContainerInput represents input for creating a container
 type CreateContainerInput struct {
 	Name             string        `json:"name" binding:"required"`
-	GitRepoURL       string        `json:"git_repo_url" binding:"required"` // GitHub repo URL
-	GitRepoName      string        `json:"git_repo_name,omitempty"`         // Optional: repo name, extracted from URL if not provided
-	SkipClaudeInit   bool          `json:"skip_claude_init,omitempty"`      // Skip Claude Code initialization
-	MemoryLimit      int64         `json:"memory_limit,omitempty"`          // Memory limit in MB (0 = default 2048MB)
-	CPULimit         float64       `json:"cpu_limit,omitempty"`             // CPU limit in cores (0 = default 1)
-	PortMappings     []PortMapping `json:"port_mappings,omitempty"`         // Legacy port mappings
-	EnableCodeServer bool          `json:"enable_code_server,omitempty"`    // Enable code-server (Web VS Code)
-	Proxy            ProxyConfig   `json:"proxy,omitempty"`                 // Traefik proxy configuration
+	GitRepoURL       string        `json:"git_repo_url,omitempty"`       // GitHub repo URL (optional when SkipGitRepo=true)
+	GitRepoName      string        `json:"git_repo_name,omitempty"`      // Optional: repo name, extracted from URL if not provided
+	SkipGitRepo      bool          `json:"skip_git_repo,omitempty"`      // Allow creating container without GitHub repository
+	SkipClaudeInit   bool          `json:"skip_claude_init,omitempty"`   // Skip Claude Code initialization
+	EnableYoloMode   bool          `json:"enable_yolo_mode,omitempty"`   // Enable YOLO mode (--dangerously-skip-permissions)
+	MemoryLimit      int64         `json:"memory_limit,omitempty"`       // Memory limit in MB (0 = default 2048MB)
+	CPULimit         float64       `json:"cpu_limit,omitempty"`          // CPU limit in cores (0 = default 1)
+	PortMappings     []PortMapping `json:"port_mappings,omitempty"`      // Legacy port mappings
+	EnableCodeServer bool          `json:"enable_code_server,omitempty"` // Enable code-server (Web VS Code)
+	Proxy            ProxyConfig   `json:"proxy,omitempty"`              // Traefik proxy configuration
 	// Configuration profile references (nil = use default)
 	GitHubTokenID           *uint `json:"github_token_id,omitempty"`
 	EnvVarsProfileID        *uint `json:"env_vars_profile_id,omitempty"`
 	StartupCommandProfileID *uint `json:"startup_command_profile_id,omitempty"`
+	// Claude Config Template selections
+	SelectedClaudeMD *uint  `json:"selected_claude_md,omitempty"` // Single CLAUDE.MD template ID (optional)
+	SelectedSkills   []uint `json:"selected_skills,omitempty"`    // Multiple Skill template IDs (optional)
+	SelectedMCPs     []uint `json:"selected_mcps,omitempty"`      // Multiple MCP template IDs (optional)
+	SelectedCommands []uint `json:"selected_commands,omitempty"`  // Multiple Command template IDs (optional)
 }
 
 // CreateContainer creates a new container and automatically starts initialization
@@ -164,15 +174,20 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		return nil, err
 	}
 
-	// Check if GitHub token is configured (using new multi-profile or legacy)
+	// Validate GitRepoURL is required when SkipGitRepo is false
+	if !input.SkipGitRepo && input.GitRepoURL == "" {
+		return nil, fmt.Errorf("git_repo_url is required when skip_git_repo is false")
+	}
+
+	// Check if GitHub token is configured (only required when not skipping git repo)
 	hasTokens := s.configProfileService.HasGitHubTokens()
-	if !hasTokens && !s.githubService.HasToken() {
+	if !input.SkipGitRepo && !hasTokens && !s.githubService.HasToken() {
 		return nil, ErrNoGitHubTokenConfigured
 	}
 
-	// Extract repo name from URL if not provided
+	// Extract repo name from URL if not provided (only when not skipping git repo)
 	repoName := input.GitRepoName
-	if repoName == "" {
+	if !input.SkipGitRepo && repoName == "" {
 		repoName = extractRepoName(input.GitRepoURL)
 	}
 
@@ -195,24 +210,26 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		}
 	}
 
-	// Get GitHub token from profile (or legacy config as fallback)
-	var githubToken string
-	if s.configProfileService != nil && hasTokens {
-		githubToken, err = s.configProfileService.GetGitHubTokenForContainer(input.GitHubTokenID)
-		if err != nil {
-			// Fallback to legacy token
+	// Get GitHub token from profile (or legacy config as fallback) - only when not skipping git repo
+	if !input.SkipGitRepo {
+		var githubToken string
+		if s.configProfileService != nil && hasTokens {
+			githubToken, err = s.configProfileService.GetGitHubTokenForContainer(input.GitHubTokenID)
+			if err != nil {
+				// Fallback to legacy token
+				githubToken, err = s.githubService.GetToken()
+				if err != nil {
+					return nil, err
+				}
+			}
+		} else {
 			githubToken, err = s.githubService.GetToken()
 			if err != nil {
 				return nil, err
 			}
 		}
-	} else {
-		githubToken, err = s.githubService.GetToken()
-		if err != nil {
-			return nil, err
-		}
+		envVars["GITHUB_TOKEN"] = githubToken
 	}
-	envVars["GITHUB_TOKEN"] = githubToken
 
 	// Convert env vars map to slice
 	envSlice := make([]string, 0, len(envVars))
@@ -249,7 +266,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	codeServerHostPort := 0
 	codeServerDomain := ""
 	useSubdomainRouting := s.config.CodeServerBaseDomain != "" && input.EnableCodeServer
-	
+
 	if input.EnableCodeServer {
 		if useSubdomainRouting {
 			// Subdomain routing: {container-name}.{base-domain}
@@ -274,33 +291,33 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 
 	// Build Traefik labels
 	labels := make(map[string]string)
-	
+
 	// Add cc-platform identifier label
 	labels["cc-platform.managed"] = "true"
-	
+
 	// Connect to traefik-net if proxy or subdomain routing is enabled
 	useTraefikNet := input.Proxy.Enabled || useSubdomainRouting
-	
+
 	// Add code-server subdomain routing labels
 	if useSubdomainRouting {
 		codeServiceName := fmt.Sprintf("cc-%s-code", input.Name)
 		labels["traefik.enable"] = "true"
-		
+
 		// Router for code-server subdomain
 		codeRouterName := fmt.Sprintf("%s-code", input.Name)
 		labels[fmt.Sprintf("traefik.http.routers.%s.rule", codeRouterName)] = fmt.Sprintf("Host(`%s`)", codeServerDomain)
 		labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", codeRouterName)] = "web"
 		labels[fmt.Sprintf("traefik.http.routers.%s.service", codeRouterName)] = codeServiceName
-		
+
 		// Service configuration - point to code-server port
 		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", codeServiceName)] = fmt.Sprintf("%d", CodeServerInternalPort)
 	}
-	
+
 	// Add user-defined proxy labels if enabled
 	if input.Proxy.Enabled && input.Proxy.ServicePort > 0 {
 		serviceName := fmt.Sprintf("cc-%s", input.Name)
 		labels["traefik.enable"] = "true"
-		
+
 		// Domain-based routing (via Nginx -> Traefik:8080)
 		if input.Proxy.Domain != "" {
 			routerName := fmt.Sprintf("%s-domain", serviceName)
@@ -308,7 +325,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 			labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", routerName)] = "web"
 			labels[fmt.Sprintf("traefik.http.routers.%s.service", routerName)] = serviceName
 		}
-		
+
 		// Direct port access (IP:port)
 		if input.Proxy.Port >= 30001 && input.Proxy.Port <= 30020 {
 			routerName := fmt.Sprintf("%s-direct", serviceName)
@@ -317,7 +334,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 			labels[fmt.Sprintf("traefik.http.routers.%s.entrypoints", routerName)] = entrypoint
 			labels[fmt.Sprintf("traefik.http.routers.%s.service", routerName)] = serviceName
 		}
-		
+
 		// Service configuration - point to container's internal port
 		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", serviceName)] = fmt.Sprintf("%d", input.Proxy.ServicePort)
 	}
@@ -366,6 +383,12 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	}
 
 	// Save to database
+	// Determine working directory: /app for empty containers, /workspace/{repoName} for git repos
+	workDir := "/app"
+	if !input.SkipGitRepo && repoName != "" {
+		workDir = fmt.Sprintf("/workspace/%s", repoName)
+	}
+
 	dbContainer := &models.Container{
 		DockerID:                dockerID,
 		Name:                    input.Name,
@@ -373,8 +396,10 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		InitStatus:              models.InitStatusPending,
 		GitRepoURL:              input.GitRepoURL,
 		GitRepoName:             repoName,
-		WorkDir:                 fmt.Sprintf("/workspace/%s", repoName),
+		WorkDir:                 workDir,
 		SkipClaudeInit:          input.SkipClaudeInit,
+		SkipGitRepo:             input.SkipGitRepo,
+		EnableYoloMode:          input.EnableYoloMode,
 		MemoryLimit:             memoryLimit * 1024 * 1024, // Store in bytes
 		CPULimit:                cpuLimit,
 		ExposedPorts:            portMappingsJSON,
@@ -397,7 +422,11 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	}
 
 	// Add initial log
-	s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Container created for repository: %s", input.GitRepoURL))
+	if input.SkipGitRepo {
+		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, "Container created without GitHub repository (empty container)")
+	} else {
+		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Container created for repository: %s", input.GitRepoURL))
+	}
 	if len(input.PortMappings) > 0 {
 		portInfo := make([]string, len(input.PortMappings))
 		for i, pm := range input.PortMappings {
@@ -417,24 +446,45 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	}
 	s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, fmt.Sprintf("Resources: Memory=%dMB, CPU=%.1f cores", memoryLimit, cpuLimit))
 
+	// Log YOLO mode if enabled
+	if input.EnableYoloMode {
+		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, "YOLO mode enabled (--dangerously-skip-permissions)")
+	}
+
 	// Log code-server if enabled
 	if input.EnableCodeServer {
 		if useSubdomainRouting {
 			// Add code-server port to ports table (using internal port for subdomain routing)
 			portService := NewPortService(s.db)
 			portService.AddPort(dbContainer.ID, CodeServerInternalPort, "VS Code", "http", true)
-			s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, 
+			s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup,
 				fmt.Sprintf("code-server: http://%s (subdomain routing via Traefik)", codeServerDomain))
 		} else if codeServerHostPort > 0 {
 			// Add code-server port to ports table
 			portService := NewPortService(s.db)
 			portService.AddPort(dbContainer.ID, codeServerHostPort, "VS Code", "http", true)
-			s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup, 
+			s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup,
 				fmt.Sprintf("code-server: http://server-ip:%d", codeServerHostPort))
 		} else {
-			s.addLog(dbContainer.ID, models.LogLevelWarn, models.LogStageStartup, 
+			s.addLog(dbContainer.ID, models.LogLevelWarn, models.LogStageStartup,
 				"code-server enabled but no free port available")
 		}
+	}
+
+	// Collect all template IDs for config injection
+	var templateIDs []uint
+	if input.SelectedClaudeMD != nil {
+		templateIDs = append(templateIDs, *input.SelectedClaudeMD)
+	}
+	templateIDs = append(templateIDs, input.SelectedSkills...)
+	templateIDs = append(templateIDs, input.SelectedMCPs...)
+	templateIDs = append(templateIDs, input.SelectedCommands...)
+
+	// Store template IDs for initialization (will be retrieved during runInitialization)
+	if len(templateIDs) > 0 {
+		s.pendingTemplateIDs.Store(dbContainer.ID, templateIDs)
+		s.addLog(dbContainer.ID, models.LogLevelInfo, models.LogStageStartup,
+			fmt.Sprintf("Claude config templates selected: %d template(s)", len(templateIDs)))
 	}
 
 	// Auto-start the container and begin initialization
@@ -458,7 +508,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 // startAndInitialize starts the container and runs initialization
 func (s *ContainerService) startAndInitialize(containerID uint) error {
 	ctx := context.Background()
-	
+
 	container, err := s.GetContainer(containerID)
 	if err != nil {
 		return err
@@ -506,22 +556,78 @@ func (s *ContainerService) runInitialization(containerID uint) {
 		return
 	}
 
-	// Step 1: Clone repository
-	s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, fmt.Sprintf("Cloning repository: %s", container.GitRepoURL))
-	s.updateInitStatus(containerID, models.InitStatusCloning, "Cloning repository...")
-	
-	if err := s.cloneRepository(ctx, container); err != nil {
-		s.addLog(containerID, models.LogLevelError, models.LogStageClone, fmt.Sprintf("Clone failed: %v", err))
-		s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Clone failed: %v", err))
-		return
+	// Step 0: Inject Claude Code configurations (if any templates were selected)
+	if templateIDsVal, ok := s.pendingTemplateIDs.LoadAndDelete(containerID); ok {
+		templateIDs := templateIDsVal.([]uint)
+		if len(templateIDs) > 0 && s.configInjectionService != nil {
+			s.addLog(containerID, models.LogLevelInfo, models.LogStageInit,
+				fmt.Sprintf("Injecting %d Claude config template(s)...", len(templateIDs)))
+			s.updateInitStatus(containerID, models.InitStatusInitializing, "Injecting Claude configurations...")
+
+			injectionStatus, err := s.configInjectionService.InjectConfigs(ctx, container.DockerID, templateIDs)
+			if err != nil {
+				s.addLog(containerID, models.LogLevelError, models.LogStageInit,
+					fmt.Sprintf("Config injection error: %v", err))
+				// Don't fail initialization, just log the error
+			}
+
+			// Store injection status in container record
+			if injectionStatus != nil {
+				if err := s.db.Model(&models.Container{}).Where("id = ?", containerID).
+					Update("injection_status", injectionStatus).Error; err != nil {
+					log.Printf("Failed to store injection status for container %d: %v", containerID, err)
+				}
+
+				// Log injection results
+				if len(injectionStatus.Successful) > 0 {
+					s.addLog(containerID, models.LogLevelInfo, models.LogStageInit,
+						fmt.Sprintf("Successfully injected configs: %v", injectionStatus.Successful))
+				}
+				if len(injectionStatus.Failed) > 0 {
+					for _, failed := range injectionStatus.Failed {
+						s.addLog(containerID, models.LogLevelWarn, models.LogStageInit,
+							fmt.Sprintf("Failed to inject config '%s' (%s): %s",
+								failed.TemplateName, failed.ConfigType, failed.Reason))
+					}
+				}
+			}
+		}
 	}
-	s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, "Repository cloned successfully")
+
+	// Step 1: Clone repository or create default /app directory
+	if container.SkipGitRepo {
+		// Create default /app working directory for empty containers
+		s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, "Creating default /app working directory...")
+		s.updateInitStatus(containerID, models.InitStatusCloning, "Creating working directory...")
+
+		createDirCmd := []string{
+			"bash", "-c",
+			"mkdir -p /app && chmod 755 /app",
+		}
+		if _, err := s.dockerClient.ExecInContainer(ctx, container.DockerID, createDirCmd); err != nil {
+			s.addLog(containerID, models.LogLevelError, models.LogStageClone, fmt.Sprintf("Failed to create /app directory: %v", err))
+			s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Failed to create /app directory: %v", err))
+			return
+		}
+		s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, "Default /app working directory created successfully")
+	} else {
+		// Clone repository
+		s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, fmt.Sprintf("Cloning repository: %s", container.GitRepoURL))
+		s.updateInitStatus(containerID, models.InitStatusCloning, "Cloning repository...")
+
+		if err := s.cloneRepository(ctx, container); err != nil {
+			s.addLog(containerID, models.LogLevelError, models.LogStageClone, fmt.Sprintf("Clone failed: %v", err))
+			s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Clone failed: %v", err))
+			return
+		}
+		s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, "Repository cloned successfully")
+	}
 
 	// Step 2: Run Claude Code initialization (if not skipped)
 	if !container.SkipClaudeInit {
 		s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, "Starting Claude Code initialization...")
 		s.updateInitStatus(containerID, models.InitStatusInitializing, "Initializing project environment...")
-		
+
 		if err := s.runClaudeInit(ctx, container); err != nil {
 			s.addLog(containerID, models.LogLevelError, models.LogStageInit, fmt.Sprintf("Initialization failed: %v", err))
 			s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Initialization failed: %v", err))
@@ -538,7 +644,7 @@ func (s *ContainerService) runInitialization(containerID uint) {
 			s.addLog(containerID, models.LogLevelWarn, models.LogStageInit, fmt.Sprintf("code-server failed to start: %v", err))
 			// Don't fail initialization if code-server fails
 		} else {
-			s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, 
+			s.addLog(containerID, models.LogLevelInfo, models.LogStageInit,
 				fmt.Sprintf("code-server started on container port %d", container.CodeServerPort))
 		}
 	}
@@ -601,7 +707,7 @@ func (s *ContainerService) cloneRepository(ctx context.Context, container *model
 func (s *ContainerService) runClaudeInit(ctx context.Context, container *models.Container) error {
 	// Generate system prompt for environment setup
 	systemPrompt := s.generateSystemPrompt()
-	
+
 	// Generate initial prompt
 	initPrompt := s.generateInitPrompt(container.GitRepoName)
 
@@ -612,16 +718,26 @@ func (s *ContainerService) runClaudeInit(ctx context.Context, container *models.
 %s
 SYSPROMPTEOF`, systemPrompt),
 	}
-	
+
 	if _, err := s.dockerClient.ExecInContainer(ctx, container.DockerID, createPromptCmd); err != nil {
 		return fmt.Errorf("failed to create system prompt file: %v", err)
 	}
 
-	// Run Claude Code in non-interactive mode
-	claudeCmd := []string{
-		"bash", "-c",
-		fmt.Sprintf(`cd %s && claude --dangerously-skip-permissions --system-prompt-file /tmp/system_prompt.txt -p "%s"`,
-			container.WorkDir, initPrompt),
+	// Build Claude Code command with optional YOLO mode flag
+	// When EnableYoloMode is true, add --dangerously-skip-permissions to skip all permission prompts
+	var claudeCmd []string
+	if container.EnableYoloMode {
+		claudeCmd = []string{
+			"bash", "-c",
+			fmt.Sprintf(`cd %s && claude --dangerously-skip-permissions --system-prompt-file /tmp/system_prompt.txt -p "%s"`,
+				container.WorkDir, initPrompt),
+		}
+	} else {
+		claudeCmd = []string{
+			"bash", "-c",
+			fmt.Sprintf(`cd %s && claude --system-prompt-file /tmp/system_prompt.txt -p "%s"`,
+				container.WorkDir, initPrompt),
+		}
 	}
 
 	output, err := s.dockerClient.ExecInContainer(ctx, container.DockerID, claudeCmd)
@@ -743,7 +859,7 @@ func (s *ContainerService) StartContainer(ctx context.Context, id uint) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			
+
 			// Wait a moment for container to fully start, but check for shutdown
 			select {
 			case <-s.ctx.Done():
@@ -751,15 +867,15 @@ func (s *ContainerService) StartContainer(ctx context.Context, id uint) error {
 				return
 			case <-time.After(2 * time.Second):
 			}
-			
+
 			startCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			
+
 			if err := s.StartCodeServer(startCtx, id); err != nil {
 				s.addLog(id, models.LogLevelWarn, models.LogStageStartup, fmt.Sprintf("Failed to start code-server: %v", err))
 			} else {
 				s.addLog(id, models.LogLevelInfo, models.LogStageStartup, "code-server started")
-				
+
 				// Re-add port record for code-server
 				portService := NewPortService(s.db)
 				// Use subdomain routing port (internal) or host port
@@ -833,14 +949,14 @@ func (s *ContainerService) DeleteContainer(ctx context.Context, id uint) error {
 	// Clean up related resources
 	// Delete port records (use Unscoped for hard delete since we use raw table query)
 	s.db.Unscoped().Where("container_id = ?", id).Delete(&models.ContainerPort{})
-	
+
 	// Delete terminal sessions
 	s.db.Unscoped().Where("container_id = ?", id).Delete(&models.TerminalSession{})
-	
+
 	// Delete terminal history
 	s.db.Where("session_id IN (SELECT session_id FROM terminal_sessions WHERE container_id = ?)", id).
 		Delete(&models.TerminalHistory{})
-	
+
 	// Delete container logs
 	s.db.Where("container_id = ?", id).Delete(&models.ContainerLog{})
 
@@ -864,7 +980,7 @@ func (s *ContainerService) GetContainer(id uint) (*models.Container, error) {
 // Supports both full (64 char) and short (12 char) Docker IDs
 func (s *ContainerService) GetContainerByDockerID(dockerID string) (*models.Container, error) {
 	var container models.Container
-	
+
 	// For short Docker IDs (12+ chars), use prefix match directly
 	// For full IDs (64 chars), try exact match
 	if len(dockerID) >= 64 {
@@ -877,7 +993,7 @@ func (s *ContainerService) GetContainerByDockerID(dockerID string) (*models.Cont
 		}
 		return &container, nil
 	}
-	
+
 	// Short Docker ID (12+ chars) - use prefix match
 	if len(dockerID) >= 12 {
 		if err := s.db.Where("docker_id LIKE ?", dockerID+"%").First(&container).Error; err != nil {
@@ -888,7 +1004,7 @@ func (s *ContainerService) GetContainerByDockerID(dockerID string) (*models.Cont
 		}
 		return &container, nil
 	}
-	
+
 	return nil, ErrContainerNotFound
 }
 
@@ -959,29 +1075,30 @@ func (s *ContainerService) GetStartupCommandForContainer(container *models.Conta
 
 // ContainerInfo represents container information for API response
 type ContainerInfo struct {
-	ID               uint       `json:"id"`
-	DockerID         string     `json:"docker_id"`
-	Name             string     `json:"name"`
-	Status           string     `json:"status"`
-	InitStatus       string     `json:"init_status"`
-	InitMessage      string     `json:"init_message,omitempty"`
-	GitRepoURL       string     `json:"git_repo_url,omitempty"`
-	GitRepoName      string     `json:"git_repo_name,omitempty"`
-	WorkDir          string     `json:"work_dir,omitempty"`
-	MemoryLimit      int64      `json:"memory_limit,omitempty"`
-	CPULimit         float64    `json:"cpu_limit,omitempty"`
-	ExposedPorts     string     `json:"exposed_ports,omitempty"`
-	ProxyEnabled     bool       `json:"proxy_enabled"`
-	ProxyDomain      string     `json:"proxy_domain,omitempty"`
-	ProxyPort        int        `json:"proxy_port,omitempty"`
-	ServicePort      int        `json:"service_port,omitempty"`
-	EnableCodeServer bool       `json:"enable_code_server"`
-	CodeServerPort   int        `json:"code_server_port,omitempty"`
-	CodeServerDomain string     `json:"code_server_domain,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	StartedAt        *time.Time `json:"started_at,omitempty"`
-	StoppedAt        *time.Time `json:"stopped_at,omitempty"`
-	InitializedAt    *time.Time `json:"initialized_at,omitempty"`
+	ID               uint                    `json:"id"`
+	DockerID         string                  `json:"docker_id"`
+	Name             string                  `json:"name"`
+	Status           string                  `json:"status"`
+	InitStatus       string                  `json:"init_status"`
+	InitMessage      string                  `json:"init_message,omitempty"`
+	GitRepoURL       string                  `json:"git_repo_url,omitempty"`
+	GitRepoName      string                  `json:"git_repo_name,omitempty"`
+	WorkDir          string                  `json:"work_dir,omitempty"`
+	MemoryLimit      int64                   `json:"memory_limit,omitempty"`
+	CPULimit         float64                 `json:"cpu_limit,omitempty"`
+	ExposedPorts     string                  `json:"exposed_ports,omitempty"`
+	ProxyEnabled     bool                    `json:"proxy_enabled"`
+	ProxyDomain      string                  `json:"proxy_domain,omitempty"`
+	ProxyPort        int                     `json:"proxy_port,omitempty"`
+	ServicePort      int                     `json:"service_port,omitempty"`
+	EnableCodeServer bool                    `json:"enable_code_server"`
+	CodeServerPort   int                     `json:"code_server_port,omitempty"`
+	CodeServerDomain string                  `json:"code_server_domain,omitempty"`
+	CreatedAt        time.Time               `json:"created_at"`
+	StartedAt        *time.Time              `json:"started_at,omitempty"`
+	StoppedAt        *time.Time              `json:"stopped_at,omitempty"`
+	InitializedAt    *time.Time              `json:"initialized_at,omitempty"`
+	InjectionStatus  *models.InjectionStatus `json:"injection_status,omitempty"`
 }
 
 // ToContainerInfo converts a Container model to ContainerInfo
@@ -1010,6 +1127,7 @@ func ToContainerInfo(c *models.Container) ContainerInfo {
 		StartedAt:        c.StartedAt,
 		StoppedAt:        c.StoppedAt,
 		InitializedAt:    c.InitializedAt,
+		InjectionStatus:  c.InjectionStatus,
 	}
 }
 
@@ -1017,7 +1135,7 @@ func ToContainerInfo(c *models.Container) ContainerInfo {
 func extractRepoName(url string) string {
 	// Remove .git suffix if present
 	url = strings.TrimSuffix(url, ".git")
-	
+
 	// Get the last part of the URL
 	parts := strings.Split(url, "/")
 	if len(parts) > 0 {
@@ -1032,7 +1150,7 @@ func (s *ContainerService) GetContainerIP(ctx context.Context, id uint) (string,
 	if err != nil {
 		return "", err
 	}
-	
+
 	return s.dockerClient.GetContainerIP(ctx, container.DockerID)
 }
 
@@ -1045,11 +1163,11 @@ func (s *ContainerService) StartCodeServer(ctx context.Context, containerID uint
 	if err != nil {
 		return err
 	}
-	
+
 	if !container.EnableCodeServer {
 		return nil
 	}
-	
+
 	// Always use the fixed internal port (8443), not the host port stored in DB
 	// The host port mapping is handled by Docker port bindings
 	cmd := []string{
@@ -1057,13 +1175,13 @@ func (s *ContainerService) StartCodeServer(ctx context.Context, containerID uint
 		fmt.Sprintf("nohup code-server --bind-addr 0.0.0.0:%d --auth none %s > /tmp/code-server.log 2>&1 &",
 			CodeServerInternalPort, container.WorkDir),
 	}
-	
+
 	_, err = s.dockerClient.ExecInContainer(ctx, container.DockerID, cmd)
 	if err != nil {
 		s.addLog(containerID, models.LogLevelError, models.LogStageInit, fmt.Sprintf("Failed to start code-server: %v", err))
 		return err
 	}
-	
+
 	s.addLog(containerID, models.LogLevelInfo, models.LogStageInit, fmt.Sprintf("code-server started on container port %d", CodeServerInternalPort))
 	return nil
 }

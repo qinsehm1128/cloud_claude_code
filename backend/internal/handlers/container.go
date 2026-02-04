@@ -45,7 +45,7 @@ type ProxyConfigRequest struct {
 // CreateContainerRequest represents the request to create a container
 type CreateContainerRequest struct {
 	Name             string               `json:"name" binding:"required"`
-	GitRepoURL       string               `json:"git_repo_url" binding:"required"`
+	GitRepoURL       string               `json:"git_repo_url,omitempty"`       // GitHub repo URL (optional when SkipGitRepo=true)
 	GitRepoName      string               `json:"git_repo_name,omitempty"`
 	SkipClaudeInit   bool                 `json:"skip_claude_init,omitempty"`   // Skip Claude Code initialization
 	MemoryLimit      int64                `json:"memory_limit,omitempty"`       // Memory limit in MB (0 = default 2048MB)
@@ -57,6 +57,14 @@ type CreateContainerRequest struct {
 	GitHubTokenID           *uint `json:"github_token_id,omitempty"`
 	EnvVarsProfileID        *uint `json:"env_vars_profile_id,omitempty"`
 	StartupCommandProfileID *uint `json:"startup_command_profile_id,omitempty"`
+	// Claude Config Template selections
+	SelectedClaudeMD *uint  `json:"selected_claude_md,omitempty"` // Single CLAUDE.MD template ID (optional)
+	SelectedSkills   []uint `json:"selected_skills,omitempty"`    // Multiple Skill template IDs (optional)
+	SelectedMCPs     []uint `json:"selected_mcps,omitempty"`      // Multiple MCP template IDs (optional)
+	SelectedCommands []uint `json:"selected_commands,omitempty"`  // Multiple Command template IDs (optional)
+	// Container creation options
+	SkipGitRepo    bool `json:"skip_git_repo,omitempty"`    // Allow creating container without GitHub repository
+	EnableYoloMode bool `json:"enable_yolo_mode,omitempty"` // Enable YOLO mode (--dangerously-skip-permissions)
 }
 
 // ListContainers lists all containers
@@ -111,6 +119,14 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 			Port:        req.Proxy.Port,
 			ServicePort: req.Proxy.ServicePort,
 		},
+		// Claude Config Template selections
+		SelectedClaudeMD: req.SelectedClaudeMD,
+		SelectedSkills:   req.SelectedSkills,
+		SelectedMCPs:     req.SelectedMCPs,
+		SelectedCommands: req.SelectedCommands,
+		// Container creation options
+		SkipGitRepo:    req.SkipGitRepo,
+		EnableYoloMode: req.EnableYoloMode,
 	}
 
 	container, err := h.containerService.CreateContainer(c.Request.Context(), input)

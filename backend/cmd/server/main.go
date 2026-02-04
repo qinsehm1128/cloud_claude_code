@@ -63,6 +63,7 @@ func main() {
 	githubService := services.NewGitHubService(db, cfg)
 	claudeConfigService := services.NewClaudeConfigService(db, cfg)
 	configProfileService := services.NewConfigProfileService(db, cfg)
+	configTemplateService := services.NewConfigTemplateService(db)
 	portService := services.NewPortService(db)
 
 	// Start port cleanup routine (every 5 minutes)
@@ -70,7 +71,12 @@ func main() {
 	defer cleanupCancel()
 	portService.StartCleanupRoutine(cleanupCtx, 5*time.Minute)
 
-	containerService, err := services.NewContainerService(db, cfg, claudeConfigService, githubService, configProfileService)
+	// Create ConfigInjectionService for injecting Claude configs into containers
+	// Note: We need to create a docker client for the injection service
+	// The ContainerService will create its own docker client internally
+	configInjectionService := services.NewConfigInjectionServiceWithNewClient(configTemplateService)
+
+	containerService, err := services.NewContainerService(db, cfg, claudeConfigService, githubService, configProfileService, configInjectionService)
 	if err != nil {
 		log.Fatalf("Failed to initialize container service: %v", err)
 	}
@@ -131,6 +137,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(authService)
 	settingsHandler := handlers.NewSettingsHandler(githubService, claudeConfigService)
 	configProfileHandler := handlers.NewConfigProfileHandler(configProfileService)
+	configTemplateHandler := handlers.NewConfigTemplateHandler(configTemplateService)
 	repoHandler := handlers.NewRepositoryHandler(githubService, configProfileService)
 	containerHandler := handlers.NewContainerHandler(containerService, terminalService, configProfileService)
 	fileHandler := handlers.NewFileHandler(fileService)
@@ -161,6 +168,9 @@ func main() {
 
 		// Config profile routes (new multi-config)
 		configProfileHandler.RegisterRoutes(protected.Group("/settings"))
+
+		// Claude config template routes
+		configTemplateHandler.RegisterRoutes(protected)
 
 		// Repository routes
 		protected.GET("/repos/remote", repoHandler.ListRemoteRepositories)

@@ -41,8 +41,12 @@ type Container struct {
 	InitMessage    string     `json:"init_message,omitempty"`
 	GitRepoURL     string     `json:"git_repo_url,omitempty"`  // GitHub repo URL to clone
 	GitRepoName    string     `json:"git_repo_name,omitempty"` // GitHub repo name
-	WorkDir        string     `json:"work_dir,omitempty"`      // Working directory inside container
+	WorkDir        string     `json:"work_dir,omitempty" gorm:"default:/app"` // Working directory inside container, default: /app
 	SkipClaudeInit bool       `json:"skip_claude_init"`        // Skip Claude Code initialization
+	// Claude Config Management fields
+	SkipGitRepo     bool             `json:"skip_git_repo"`                                        // Allow creating container without GitHub repository
+	EnableYoloMode  bool             `json:"enable_yolo_mode"`                                     // Enable YOLO mode (--dangerously-skip-permissions)
+	InjectionStatus *InjectionStatus `gorm:"type:text" json:"injection_status,omitempty"`         // JSON serialized config injection status
 	// Resource configuration
 	MemoryLimit    int64      `json:"memory_limit,omitempty"`    // Memory limit in bytes (0 = default 2GB)
 	CPULimit       float64    `json:"cpu_limit,omitempty"`       // CPU limit (0 = default 1 core)

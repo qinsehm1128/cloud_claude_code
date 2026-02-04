@@ -7,6 +7,7 @@ import { ToastProvider, useToast, setGlobalToast } from './components/ui/toast'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Settings from './pages/Settings'
+import ClaudeConfig from './pages/ClaudeConfig'
 import ContainerTerminal from './pages/ContainerTerminal'
 import Ports from './pages/Ports'
 import DockerContainers from './pages/DockerContainers'
@@ -71,6 +72,7 @@ function App() {
             >
               <Route index element={<Dashboard />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="claude-config" element={<ClaudeConfig />} />
               <Route path="ports" element={<Ports />} />
               <Route path="docker" element={<DockerContainers />} />
               <Route path="automation-logs" element={<AutomationLogs />} />

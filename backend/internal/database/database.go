@@ -52,6 +52,8 @@ func Initialize(dbPath string) (*gorm.DB, error) {
 		&models.GitHubToken{},
 		&models.EnvVarsProfile{},
 		&models.StartupCommandProfile{},
+		// Claude Config Management models
+		&models.ClaudeConfigTemplate{},
 	); err != nil {
 		return nil, err
 	}

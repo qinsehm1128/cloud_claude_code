@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { 
   Plus, 
@@ -21,7 +21,10 @@ import {
   Link,
   Code,
   Settings2,
-  GitFork
+  GitFork,
+  AlertTriangle,
+  FileCode,
+  Info
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -47,7 +50,18 @@ import {
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { containerApi, repoApi, configProfileApi, PortMapping, ProxyConfig, GitHubTokenItem, EnvVarsProfile, StartupCommandProfile } from '@/services/api'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { containerApi, repoApi, configProfileApi, PortMapping, ProxyConfig, GitHubTokenItem, EnvVarsProfile, StartupCommandProfile, ClaudeConfigSelection } from '@/services/api'
+import { claudeConfigApi } from '@/services/claudeConfigApi'
+import { ClaudeConfigTemplate, ConfigType, ConfigTypes, InjectionStatus } from '@/types/claudeConfig'
+import ConfigPreview from '@/components/ConfigPreview'
+import { toast } from '@/components/ui/toast'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 interface Container {
   id: number
@@ -59,6 +73,7 @@ interface Container {
   git_repo_url?: string
   git_repo_name?: string
   created_at: string
+  injection_status?: InjectionStatus
 }
 
 interface RemoteRepository {
@@ -94,6 +109,9 @@ export default function Dashboard() {
   const [envProfiles, setEnvProfiles] = useState<EnvVarsProfile[]>([])
   const [commandProfiles, setCommandProfiles] = useState<StartupCommandProfile[]>([])
   const [loadingProfiles, setLoadingProfiles] = useState(false)
+  // Claude config templates state
+  const [claudeConfigs, setClaudeConfigs] = useState<ClaudeConfigTemplate[]>([])
+  const [loadingClaudeConfigs, setLoadingClaudeConfigs] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     selectedRepo: '',
@@ -113,18 +131,63 @@ export default function Dashboard() {
     githubTokenId: undefined as number | undefined,
     envProfileId: undefined as number | undefined,
     commandProfileId: undefined as number | undefined,
+    // New fields for claude config management
+    skipGitRepo: false,
+    enableYoloMode: false,
+    selectedClaudeMD: undefined as number | undefined,
+    selectedSkills: [] as number[],
+    selectedMCPs: [] as number[],
+    selectedCommands: [] as number[],
   })
   const [newPortMapping, setNewPortMapping] = useState({ container_port: 0, host_port: 0 })
   const navigate = useNavigate()
+  // Track containers we've already shown injection status notifications for
+  const notifiedContainersRef = useRef<Set<number>>(new Set())
+
+  // Check for injection status and show notifications for newly ready containers
+  const checkInjectionStatusNotifications = useCallback((containerList: Container[]) => {
+    containerList.forEach(container => {
+      // Only check containers that are ready and have injection_status
+      if (container.init_status === 'ready' && 
+          container.injection_status && 
+          !notifiedContainersRef.current.has(container.id)) {
+        
+        const { failed, warnings } = container.injection_status
+        
+        // Show warning notification if there are failed configs
+        if (failed && failed.length > 0) {
+          const failedNames = failed.map(f => f.template_name).join(', ')
+          toast.warning(
+            `Config Injection Warning: ${container.name}`,
+            `${failed.length} configuration(s) failed to inject: ${failedNames}`
+          )
+        }
+        
+        // Show info notification for warnings
+        if (warnings && warnings.length > 0) {
+          toast.info(
+            `Config Injection Info: ${container.name}`,
+            warnings.join('; ')
+          )
+        }
+        
+        // Mark this container as notified
+        notifiedContainersRef.current.add(container.id)
+      }
+    })
+  }, [])
 
   const fetchContainers = useCallback(async () => {
     try {
       const response = await containerApi.list()
-      setContainers(response.data)
+      const containerList = response.data
+      setContainers(containerList)
+      // Check for injection status notifications
+      checkInjectionStatusNotifications(containerList)
     } catch {
       console.error('Failed to fetch containers')
     }
-  }, [])
+  }, [checkInjectionStatusNotifications])
 
   const fetchRemoteRepos = async (tokenId?: number) => {
     setLoadingRepos(true)
@@ -156,6 +219,18 @@ export default function Dashboard() {
     }
   }
 
+  const fetchClaudeConfigs = async () => {
+    setLoadingClaudeConfigs(true)
+    try {
+      const response = await claudeConfigApi.list()
+      setClaudeConfigs(response.data || [])
+    } catch {
+      console.error('Failed to fetch Claude configs')
+    } finally {
+      setLoadingClaudeConfigs(false)
+    }
+  }
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true)
@@ -180,6 +255,7 @@ export default function Dashboard() {
     setCreateDialogOpen(true)
     fetchRemoteRepos()
     fetchConfigProfiles()
+    fetchClaudeConfigs()
   }
 
   const handleCreate = async () => {
@@ -188,18 +264,35 @@ export default function Dashboard() {
       let gitRepoUrl = ''
       let gitRepoName = ''
 
-      if (repoSource === 'select' && formData.selectedRepo) {
-        const selectedRepo = remoteRepos.find(r => r.clone_url === formData.selectedRepo)
-        if (selectedRepo) {
-          gitRepoUrl = selectedRepo.clone_url
-          gitRepoName = selectedRepo.name
+      // Only process repo selection if not skipping git repo
+      if (!formData.skipGitRepo) {
+        if (repoSource === 'select' && formData.selectedRepo) {
+          const selectedRepo = remoteRepos.find(r => r.clone_url === formData.selectedRepo)
+          if (selectedRepo) {
+            gitRepoUrl = selectedRepo.clone_url
+            gitRepoName = selectedRepo.name
+          }
+        } else if (repoSource === 'url' && formData.gitRepoUrl) {
+          gitRepoUrl = formData.gitRepoUrl
         }
-      } else if (repoSource === 'url' && formData.gitRepoUrl) {
-        gitRepoUrl = formData.gitRepoUrl
+
+        // Require repo URL if not skipping
+        if (!gitRepoUrl || !formData.name) {
+          return
+        }
+      } else {
+        // When skipping git repo, only name is required
+        if (!formData.name) {
+          return
+        }
       }
 
-      if (!gitRepoUrl || !formData.name) {
-        return
+      // Build claude config selection
+      const claudeConfigSelection: ClaudeConfigSelection = {
+        selected_claude_md: formData.selectedClaudeMD,
+        selected_skills: formData.selectedSkills,
+        selected_mcps: formData.selectedMCPs,
+        selected_commands: formData.selectedCommands,
       }
 
       await containerApi.create(
@@ -214,7 +307,10 @@ export default function Dashboard() {
         formData.enableCodeServer,
         formData.githubTokenId,
         formData.envProfileId,
-        formData.commandProfileId
+        formData.commandProfileId,
+        formData.skipGitRepo,
+        formData.enableYoloMode,
+        claudeConfigSelection
       )
       setCreateDialogOpen(false)
       setFormData({
@@ -230,6 +326,12 @@ export default function Dashboard() {
         githubTokenId: undefined,
         envProfileId: undefined,
         commandProfileId: undefined,
+        skipGitRepo: false,
+        enableYoloMode: false,
+        selectedClaudeMD: undefined,
+        selectedSkills: [],
+        selectedMCPs: [],
+        selectedCommands: [],
       })
       setNewPortMapping({ container_port: 0, host_port: 0 })
       fetchContainers()
@@ -350,6 +452,93 @@ export default function Dashboard() {
     }
   }
 
+  // Render injection status indicator for container card
+  const getInjectionStatusDisplay = (container: Container) => {
+    const { injection_status } = container
+    if (!injection_status) return null
+
+    const { successful, failed, warnings } = injection_status
+    const hasFailures = failed && failed.length > 0
+    const hasWarnings = warnings && warnings.length > 0
+    const hasSuccessful = successful && successful.length > 0
+
+    // Don't show anything if no configs were injected
+    if (!hasSuccessful && !hasFailures) return null
+
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div 
+              className={`flex items-center gap-1 text-xs cursor-help ${
+                hasFailures ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400'
+              }`}
+              data-testid="injection-status-indicator"
+            >
+              {hasFailures ? (
+                <>
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>{failed.length} config(s) failed</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-3 w-3" />
+                  <span>{successful.length} config(s) injected</span>
+                </>
+              )}
+            </div>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs" data-testid="injection-status-tooltip">
+            <div className="space-y-2">
+              {hasSuccessful && (
+                <div>
+                  <p className="font-medium text-green-600 dark:text-green-400 flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Successful ({successful.length})
+                  </p>
+                  <ul className="text-xs text-muted-foreground ml-4 list-disc">
+                    {successful.map((name, idx) => (
+                      <li key={idx}>{name}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {hasFailures && (
+                <div>
+                  <p className="font-medium text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    Failed ({failed.length})
+                  </p>
+                  <ul className="text-xs text-muted-foreground ml-4 list-disc">
+                    {failed.map((f, idx) => (
+                      <li key={idx}>
+                        <span className="font-medium">{f.template_name}</span>
+                        <span className="text-destructive"> - {f.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {hasWarnings && (
+                <div>
+                  <p className="font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                    <Info className="h-3 w-3" />
+                    Warnings
+                  </p>
+                  <ul className="text-xs text-muted-foreground ml-4 list-disc">
+                    {warnings.map((w, idx) => (
+                      <li key={idx}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -414,6 +603,9 @@ export default function Dashboard() {
               <CardContent className="space-y-4">
                 {/* Init Status */}
                 {getInitStatusDisplay(container)}
+
+                {/* Injection Status */}
+                {container.init_status === 'ready' && getInjectionStatusDisplay(container)}
 
                 {/* Created Time */}
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -494,10 +686,14 @@ export default function Dashboard() {
           </DialogHeader>
           
           <Tabs defaultValue="basic" className="flex-1">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="basic" className="flex items-center gap-1 text-xs md:text-sm">
                 <GitFork className="h-3 w-3" />
                 <span className="hidden sm:inline">Basic</span>
+              </TabsTrigger>
+              <TabsTrigger value="claude" className="flex items-center gap-1 text-xs md:text-sm">
+                <FileCode className="h-3 w-3" />
+                <span className="hidden sm:inline">Claude</span>
               </TabsTrigger>
               <TabsTrigger value="resources" className="flex items-center gap-1 text-xs md:text-sm">
                 <Cpu className="h-3 w-3" />
@@ -523,57 +719,84 @@ export default function Dashboard() {
                     />
                   </div>
                   
-                  <div className="space-y-2">
-                    <Label>Repository Source</Label>
-                    <Select value={repoSource} onValueChange={(v: 'select' | 'url') => setRepoSource(v)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="select">Select from GitHub</SelectItem>
-                        <SelectItem value="url">Enter URL manually</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  {/* Skip GitHub Repository Option */}
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="skipGitRepo"
+                      checked={formData.skipGitRepo}
+                      onCheckedChange={(checked) =>
+                        setFormData({ 
+                          ...formData, 
+                          skipGitRepo: checked === true,
+                          selectedRepo: '',
+                          gitRepoUrl: ''
+                        })
+                      }
+                      data-testid="skip-git-repo-checkbox"
+                    />
+                    <label htmlFor="skipGitRepo" className="text-sm leading-none flex items-center gap-2">
+                      <GitFork className="h-4 w-4 text-muted-foreground" />
+                      Skip GitHub Repository (create empty container)
+                    </label>
                   </div>
                   
-                  {repoSource === 'select' ? (
-                    <div className="space-y-2">
-                      <Label>GitHub Repository</Label>
-                      <Select
-                        value={formData.selectedRepo}
-                        onValueChange={(v) => setFormData({ ...formData, selectedRepo: v })}
-                        disabled={loadingRepos}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={loadingRepos ? "Loading..." : "Select a repository"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {remoteRepos.map((repo) => (
-                            <SelectItem key={repo.id} value={repo.clone_url}>
-                              {repo.full_name}
-                              {repo.private && " (Private)"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <Label htmlFor="url">Repository URL</Label>
-                      <Input
-                        id="url"
-                        placeholder="https://github.com/username/repository"
-                        value={formData.gitRepoUrl}
-                        onChange={(e) => setFormData({ ...formData, gitRepoUrl: e.target.value })}
-                      />
-                    </div>
+                  {/* Repository Selection - only show if not skipping */}
+                  {!formData.skipGitRepo && (
+                    <>
+                      <div className="space-y-2">
+                        <Label>Repository Source</Label>
+                        <Select value={repoSource} onValueChange={(v: 'select' | 'url') => setRepoSource(v)}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="select">Select from GitHub</SelectItem>
+                            <SelectItem value="url">Enter URL manually</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      {repoSource === 'select' ? (
+                        <div className="space-y-2">
+                          <Label>GitHub Repository</Label>
+                          <Select
+                            value={formData.selectedRepo}
+                            onValueChange={(v) => setFormData({ ...formData, selectedRepo: v })}
+                            disabled={loadingRepos}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={loadingRepos ? "Loading..." : "Select a repository"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {remoteRepos.map((repo) => (
+                                <SelectItem key={repo.id} value={repo.clone_url}>
+                                  {repo.full_name}
+                                  {repo.private && " (Private)"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Label htmlFor="url">Repository URL</Label>
+                          <Input
+                            id="url"
+                            placeholder="https://github.com/username/repository"
+                            value={formData.gitRepoUrl}
+                            onChange={(e) => setFormData({ ...formData, gitRepoUrl: e.target.value })}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                   
                   <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
                     <p className="font-medium mb-1">What happens next:</p>
                     <ol className="list-decimal list-inside space-y-1 text-xs">
                       <li>Container will be created and started</li>
-                      <li>Repository will be cloned inside</li>
+                      {!formData.skipGitRepo && <li>Repository will be cloned inside</li>}
+                      {formData.skipGitRepo && <li>Empty /app directory will be created</li>}
                       {!formData.skipClaudeInit && <li>Claude Code will set up the environment</li>}
                       <li>Once ready, you can access the terminal</li>
                     </ol>
@@ -689,7 +912,272 @@ export default function Dashboard() {
                         Enable Web VS Code (code-server)
                       </label>
                     </div>
+
+                    {/* YOLO Mode Option */}
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="enableYoloMode"
+                          checked={formData.enableYoloMode}
+                          onCheckedChange={(checked) =>
+                            setFormData({ ...formData, enableYoloMode: checked === true })
+                          }
+                          data-testid="yolo-mode-checkbox"
+                        />
+                        <label htmlFor="enableYoloMode" className="text-sm leading-none flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                          Enable YOLO Mode
+                        </label>
+                      </div>
+                      {formData.enableYoloMode && (
+                        <Alert variant="warning" className="mt-2" data-testid="yolo-mode-warning">
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertTitle>Warning: YOLO Mode Enabled</AlertTitle>
+                          <AlertDescription>
+                            YOLO mode (--dangerously-skip-permissions) allows Claude Code to execute commands without permission prompts. 
+                            This can be dangerous as it bypasses all safety checks. Only enable this if you trust the code being executed.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                    </div>
                   </div>
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            {/* Claude Config Tab */}
+            <TabsContent value="claude" className="mt-4">
+              <ScrollArea className="h-[45vh] pr-4">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <FileCode className="h-4 w-4" />
+                      Claude Configuration
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Select configuration templates to inject into the container
+                    </p>
+                  </div>
+
+                  {loadingClaudeConfigs ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : claudeConfigs.length === 0 ? (
+                    <div className="rounded-md bg-muted p-4 text-center text-sm text-muted-foreground">
+                      <p>No configuration templates available.</p>
+                      <p className="text-xs mt-1">Create templates in the Claude Config page first.</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* CLAUDE.MD Selection (Single Select) */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">CLAUDE.MD Template</Label>
+                        <p className="text-xs text-muted-foreground">Select one CLAUDE.MD template (optional)</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                          {claudeConfigs
+                            .filter(c => c.config_type === ConfigTypes.CLAUDE_MD)
+                            .map(config => (
+                              <div key={config.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`claude-md-${config.id}`}
+                                  checked={formData.selectedClaudeMD === config.id}
+                                  onCheckedChange={(checked) => {
+                                    setFormData({
+                                      ...formData,
+                                      selectedClaudeMD: checked ? config.id : undefined
+                                    })
+                                  }}
+                                  data-testid={`claude-md-checkbox-${config.id}`}
+                                />
+                                <ConfigPreview
+                                  content={config.content}
+                                  configType={config.config_type}
+                                  trigger="hover"
+                                >
+                                  <label
+                                    htmlFor={`claude-md-${config.id}`}
+                                    className="text-sm cursor-pointer hover:underline"
+                                  >
+                                    {config.name}
+                                    {config.description && (
+                                      <span className="text-xs text-muted-foreground ml-2">
+                                        - {config.description}
+                                      </span>
+                                    )}
+                                  </label>
+                                </ConfigPreview>
+                              </div>
+                            ))}
+                          {claudeConfigs.filter(c => c.config_type === ConfigTypes.CLAUDE_MD).length === 0 && (
+                            <p className="text-xs text-muted-foreground">No CLAUDE.MD templates available</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Skills Selection (Multi-Select) */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Skills</Label>
+                        <p className="text-xs text-muted-foreground">Select multiple skill templates (optional)</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                          {claudeConfigs
+                            .filter(c => c.config_type === ConfigTypes.SKILL)
+                            .map(config => (
+                              <div key={config.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`skill-${config.id}`}
+                                  checked={formData.selectedSkills.includes(config.id)}
+                                  onCheckedChange={(checked) => {
+                                    setFormData({
+                                      ...formData,
+                                      selectedSkills: checked
+                                        ? [...formData.selectedSkills, config.id]
+                                        : formData.selectedSkills.filter(id => id !== config.id)
+                                    })
+                                  }}
+                                  data-testid={`skill-checkbox-${config.id}`}
+                                />
+                                <ConfigPreview
+                                  content={config.content}
+                                  configType={config.config_type}
+                                  trigger="hover"
+                                >
+                                  <label
+                                    htmlFor={`skill-${config.id}`}
+                                    className="text-sm cursor-pointer hover:underline"
+                                  >
+                                    {config.name}
+                                    {config.description && (
+                                      <span className="text-xs text-muted-foreground ml-2">
+                                        - {config.description}
+                                      </span>
+                                    )}
+                                  </label>
+                                </ConfigPreview>
+                              </div>
+                            ))}
+                          {claudeConfigs.filter(c => c.config_type === ConfigTypes.SKILL).length === 0 && (
+                            <p className="text-xs text-muted-foreground">No skill templates available</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* MCP Selection (Multi-Select) */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">MCP Servers</Label>
+                        <p className="text-xs text-muted-foreground">Select multiple MCP server configurations (optional)</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                          {claudeConfigs
+                            .filter(c => c.config_type === ConfigTypes.MCP)
+                            .map(config => (
+                              <div key={config.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`mcp-${config.id}`}
+                                  checked={formData.selectedMCPs.includes(config.id)}
+                                  onCheckedChange={(checked) => {
+                                    setFormData({
+                                      ...formData,
+                                      selectedMCPs: checked
+                                        ? [...formData.selectedMCPs, config.id]
+                                        : formData.selectedMCPs.filter(id => id !== config.id)
+                                    })
+                                  }}
+                                  data-testid={`mcp-checkbox-${config.id}`}
+                                />
+                                <ConfigPreview
+                                  content={config.content}
+                                  configType={config.config_type}
+                                  trigger="hover"
+                                >
+                                  <label
+                                    htmlFor={`mcp-${config.id}`}
+                                    className="text-sm cursor-pointer hover:underline"
+                                  >
+                                    {config.name}
+                                    {config.description && (
+                                      <span className="text-xs text-muted-foreground ml-2">
+                                        - {config.description}
+                                      </span>
+                                    )}
+                                  </label>
+                                </ConfigPreview>
+                              </div>
+                            ))}
+                          {claudeConfigs.filter(c => c.config_type === ConfigTypes.MCP).length === 0 && (
+                            <p className="text-xs text-muted-foreground">No MCP templates available</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Commands Selection (Multi-Select) */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Commands</Label>
+                        <p className="text-xs text-muted-foreground">Select multiple command templates (optional)</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                          {claudeConfigs
+                            .filter(c => c.config_type === ConfigTypes.COMMAND)
+                            .map(config => (
+                              <div key={config.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`command-${config.id}`}
+                                  checked={formData.selectedCommands.includes(config.id)}
+                                  onCheckedChange={(checked) => {
+                                    setFormData({
+                                      ...formData,
+                                      selectedCommands: checked
+                                        ? [...formData.selectedCommands, config.id]
+                                        : formData.selectedCommands.filter(id => id !== config.id)
+                                    })
+                                  }}
+                                  data-testid={`command-checkbox-${config.id}`}
+                                />
+                                <ConfigPreview
+                                  content={config.content}
+                                  configType={config.config_type}
+                                  trigger="hover"
+                                >
+                                  <label
+                                    htmlFor={`command-${config.id}`}
+                                    className="text-sm cursor-pointer hover:underline"
+                                  >
+                                    {config.name}
+                                    {config.description && (
+                                      <span className="text-xs text-muted-foreground ml-2">
+                                        - {config.description}
+                                      </span>
+                                    )}
+                                  </label>
+                                </ConfigPreview>
+                              </div>
+                            ))}
+                          {claudeConfigs.filter(c => c.config_type === ConfigTypes.COMMAND).length === 0 && (
+                            <p className="text-xs text-muted-foreground">No command templates available</p>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Selection Summary */}
+                  {(formData.selectedClaudeMD || formData.selectedSkills.length > 0 || formData.selectedMCPs.length > 0 || formData.selectedCommands.length > 0) && (
+                    <div className="rounded-md bg-muted p-3 text-sm">
+                      <p className="font-medium mb-2">Selected Configurations:</p>
+                      <ul className="list-disc list-inside space-y-1 text-xs text-muted-foreground">
+                        {formData.selectedClaudeMD && (
+                          <li>CLAUDE.MD: {claudeConfigs.find(c => c.id === formData.selectedClaudeMD)?.name}</li>
+                        )}
+                        {formData.selectedSkills.length > 0 && (
+                          <li>Skills: {formData.selectedSkills.map(id => claudeConfigs.find(c => c.id === id)?.name).join(', ')}</li>
+                        )}
+                        {formData.selectedMCPs.length > 0 && (
+                          <li>MCP Servers: {formData.selectedMCPs.map(id => claudeConfigs.find(c => c.id === id)?.name).join(', ')}</li>
+                        )}
+                        {formData.selectedCommands.length > 0 && (
+                          <li>Commands: {formData.selectedCommands.map(id => claudeConfigs.find(c => c.id === id)?.name).join(', ')}</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </ScrollArea>
             </TabsContent>

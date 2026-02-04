@@ -1,12 +1,30 @@
 import axios, { AxiosError, AxiosResponse } from 'axios'
 import { toast } from '@/components/ui/toast'
+import { getApiBaseUrl } from './serverAddressManager'
 
 // ==================== Base Axios Instance ====================
 
+/**
+ * Gets the dynamic base URL for API requests
+ * Uses serverAddressManager to get the current server address
+ *
+ * Requirements: 4.1, 4.2, 4.3
+ */
+export function getBaseUrl(): string {
+  return getApiBaseUrl()
+}
+
 const api = axios.create({
-  baseURL: '/api',
+  // baseURL is set dynamically via request interceptor
   timeout: 30000,
-  withCredentials: true,
+  withCredentials: true, // Required for CORS with credentials (Requirements: 6.1, 6.2)
+})
+
+// Request interceptor to set dynamic baseURL
+// Requirements: 4.1, 4.3, 4.4
+api.interceptors.request.use((config) => {
+  config.baseURL = getBaseUrl()
+  return config
 })
 
 // Response interceptor to handle auth errors and show error toasts
@@ -177,6 +195,14 @@ export interface DockerContainerInfo {
   is_managed: boolean
 }
 
+// Claude Config Selection for container creation
+export interface ClaudeConfigSelection {
+  selected_claude_md?: number      // Single CLAUDE.MD template ID
+  selected_skills?: number[]       // Multiple Skill template IDs
+  selected_mcps?: number[]         // Multiple MCP template IDs
+  selected_commands?: number[]     // Multiple Command template IDs
+}
+
 // Container API
 export const containerApi = {
   list: () => api.get('/containers'),
@@ -197,7 +223,11 @@ export const containerApi = {
     enableCodeServer?: boolean,
     githubTokenId?: number,
     envVarsProfileId?: number,
-    startupCommandProfileId?: number
+    startupCommandProfileId?: number,
+    // New fields for claude config management
+    skipGitRepo?: boolean,
+    enableYoloMode?: boolean,
+    claudeConfigSelection?: ClaudeConfigSelection
   ) =>
     api.post('/containers', {
       name,
@@ -212,6 +242,13 @@ export const containerApi = {
       github_token_id: githubTokenId,
       env_vars_profile_id: envVarsProfileId,
       startup_command_profile_id: startupCommandProfileId,
+      // New fields for claude config management
+      skip_git_repo: skipGitRepo || false,
+      enable_yolo_mode: enableYoloMode || false,
+      selected_claude_md: claudeConfigSelection?.selected_claude_md,
+      selected_skills: claudeConfigSelection?.selected_skills || [],
+      selected_mcps: claudeConfigSelection?.selected_mcps || [],
+      selected_commands: claudeConfigSelection?.selected_commands || [],
     }),
   start: (id: number) => api.post(`/containers/${id}/start`),
   stop: (id: number) => api.post(`/containers/${id}/stop`),
