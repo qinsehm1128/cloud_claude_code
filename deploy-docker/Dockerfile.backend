@@ -1,0 +1,88 @@
+# ============================================
+# Backend Dockerfile - Multi-stage Build
+# 后端 Dockerfile - 多阶段构建
+# ============================================
+
+# Stage 1: Build / 构建阶段
+FROM golang:1.24-alpine AS builder
+
+# Install build dependencies
+# 安装构建依赖
+RUN apk add --no-cache gcc musl-dev
+
+WORKDIR /app
+
+# Copy go mod files first for better caching
+# 先复制 go mod 文件以优化缓存
+COPY backend/go.mod backend/go.sum ./
+
+# Download dependencies
+# 下载依赖
+RUN go mod download
+
+# Copy source code
+# 复制源代码
+COPY backend/ .
+
+# Build the application with optimizations
+# 使用优化选项构建应用
+# CGO_ENABLED=1 is required for SQLite
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags="-w -s -linkmode external -extldflags '-static'" \
+    -o cc-server ./cmd/server
+
+# Stage 2: Production / 生产阶段
+# Using alpine for minimal size while maintaining compatibility
+# 使用 alpine 以获得最小体积同时保持兼容性
+FROM alpine:3.19 AS production
+
+# Add labels
+LABEL maintainer="CC-Platform Team"
+LABEL description="Claude Code Container Platform - Backend"
+
+# Install runtime dependencies
+# 安装运行时依赖
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user
+# 创建非 root 用户
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+# Create necessary directories
+# 创建必要的目录
+RUN mkdir -p /app/data && \
+    chown -R appuser:appgroup /app
+
+WORKDIR /app
+
+# Copy binary from builder
+# 从构建阶段复制二进制文件
+COPY --from=builder /app/cc-server .
+
+# Set ownership
+RUN chown appuser:appgroup cc-server
+
+# Switch to non-root user
+# 切换到非 root 用户
+USER appuser
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/auth/verify || exit 1
+
+# Environment variables with defaults
+# 环境变量默认值
+ENV ENVIRONMENT=production \
+    PORT=8080 \
+    DATABASE_PATH=/app/data/cc-platform.db \
+    DATA_DIR=/app/data
+
+# Run the application
+CMD ["./cc-server"]
