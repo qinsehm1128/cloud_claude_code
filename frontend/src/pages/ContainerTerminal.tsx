@@ -13,6 +13,7 @@ import {
   PanelRight,
   ListTodo,
   Settings,
+  Download,
 } from 'lucide-react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
@@ -29,6 +30,7 @@ import { MonitoringStatusBar, MonitoringStatus } from '@/components/Automation/M
 import { MonitoringConfigPanel, MonitoringConfig } from '@/components/Automation/MonitoringConfigPanel'
 import { TaskPanel, Task } from '@/components/Automation/TaskPanel'
 import { TaskEditor } from '@/components/Automation/TaskEditor'
+import { ConfigInjectionDialog } from '@/components/ConfigInjectionDialog'
 import 'xterm/css/xterm.css'
 
 interface Container {
@@ -82,6 +84,7 @@ export default function ContainerTerminal() {
   const [activeKey, setActiveKey] = useState<string>('')
   const [filePanelOpen, setFilePanelOpen] = useState(false)
   const [taskPanelOpen, setTaskPanelOpen] = useState(false)
+  const [configDialogOpen, setConfigDialogOpen] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus>({
     enabled: false,
@@ -670,6 +673,14 @@ export default function ContainerTerminal() {
                 </span>
               )}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfigDialogOpen(true)}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Inject Config
+            </Button>
             <Button variant="outline" size="sm" onClick={() => addNewTab()}>
               <Plus className="h-4 w-4 mr-2" />
               New Terminal
@@ -849,6 +860,14 @@ export default function ContainerTerminal() {
           </Tabs>
         )}
       </div>
+
+      {/* Config Injection Dialog */}
+      <ConfigInjectionDialog
+        containerId={parseInt(containerId || '0')}
+        containerName={container?.name || ''}
+        open={configDialogOpen}
+        onOpenChange={setConfigDialogOpen}
+      />
     </div>
   )
 }

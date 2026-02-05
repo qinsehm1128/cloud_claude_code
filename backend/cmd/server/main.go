@@ -192,6 +192,7 @@ func main() {
 		protected.GET("/containers/:id/api-config", containerHandler.GetContainerApiConfig)
 		protected.POST("/containers/:id/start", containerHandler.StartContainer)
 		protected.POST("/containers/:id/stop", containerHandler.StopContainer)
+		protected.POST("/containers/:id/inject-configs", containerHandler.InjectConfigs)
 		protected.DELETE("/containers/:id", containerHandler.DeleteContainer)
 
 		// Docker container management (all containers including orphaned)

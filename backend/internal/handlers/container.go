@@ -383,6 +383,46 @@ func parseID(idStr string) (uint, error) {
 	return uint(id), nil
 }
 
+// InjectConfigsRequest represents the request to inject configs into a container
+type InjectConfigsRequest struct {
+	TemplateIDs []uint `json:"template_ids" binding:"required"`
+}
+
+// InjectConfigs manually injects Claude configurations into a running container
+func (h *ContainerHandler) InjectConfigs(c *gin.Context) {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid container ID"})
+		return
+	}
+
+	var req InjectConfigsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body, template_ids array required"})
+		return
+	}
+
+	if len(req.TemplateIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one template ID is required"})
+		return
+	}
+
+	status, err := h.containerService.InjectConfigs(c.Request.Context(), id, req.TemplateIDs)
+	if err != nil {
+		if err == services.ErrContainerNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Configuration injection completed",
+		"status":  status,
+	})
+}
+
 // GetContainerApiConfig gets the API configuration for a container
 // This returns the API URL and Token based on the container's env vars profile
 func (h *ContainerHandler) GetContainerApiConfig(c *gin.Context) {

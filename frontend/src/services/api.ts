@@ -257,6 +257,8 @@ export const containerApi = {
   start: (id: number) => api.post(`/containers/${id}/start`),
   stop: (id: number) => api.post(`/containers/${id}/stop`),
   delete: (id: number) => api.delete(`/containers/${id}`),
+  injectConfigs: (id: number, templateIds: number[]) =>
+    api.post(`/containers/${id}/inject-configs`, { template_ids: templateIds }),
 }
 
 // Docker API
