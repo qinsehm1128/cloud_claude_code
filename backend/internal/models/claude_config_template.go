@@ -49,6 +49,12 @@ type ClaudeConfigTemplate struct {
 	ConfigType  ConfigType     `gorm:"not null;index;uniqueIndex:idx_name_config_type" json:"config_type"`
 	Content     string         `gorm:"type:text;not null" json:"content"` // Markdown or JSON, includes all metadata
 	Description string         `gorm:"type:text" json:"description,omitempty"`
+	// IsArchive indicates if this is a multi-file skill stored as a zip archive
+	// Only applicable for ConfigTypeSkill
+	IsArchive bool `gorm:"default:false" json:"is_archive"`
+	// ArchiveData contains base64-encoded zip file data when IsArchive is true
+	// The zip should contain the skill folder structure (SKILL.md + scripts/resources)
+	ArchiveData string `gorm:"type:longtext" json:"archive_data,omitempty"`
 }
 
 // TableName specifies the table name for ClaudeConfigTemplate

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -30,6 +31,7 @@ type ConfigInjectionService interface {
 	// Individual injection methods
 	InjectClaudeMD(ctx context.Context, containerID string, content string) error
 	InjectSkill(ctx context.Context, containerID string, name string, content string) error
+	InjectSkillArchive(ctx context.Context, containerID string, name string, archiveData string) error
 	InjectMCP(ctx context.Context, containerID string, configs []MCPServerConfig) error
 	InjectCommand(ctx context.Context, containerID string, name string, content string) error
 }
@@ -142,6 +144,10 @@ func (s *configInjectionServiceImpl) injectSingleConfig(ctx context.Context, con
 		return s.InjectClaudeMD(ctx, containerID, template.Content)
 
 	case models.ConfigTypeSkill:
+		// Check if this is an archive-based skill
+		if template.IsArchive && template.ArchiveData != "" {
+			return s.InjectSkillArchive(ctx, containerID, template.Name, template.ArchiveData)
+		}
 		return s.InjectSkill(ctx, containerID, template.Name, template.Content)
 
 	case models.ConfigTypeMCP:
@@ -193,6 +199,45 @@ func (s *configInjectionServiceImpl) InjectSkill(ctx context.Context, containerI
 	// Write content to ~/.claude/skills/{name}/SKILL.md
 	skillPath := fmt.Sprintf("%s/SKILL.md", skillDir)
 	return s.writeFile(ctx, containerID, skillPath, content)
+}
+
+// InjectSkillArchive injects a multi-file skill from a base64-encoded zip archive
+// The zip file should contain the skill folder structure (SKILL.md + scripts/resources)
+func (s *configInjectionServiceImpl) InjectSkillArchive(ctx context.Context, containerID string, name string, archiveData string) error {
+	// Decode base64 data
+	zipData, err := base64.StdEncoding.DecodeString(archiveData)
+	if err != nil {
+		return fmt.Errorf("failed to decode archive data: %w", err)
+	}
+
+	// Create the skills directory
+	skillsDir := "$HOME/.claude/skills"
+	if err := s.ensureDirectory(ctx, containerID, skillsDir); err != nil {
+		return fmt.Errorf("failed to create skills directory: %w", err)
+	}
+
+	// Create target skill directory
+	skillDir := fmt.Sprintf("%s/%s", skillsDir, name)
+	if err := s.ensureDirectory(ctx, containerID, skillDir); err != nil {
+		return fmt.Errorf("failed to create skill directory %s: %w", skillDir, err)
+	}
+
+	// Write zip file to a temporary location in container
+	tempZipPath := fmt.Sprintf("/tmp/skill_%s.zip", name)
+	if err := s.writeBinaryFile(ctx, containerID, tempZipPath, zipData); err != nil {
+		return fmt.Errorf("failed to write zip file: %w", err)
+	}
+
+	// Extract zip to skill directory
+	// Use unzip -o to overwrite existing files
+	extractCmd := []string{"sh", "-c", fmt.Sprintf("cd %s && unzip -o %s && rm %s", skillDir, tempZipPath, tempZipPath)}
+	_, err = s.dockerClient.ExecInContainer(ctx, containerID, extractCmd)
+	if err != nil {
+		return fmt.Errorf("failed to extract skill archive: %w", err)
+	}
+
+	log.Infof("Successfully injected skill archive '%s' to container %s", name, containerID)
+	return nil
 }
 
 // InjectMCP injects MCP configurations into ~/.claude.json
@@ -268,5 +313,45 @@ func (s *configInjectionServiceImpl) writeFile(ctx context.Context, containerID 
 	if err != nil {
 		return fmt.Errorf("failed to write file %s: %w", path, err)
 	}
+	return nil
+}
+
+// writeBinaryFile writes binary data to a file in the container using base64 encoding
+func (s *configInjectionServiceImpl) writeBinaryFile(ctx context.Context, containerID string, path string, data []byte) error {
+	// Encode binary data as base64
+	b64Data := base64.StdEncoding.EncodeToString(data)
+
+	// Use echo with base64 decode to write binary file
+	// Split into chunks to avoid command line length limits
+	const chunkSize = 65536 // 64KB chunks
+	for i := 0; i < len(b64Data); i += chunkSize {
+		end := i + chunkSize
+		if end > len(b64Data) {
+			end = len(b64Data)
+		}
+		chunk := b64Data[i:end]
+
+		var cmd []string
+		if i == 0 {
+			// First chunk: create file
+			cmd = []string{"sh", "-c", fmt.Sprintf("echo -n '%s' > %s.b64", chunk, path)}
+		} else {
+			// Subsequent chunks: append to file
+			cmd = []string{"sh", "-c", fmt.Sprintf("echo -n '%s' >> %s.b64", chunk, path)}
+		}
+
+		_, err := s.dockerClient.ExecInContainer(ctx, containerID, cmd)
+		if err != nil {
+			return fmt.Errorf("failed to write chunk to %s: %w", path, err)
+		}
+	}
+
+	// Decode base64 file to binary
+	decodeCmd := []string{"sh", "-c", fmt.Sprintf("base64 -d %s.b64 > %s && rm %s.b64", path, path, path)}
+	_, err := s.dockerClient.ExecInContainer(ctx, containerID, decodeCmd)
+	if err != nil {
+		return fmt.Errorf("failed to decode binary file %s: %w", path, err)
+	}
+
 	return nil
 }
