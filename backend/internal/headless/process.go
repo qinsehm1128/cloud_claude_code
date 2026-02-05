@@ -117,7 +117,7 @@ func (s *HeadlessSession) StartClaudeProcess(ctx context.Context, prompt string)
 	log.Printf("[HeadlessSession %s] Created exec instance: %s", s.ID, execResp.ID)
 
 	// 附加到 exec 实例 - Tty 必须与 execConfig 一致
-	attachResp, err := cli.ContainerExecAttach(ctx, execResp.ID, types.ExecStartCheck{
+	claudeAttachResp, err := cli.ContainerExecAttach(ctx, execResp.ID, types.ExecStartCheck{
 		Tty: true,
 	})
 	if err != nil {
@@ -137,7 +137,7 @@ func (s *HeadlessSession) StartClaudeProcess(ctx context.Context, prompt string)
 	// 保存引用
 	s.dockerClient = cli
 	s.execID = execResp.ID
-	s.hijackedResp = &attachResp
+	s.hijackedResp = &claudeAttachResp
 
 	log.Printf("[HeadlessSession %s] Claude process started, exec ID: %s", s.ID, execResp.ID)
 
@@ -149,7 +149,7 @@ func (s *HeadlessSession) StartClaudeProcess(ctx context.Context, prompt string)
 	s.cancelRead = cancel
 
 	// 启动输出读取 goroutine - 使用 TTY 模式的直接读取
-	go s.readDockerOutputTTY(readCtx, &attachResp)
+	go s.readDockerOutputTTY(readCtx, &claudeAttachResp)
 
 	// 启动进程状态检查 goroutine
 	go s.waitDockerExec(ctx, cli, execResp.ID)
