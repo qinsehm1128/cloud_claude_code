@@ -184,7 +184,7 @@ export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
     if (turn.assistant_response) {
       if (typeof turn.assistant_response === 'string') {
         textParts.push(turn.assistant_response);
-      } else {
+      } else if (Array.isArray(turn.assistant_response)) {
         for (const content of turn.assistant_response) {
           if (content.type === 'text' && content.text) {
             textParts.push(content.text);
