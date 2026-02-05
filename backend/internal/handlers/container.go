@@ -65,6 +65,7 @@ type CreateContainerRequest struct {
 	// Container creation options
 	SkipGitRepo    bool `json:"skip_git_repo,omitempty"`    // Allow creating container without GitHub repository
 	EnableYoloMode bool `json:"enable_yolo_mode,omitempty"` // Enable YOLO mode (--dangerously-skip-permissions)
+	RunAsRoot      bool `json:"run_as_root,omitempty"`      // Run container as root user (default: false)
 }
 
 // ListContainers lists all containers
@@ -127,6 +128,7 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 		// Container creation options
 		SkipGitRepo:    req.SkipGitRepo,
 		EnableYoloMode: req.EnableYoloMode,
+		RunAsRoot:      req.RunAsRoot,
 	}
 
 	container, err := h.containerService.CreateContainer(c.Request.Context(), input)

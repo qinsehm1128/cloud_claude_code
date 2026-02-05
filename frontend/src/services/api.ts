@@ -227,7 +227,9 @@ export const containerApi = {
     // New fields for claude config management
     skipGitRepo?: boolean,
     enableYoloMode?: boolean,
-    claudeConfigSelection?: ClaudeConfigSelection
+    claudeConfigSelection?: ClaudeConfigSelection,
+    // Permission option
+    runAsRoot?: boolean
   ) =>
     api.post('/containers', {
       name,
@@ -249,6 +251,8 @@ export const containerApi = {
       selected_skills: claudeConfigSelection?.selected_skills || [],
       selected_mcps: claudeConfigSelection?.selected_mcps || [],
       selected_commands: claudeConfigSelection?.selected_commands || [],
+      // Permission option
+      run_as_root: runAsRoot || false,
     }),
   start: (id: number) => api.post(`/containers/${id}/start`),
   stop: (id: number) => api.post(`/containers/${id}/stop`),

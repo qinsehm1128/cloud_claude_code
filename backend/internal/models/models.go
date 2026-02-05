@@ -46,6 +46,7 @@ type Container struct {
 	// Claude Config Management fields
 	SkipGitRepo     bool             `json:"skip_git_repo"`                                        // Allow creating container without GitHub repository
 	EnableYoloMode  bool             `json:"enable_yolo_mode"`                                     // Enable YOLO mode (--dangerously-skip-permissions)
+	RunAsRoot       bool             `json:"run_as_root"`                                          // Run container as root user (default: false, runs as dev user)
 	InjectionStatus *InjectionStatus `gorm:"type:text" json:"injection_status,omitempty"`         // JSON serialized config injection status
 	// Resource configuration
 	MemoryLimit    int64      `json:"memory_limit,omitempty"`    // Memory limit in bytes (0 = default 2GB)
