@@ -48,8 +48,13 @@ export const claudeConfigApi = {
    * @param id - Template ID
    * @returns Promise with ClaudeConfigTemplate
    */
-  getById: (id: number) =>
-    api.get<ClaudeConfigTemplate>(`/claude-configs/${id}`),
+  getById: (id: number) => {
+    if (id === undefined || id === null) {
+      console.error('claudeConfigApi.getById called with undefined/null id')
+      return Promise.reject(new Error('Invalid template ID'))
+    }
+    return api.get<ClaudeConfigTemplate>(`/claude-configs/${id}`)
+  },
 
   /**
    * Create a new configuration template
@@ -65,16 +70,26 @@ export const claudeConfigApi = {
    * @param data - Updated template data
    * @returns Promise with updated ClaudeConfigTemplate
    */
-  update: (id: number, data: UpdateConfigInput) =>
-    api.put<ClaudeConfigTemplate>(`/claude-configs/${id}`, data),
+  update: (id: number, data: UpdateConfigInput) => {
+    if (id === undefined || id === null) {
+      console.error('claudeConfigApi.update called with undefined/null id')
+      return Promise.reject(new Error('Invalid template ID'))
+    }
+    return api.put<ClaudeConfigTemplate>(`/claude-configs/${id}`, data)
+  },
 
   /**
    * Delete a configuration template
    * @param id - Template ID
    * @returns Promise with void (204 No Content on success)
    */
-  delete: (id: number) =>
-    api.delete(`/claude-configs/${id}`),
+  delete: (id: number) => {
+    if (id === undefined || id === null) {
+      console.error('claudeConfigApi.delete called with undefined/null id')
+      return Promise.reject(new Error('Invalid template ID'))
+    }
+    return api.delete(`/claude-configs/${id}`)
+  },
 }
 
 export default claudeConfigApi
