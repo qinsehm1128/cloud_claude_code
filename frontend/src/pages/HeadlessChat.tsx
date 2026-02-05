@@ -160,7 +160,10 @@ export default function HeadlessChat() {
       try {
         // Use backend proxy to avoid CORS issues
         const response = await containerApi.getModels(selectedContainerId);
-        const modelList = response.data.data || [];
+        const modelList = (response.data.data || []).map(m => ({
+          ...m,
+          display_name: m.id, // Use id as display_name since API doesn't provide it
+        }));
         setModels(modelList);
         // 保持 "default" 选项，不自动选择第一个模型
       } catch (err) {
