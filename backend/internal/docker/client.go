@@ -134,8 +134,9 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		}
 	}
 
-	// Determine user: root or dev (default)
-	user := "dev"
+	// Determine user: root or developer (default)
+	// Note: The base image creates a user called 'developer' with home at /home/developer
+	user := "developer"
 	if config.RunAsRoot {
 		user = "root"
 	}
@@ -262,10 +263,30 @@ func (c *Client) ListAllContainers(ctx context.Context) ([]types.Container, erro
 
 // ExecInContainer executes a command in a container
 func (c *Client) ExecInContainer(ctx context.Context, containerID string, cmd []string) (string, error) {
+	// First, inspect the container to get the user setting
+	containerInfo, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container: %w", err)
+	}
+
+	// Determine the user and home directory
+	user := containerInfo.Config.User
+	if user == "" {
+		user = "root" // Default to root if not specified
+	}
+
+	// Set HOME environment variable based on user
+	homeDir := "/root"
+	if user != "root" && user != "0" {
+		homeDir = fmt.Sprintf("/home/%s", user)
+	}
+
 	execConfig := types.ExecConfig{
 		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
+		User:         user,
+		Env:          []string{fmt.Sprintf("HOME=%s", homeDir)},
 	}
 
 	execID, err := c.cli.ContainerExecCreate(ctx, containerID, execConfig)

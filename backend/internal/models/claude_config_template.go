@@ -41,11 +41,14 @@ func (ct ConfigType) IsValid() bool {
 
 // ClaudeConfigTemplate represents a Claude Code configuration template stored in the database
 type ClaudeConfigTemplate struct {
-	gorm.Model
-	Name        string     `gorm:"not null;uniqueIndex:idx_name_config_type" json:"name"`
-	ConfigType  ConfigType `gorm:"not null;index;uniqueIndex:idx_name_config_type" json:"config_type"`
-	Content     string     `gorm:"type:text;not null" json:"content"` // Markdown or JSON, includes all metadata
-	Description string     `gorm:"type:text" json:"description,omitempty"`
+	ID          uint           `gorm:"primarykey" json:"id"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	Name        string         `gorm:"not null;uniqueIndex:idx_name_config_type" json:"name"`
+	ConfigType  ConfigType     `gorm:"not null;index;uniqueIndex:idx_name_config_type" json:"config_type"`
+	Content     string         `gorm:"type:text;not null" json:"content"` // Markdown or JSON, includes all metadata
+	Description string         `gorm:"type:text" json:"description,omitempty"`
 }
 
 // TableName specifies the table name for ClaudeConfigTemplate
