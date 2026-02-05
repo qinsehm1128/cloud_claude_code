@@ -97,7 +97,7 @@ services:
     networks:
       - cc-network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/auth/verify"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://localhost:8080/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3

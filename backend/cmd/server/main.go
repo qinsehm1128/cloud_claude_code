@@ -149,6 +149,11 @@ func main() {
 	taskQueueHandler := handlers.NewTaskQueueHandler(services.NewTaskQueueService(db))
 	headlessHandler := handlers.NewHeadlessHandler(headlessManager, modeManager, containerService, authService)
 
+	// Health check endpoint (for Docker healthcheck / load balancers)
+	router.GET("/api/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
 	// Public routes (with rate limiting for login)
 	router.POST("/api/auth/login", middleware.LoginRateLimit(), authHandler.Login)
 	router.POST("/api/auth/logout", authHandler.Logout)
