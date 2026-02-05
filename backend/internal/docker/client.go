@@ -134,8 +134,9 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		}
 	}
 
-	// Determine user: root or dev (default)
-	user := "dev"
+	// Determine user: root or developer (default)
+	// Note: The base image creates a user called 'developer' with home at /home/developer
+	user := "developer"
 	if config.RunAsRoot {
 		user = "root"
 	}
