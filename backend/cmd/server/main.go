@@ -190,6 +190,7 @@ func main() {
 		protected.GET("/containers/:id/status", containerHandler.GetContainerStatus)
 		protected.GET("/containers/:id/logs", containerHandler.GetContainerLogs)
 		protected.GET("/containers/:id/api-config", containerHandler.GetContainerApiConfig)
+		protected.GET("/containers/:id/models", containerHandler.GetContainerModels)
 		protected.POST("/containers/:id/start", containerHandler.StartContainer)
 		protected.POST("/containers/:id/stop", containerHandler.StopContainer)
 		protected.POST("/containers/:id/inject-configs", containerHandler.InjectConfigs)

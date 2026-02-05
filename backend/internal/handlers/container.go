@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -444,4 +447,82 @@ func (h *ContainerHandler) GetContainerApiConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, apiConfig)
+}
+
+// GetContainerModels proxies the request to get models from the container's API
+// This avoids CORS issues by making the request from the backend
+func (h *ContainerHandler) GetContainerModels(c *gin.Context) {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid container ID"})
+		return
+	}
+
+	if h.configProfileService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Config profile service not available"})
+		return
+	}
+
+	apiConfig, err := h.configProfileService.GetApiConfigByContainerID(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if apiConfig.ApiURL == "" || apiConfig.ApiToken == "" {
+		c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
+		return
+	}
+
+	// Build models URL from API URL
+	modelsURL, err := buildModelsURL(apiConfig.ApiURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid API URL: %v", err)})
+		return
+	}
+
+	// Create HTTP request to fetch models
+	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", modelsURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create request: %v", err)})
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiConfig.ApiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Make the request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch models: %v", err)})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read response: %v", err)})
+		return
+	}
+
+	// If the upstream request failed, return the error
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(resp.StatusCode, gin.H{"error": string(body)})
+		return
+	}
+
+	// Return the models response as-is
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+// buildModelsURL constructs the models endpoint URL from the base API URL
+func buildModelsURL(apiURL string) (string, error) {
+	parsed, err := url.Parse(apiURL)
+	if err != nil {
+		return "", err
+	}
+	// Use origin + /v1/models
+	return fmt.Sprintf("%s://%s/v1/models", parsed.Scheme, parsed.Host), nil
 }
