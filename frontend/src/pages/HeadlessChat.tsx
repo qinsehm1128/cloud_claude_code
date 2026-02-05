@@ -48,47 +48,6 @@ interface ModelInfo {
   created_at?: string;
 }
 
-// Helper function to fetch models from API
-async function fetchModelsFromApi(apiUrl: string, apiToken: string): Promise<ModelInfo[]> {
-  // Validate inputs
-  if (!apiUrl || !apiToken) {
-    console.warn('[fetchModelsFromApi] API URL or Token is empty, skipping model fetch');
-    return [];
-  }
-
-  // Parse and validate URL
-  let modelsUrl: string;
-  try {
-    const url = new URL(apiUrl);
-    modelsUrl = `${url.origin}/v1/models`;
-  } catch {
-    console.error('[fetchModelsFromApi] Invalid API URL format:', apiUrl);
-    return [];
-  }
-
-  // Fetch models
-  try {
-    const response = await fetch(modelsUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    
-    if (!response.ok) {
-      console.error('[fetchModelsFromApi] Failed to fetch models:', response.status, response.statusText);
-      return [];
-    }
-    
-    const data = await response.json();
-    return data.data || [];
-  } catch (error) {
-    console.error('[fetchModelsFromApi] Network error fetching models:', error);
-    return [];
-  }
-}
-
 export default function HeadlessChat() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -199,17 +158,11 @@ export default function HeadlessChat() {
       setSelectedModel('default');
       
       try {
-        const response = await containerApi.getApiConfig(selectedContainerId);
-        const { api_url, api_token } = response.data;
-        
-        if (api_url && api_token) {
-          const modelList = await fetchModelsFromApi(api_url, api_token);
-          setModels(modelList);
-          // 保持 "default" 选项，不自动选择第一个模型
-        } else {
-          // API 配置未设置，清空模型列表
-          setModels([]);
-        }
+        // Use backend proxy to avoid CORS issues
+        const response = await containerApi.getModels(selectedContainerId);
+        const modelList = response.data.data || [];
+        setModels(modelList);
+        // 保持 "default" 选项，不自动选择第一个模型
       } catch (err) {
         console.error('Failed to load models:', err);
         setModels([]);

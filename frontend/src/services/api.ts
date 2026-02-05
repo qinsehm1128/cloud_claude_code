@@ -211,6 +211,7 @@ export const containerApi = {
   getLogs: (id: number, limit?: number) =>
     api.get(`/containers/${id}/logs`, { params: { limit: limit || 100 } }),
   getApiConfig: (id: number) => api.get<{ api_url: string; api_token: string }>(`/containers/${id}/api-config`),
+  getModels: (id: number) => api.get<{ data: Array<{ id: string; type?: string; created_at?: string }> }>(`/containers/${id}/models`),
   create: (
     name: string,
     gitRepoUrl: string,
