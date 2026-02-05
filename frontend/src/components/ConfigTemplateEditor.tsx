@@ -1,9 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Upload, Loader2, FileCode, FileJson } from 'lucide-react'
+import { Upload, Loader2, FileCode, FileJson, FolderArchive, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Dialog,
   DialogContent,
@@ -27,6 +29,7 @@ export interface ConfigTemplateEditorProps {
 interface ValidationErrors {
   name?: string
   content?: string
+  archive?: string
 }
 
 // Get syntax type based on config type
@@ -114,11 +117,15 @@ export default function ConfigTemplateEditor({
     config_type: configType,
     content: '',
     description: '',
+    is_archive: false,
+    archive_data: '',
   })
   const [errors, setErrors] = useState<ValidationErrors>({})
   const [saving, setSaving] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
+  const [archiveFileName, setArchiveFileName] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const archiveInputRef = useRef<HTMLInputElement>(null)
 
   const isEditing = !!template
   const syntaxType = getSyntaxType(configType)
@@ -132,14 +139,20 @@ export default function ConfigTemplateEditor({
           config_type: template.config_type,
           content: template.content,
           description: template.description || '',
+          is_archive: template.is_archive || false,
+          archive_data: template.archive_data || '',
         })
+        setArchiveFileName(template.is_archive ? 'Uploaded archive' : null)
       } else {
         setFormData({
           name: '',
           config_type: configType,
           content: '',
           description: '',
+          is_archive: false,
+          archive_data: '',
         })
+        setArchiveFileName(null)
       }
       setErrors({})
       setFileError(null)
@@ -154,12 +167,19 @@ export default function ConfigTemplateEditor({
       newErrors.name = 'Name is required'
     }
 
-    if (!formData.content.trim()) {
-      newErrors.content = 'Content is required'
-    } else if (configType === ConfigTypes.MCP) {
-      const mcpError = validateMCPContent(formData.content)
-      if (mcpError) {
-        newErrors.content = mcpError
+    // For archive-based skills, archive_data is required instead of content
+    if (formData.is_archive && configType === ConfigTypes.SKILL) {
+      if (!formData.archive_data) {
+        newErrors.archive = 'Please upload a zip file containing the skill folder'
+      }
+    } else {
+      if (!formData.content.trim()) {
+        newErrors.content = 'Content is required'
+      } else if (configType === ConfigTypes.MCP) {
+        const mcpError = validateMCPContent(formData.content)
+        if (mcpError) {
+          newErrors.content = mcpError
+        }
       }
     }
 
@@ -249,6 +269,64 @@ export default function ConfigTemplateEditor({
     fileInputRef.current?.click()
   }
 
+  // Handle archive (zip) file upload
+  const handleArchiveUpload = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      if (!file) return
+
+      setFileError(null)
+
+      // Validate file type (must be .zip)
+      if (!file.name.toLowerCase().endsWith('.zip')) {
+        setFileError('Please upload a .zip file containing the skill folder')
+        if (archiveInputRef.current) {
+          archiveInputRef.current.value = ''
+        }
+        return
+      }
+
+      // Read file as base64
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const arrayBuffer = e.target?.result as ArrayBuffer
+        const bytes = new Uint8Array(arrayBuffer)
+        let binary = ''
+        bytes.forEach((byte) => {
+          binary += String.fromCharCode(byte)
+        })
+        const base64 = btoa(binary)
+
+        setFormData((prev) => ({
+          ...prev,
+          archive_data: base64,
+          // Use filename without extension as name if name is empty
+          name: prev.name || file.name.replace(/\.zip$/i, ''),
+        }))
+        setArchiveFileName(file.name)
+        setErrors((prev) => ({ ...prev, archive: undefined }))
+      }
+      reader.onerror = () => {
+        setFileError('Failed to read zip file')
+      }
+      reader.readAsArrayBuffer(file)
+
+      // Reset file input for re-upload
+      if (archiveInputRef.current) {
+        archiveInputRef.current.value = ''
+      }
+    },
+    []
+  )
+
+  // Handle archive upload button click
+  const handleArchiveUploadClick = () => {
+    archiveInputRef.current?.click()
+  }
+
+  // Check if archive mode is available (only for SKILL type)
+  const canUseArchiveMode = configType === ConfigTypes.SKILL
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -298,7 +376,100 @@ export default function ConfigTemplateEditor({
             />
           </div>
 
-          {/* Content field with syntax indicator and upload */}
+          {/* Archive mode toggle (only for SKILL type) */}
+          {canUseArchiveMode && (
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="archive-mode"
+                  checked={formData.is_archive}
+                  onCheckedChange={(checked) => {
+                    setFormData({
+                      ...formData,
+                      is_archive: checked === true,
+                      // Clear content/archive when switching modes
+                      content: checked ? '' : formData.content,
+                      archive_data: checked ? formData.archive_data : '',
+                    })
+                    setArchiveFileName(checked ? archiveFileName : null)
+                    setErrors({})
+                    setFileError(null)
+                  }}
+                />
+                <Label
+                  htmlFor="archive-mode"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  Multi-file skill (upload zip archive)
+                </Label>
+              </div>
+              <Alert variant="default" className="bg-muted/50">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  Enable this option to upload a zip file containing the complete skill folder structure
+                  (SKILL.md + scripts, resources, etc.)
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
+
+          {/* Archive upload section (when archive mode is enabled) */}
+          {formData.is_archive && canUseArchiveMode && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                Skill Archive
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-muted text-muted-foreground">
+                  <FolderArchive className="h-3 w-3" />
+                  ZIP
+                </span>
+              </Label>
+              <div className="border rounded-md p-4 bg-muted/30">
+                <input
+                  ref={archiveInputRef}
+                  type="file"
+                  accept=".zip"
+                  onChange={handleArchiveUpload}
+                  className="hidden"
+                  aria-label="Upload zip archive"
+                />
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    {archiveFileName ? (
+                      <div className="flex items-center gap-2 text-sm">
+                        <FolderArchive className="h-4 w-4 text-green-500" />
+                        <span>{archiveFileName}</span>
+                        <span className="text-muted-foreground">
+                          ({Math.round((formData.archive_data?.length || 0) * 0.75 / 1024)} KB)
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No archive uploaded. Please upload a .zip file.
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleArchiveUploadClick}
+                  >
+                    <Upload className="h-4 w-4 mr-1" />
+                    {archiveFileName ? 'Change' : 'Upload ZIP'}
+                  </Button>
+                </div>
+              </div>
+              {errors.archive && (
+                <p className="text-sm text-destructive">{errors.archive}</p>
+              )}
+              {fileError && (
+                <p className="text-sm text-destructive">{fileError}</p>
+              )}
+            </div>
+          )}
+
+          {/* Content field with syntax indicator and upload (when not in archive mode) */}
+          {(!formData.is_archive || !canUseArchiveMode) && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="template-content" className="flex items-center gap-2">
@@ -371,6 +542,7 @@ export default function ConfigTemplateEditor({
               </p>
             )}
           </div>
+          )}
         </div>
 
         <DialogFooter>
