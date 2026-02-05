@@ -8,14 +8,6 @@
 #   - cc-base:latest (without code-server)
 #   - cc-base:with-code-server (with code-server)
 #
-# These images are required for creating user development containers.
-#
-# 此脚本构建两个基础镜像：
-#   - cc-base:latest（不含 code-server）
-#   - cc-base:with-code-server（含 code-server）
-#
-# 这些镜像用于创建用户的开发环境容器。
-#
 # Usage / 使用方法:
 #   ./build-base.sh              # Normal build / 常规构建
 #   ./build-base.sh --clean      # Clean build / 清理构建
@@ -112,61 +104,60 @@ if [ "$CLEAN_BUILD" = true ]; then
     print_msg "" ""
     print_msg "[0/4] Cleaning up existing images and cache..." "$YELLOW"
 
-    # Remove existing cc-base images
     docker images "${IMAGE_NAME}" -q | xargs -r docker rmi -f 2>/dev/null || true
-
-    # Remove dangling images
     docker images -f "dangling=true" -q | xargs -r docker rmi -f 2>/dev/null || true
-
-    # Prune build cache
     docker builder prune -f --filter "until=24h" 2>/dev/null || true
 
-    # Clean extension build artifacts
     rm -rf "${EXTENSION_DIR}"
-    rm -rf "${PROJECT_ROOT}/vscode-extension/out"
-    rm -rf "${PROJECT_ROOT}/vscode-extension/node_modules"
-    rm -f "${PROJECT_ROOT}/vscode-extension/*.vsix"
+    rm -rf "${PROJECT_ROOT}/vscode-extension/out" 2>/dev/null || true
+    rm -rf "${PROJECT_ROOT}/vscode-extension/node_modules" 2>/dev/null || true
+    rm -f "${PROJECT_ROOT}/vscode-extension/*.vsix" 2>/dev/null || true
 
     print_msg "Cleanup complete" "$GREEN"
 fi
 
-# Build VS Code extension if source exists
+# Build VS Code extension (optional - skip if npm not available)
 print_msg "" ""
 print_msg "[1/4] Building PTY Automation VS Code extension..." "$YELLOW"
 
+mkdir -p "${EXTENSION_DIR}"
+
 if [ -d "${PROJECT_ROOT}/vscode-extension" ]; then
-    mkdir -p "${EXTENSION_DIR}"
+    if command -v npm &> /dev/null; then
+        (
+            cd "${PROJECT_ROOT}/vscode-extension"
 
-    cd "${PROJECT_ROOT}/vscode-extension"
+            if [ ! -d "node_modules" ]; then
+                print_msg "  Installing dependencies..." ""
+                npm install 2>/dev/null || true
+            fi
 
-    # Install dependencies and build
-    if [ ! -d "node_modules" ]; then
-        print_msg "  Installing dependencies..." ""
-        npm install
-    fi
+            if [ -d "node_modules" ]; then
+                print_msg "  Compiling TypeScript..." ""
+                npm run compile 2>/dev/null || true
 
-    print_msg "  Compiling TypeScript..." ""
-    npm run compile
+                if ! command -v vsce &> /dev/null; then
+                    print_msg "  Installing vsce..." ""
+                    npm install -g @vscode/vsce 2>/dev/null || true
+                fi
 
-    # Package extension
-    if ! command -v vsce &> /dev/null; then
-        print_msg "  Installing vsce..." ""
-        npm install -g @vscode/vsce
-    fi
+                if command -v vsce &> /dev/null; then
+                    print_msg "  Packaging extension..." ""
+                    vsce package --out "${EXTENSION_DIR}/pty-automation-monitor.vsix" --allow-missing-repository 2>/dev/null || true
+                fi
+            fi
+        )
 
-    print_msg "  Packaging extension..." ""
-    vsce package --out "${EXTENSION_DIR}/pty-automation-monitor.vsix" --allow-missing-repository
-
-    cd "${SCRIPT_DIR}"
-
-    if [ -f "${EXTENSION_DIR}/pty-automation-monitor.vsix" ]; then
-        print_msg "Extension built successfully" "$GREEN"
+        if [ -f "${EXTENSION_DIR}/pty-automation-monitor.vsix" ]; then
+            print_msg "  Extension built successfully" "$GREEN"
+        else
+            print_msg "  Skipped: Extension build failed (optional)" "$YELLOW"
+        fi
     else
-        print_msg "Warning: Failed to build extension, continuing without it" "$YELLOW"
+        print_msg "  Skipped: npm not available (extension is optional)" "$YELLOW"
     fi
 else
-    print_msg "Warning: vscode-extension directory not found, skipping extension build" "$YELLOW"
-    mkdir -p "${EXTENSION_DIR}"
+    print_msg "  Skipped: vscode-extension directory not found" "$YELLOW"
 fi
 
 # Build base image (without code-server)
@@ -197,22 +188,21 @@ print_header "Verifying Images"
 print_msg "" ""
 print_msg "--- ${IMAGE_NAME}:latest ---" "$BLUE"
 docker run --rm "${IMAGE_NAME}:latest" bash -c "
-    echo 'Node.js:' \$(node --version)
-    echo 'npm:' \$(npm --version)
-    echo 'Git:' \$(git --version | cut -d' ' -f3)
-    echo 'Claude Code:' \$(which claude > /dev/null && echo 'installed' || echo 'not found')
-    echo 'code-server:' \$(which code-server > /dev/null && echo 'installed' || echo 'not installed')
+    echo 'Node.js:' \$(node --version 2>/dev/null || echo 'N/A')
+    echo 'npm:' \$(npm --version 2>/dev/null || echo 'N/A')
+    echo 'Git:' \$(git --version 2>/dev/null | cut -d' ' -f3 || echo 'N/A')
+    echo 'Claude Code:' \$(which claude > /dev/null 2>&1 && echo 'installed' || echo 'not found')
+    echo 'code-server:' \$(which code-server > /dev/null 2>&1 && echo 'installed' || echo 'not installed')
 "
 
 print_msg "" ""
 print_msg "--- ${IMAGE_NAME}:with-code-server ---" "$BLUE"
 docker run --rm "${IMAGE_NAME}:with-code-server" bash -c "
-    echo 'Node.js:' \$(node --version)
-    echo 'npm:' \$(npm --version)
-    echo 'Git:' \$(git --version | cut -d' ' -f3)
-    echo 'Claude Code:' \$(which claude > /dev/null && echo 'installed' || echo 'not found')
-    echo 'code-server:' \$(which code-server > /dev/null && echo 'installed' || echo 'not installed')
-    echo 'PTY Automation:' \$(code-server --list-extensions 2>/dev/null | grep -q 'pty-automation' && echo 'installed' || echo 'not installed')
+    echo 'Node.js:' \$(node --version 2>/dev/null || echo 'N/A')
+    echo 'npm:' \$(npm --version 2>/dev/null || echo 'N/A')
+    echo 'Git:' \$(git --version 2>/dev/null | cut -d' ' -f3 || echo 'N/A')
+    echo 'Claude Code:' \$(which claude > /dev/null 2>&1 && echo 'installed' || echo 'not found')
+    echo 'code-server:' \$(which code-server > /dev/null 2>&1 && echo 'installed' || echo 'not installed')
 "
 
 # Cleanup
@@ -223,6 +213,3 @@ rm -rf "${EXTENSION_DIR}"
 print_header "Build Complete!"
 print_msg "Available images:" "$GREEN"
 docker images "${IMAGE_NAME}" --format "  - {{.Repository}}:{{.Tag}}\t({{.Size}})"
-print_msg "" ""
-print_msg "These base images are required for the platform to create user containers." "$YELLOW"
-print_msg "You can now start the platform with: docker compose up -d" ""

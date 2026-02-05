@@ -95,9 +95,8 @@ deploy-docker/
 ├── Dockerfile.frontend     # 前端镜像
 ├── Dockerfile.backend      # 后端镜像
 ├── nginx.conf              # 容器内 Nginx 配置
-├── nginx-host.conf         # 宿主机 Nginx 参考配置
 ├── .env.example            # 环境变量模板
-└── README.zh-CN.md         # 本文件
+└── README.md               # 本文件
 ```
 
 ## 端口说明
