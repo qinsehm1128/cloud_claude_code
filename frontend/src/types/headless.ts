@@ -54,7 +54,7 @@ export interface TurnInfo {
   turn_index: number;
   user_prompt: string;
   prompt_source: 'user' | 'strategy' | 'monitoring';
-  assistant_response?: string;
+  assistant_response?: string | MessageContent[];
   model?: string;
   input_tokens: number;
   output_tokens: number;
