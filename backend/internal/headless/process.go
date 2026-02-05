@@ -49,26 +49,48 @@ func (s *HeadlessSession) StartClaudeProcess(ctx context.Context, prompt string)
 
 	// 确保工作目录存在（防止 "no such file or directory" 错误）
 	// 必须在创建 Claude exec 之前完成，因为 Docker 会验证 WorkingDir 存在
+	workDir := s.WorkDir
+	if workDir == "" {
+		workDir = "/app"
+	}
+	log.Printf("[HeadlessSession %s] Ensuring WorkDir exists: %s", s.ID, workDir)
+
+	// 使用 sh -c 执行，确保命令在容器内正确运行
 	ensureDirConfig := types.ExecConfig{
-		Cmd:          []string{"mkdir", "-p", s.WorkDir},
+		Cmd:          []string{"sh", "-c", fmt.Sprintf("mkdir -p '%s' && echo 'OK'", workDir)},
 		AttachStdout: true,
 		AttachStderr: true,
 	}
 	ensureDirResp, err := cli.ContainerExecCreate(ctx, s.DockerID, ensureDirConfig)
 	if err != nil {
-		log.Printf("[HeadlessSession %s] Warning: failed to create mkdir exec: %v", s.ID, err)
-	} else {
-		// 使用 Attach 而不是 Start，这样可以等待命令完成
-		attachResp, err := cli.ContainerExecAttach(ctx, ensureDirResp.ID, types.ExecStartCheck{})
-		if err != nil {
-			log.Printf("[HeadlessSession %s] Warning: failed to attach mkdir exec: %v", s.ID, err)
-		} else {
-			// 读取输出并等待完成
-			_, _ = io.ReadAll(attachResp.Reader)
-			attachResp.Close()
-			log.Printf("[HeadlessSession %s] WorkDir %s ensured to exist", s.ID, s.WorkDir)
-		}
+		cli.Close()
+		return fmt.Errorf("failed to create mkdir exec for WorkDir %s: %w", workDir, err)
 	}
+
+	// 使用 Attach 并等待命令完成
+	attachResp, err := cli.ContainerExecAttach(ctx, ensureDirResp.ID, types.ExecStartCheck{})
+	if err != nil {
+		cli.Close()
+		return fmt.Errorf("failed to attach mkdir exec for WorkDir %s: %w", workDir, err)
+	}
+
+	// 读取输出并等待完成
+	output, _ := io.ReadAll(attachResp.Reader)
+	attachResp.Close()
+	log.Printf("[HeadlessSession %s] mkdir output: %s", s.ID, string(output))
+
+	// 检查 exec 退出码
+	inspectResp, err := cli.ContainerExecInspect(ctx, ensureDirResp.ID)
+	if err != nil {
+		log.Printf("[HeadlessSession %s] Warning: failed to inspect mkdir exec: %v", s.ID, err)
+	} else if inspectResp.ExitCode != 0 {
+		cli.Close()
+		return fmt.Errorf("failed to create WorkDir %s: exit code %d", workDir, inspectResp.ExitCode)
+	}
+	log.Printf("[HeadlessSession %s] WorkDir %s ensured to exist", s.ID, workDir)
+
+	// 更新 WorkDir（以防原来是空字符串）
+	s.WorkDir = workDir
 
 	// 创建 exec 实例 - 必须启用 TTY，否则 claude CLI 可能卡住或不输出
 	execConfig := types.ExecConfig{
