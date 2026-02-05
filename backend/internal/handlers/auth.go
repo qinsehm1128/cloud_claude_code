@@ -39,9 +39,28 @@ type LoginResponse struct {
 	Message string `json:"message"`
 }
 
-// isProduction checks if running in production mode
-func isProduction() bool {
-	return os.Getenv("ENVIRONMENT") == "production"
+// isSecureRequest checks if the request should use secure cookies
+// It considers both the environment and the actual request protocol
+func isSecureRequest(c *gin.Context) bool {
+	// In development mode, never use secure cookies
+	if os.Getenv("ENVIRONMENT") != "production" {
+		return false
+	}
+
+	// Check if request came over HTTPS (directly or via proxy)
+	// X-Forwarded-Proto is set by reverse proxies (nginx, etc.)
+	if proto := c.GetHeader("X-Forwarded-Proto"); proto == "https" {
+		return true
+	}
+
+	// Check the actual request scheme
+	if c.Request.TLS != nil {
+		return true
+	}
+
+	// In production but not HTTPS, still don't set Secure flag
+	// This allows HTTP deployments to work (not recommended but functional)
+	return false
 }
 
 // Login handles user login
@@ -63,8 +82,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Set httpOnly cookie with the token
-	// In production, set Secure=true for HTTPS only
-	secure := isProduction()
+	// Secure flag is set based on actual request protocol
+	secure := isSecureRequest(c)
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
 		TokenCookieName,    // name
@@ -72,7 +91,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		TokenCookieMaxAge,  // maxAge (24 hours)
 		"/",                // path
 		"",                 // domain (empty = current domain)
-		secure,             // secure (HTTPS only in production)
+		secure,             // secure (HTTPS only when actually using HTTPS)
 		true,               // httpOnly (not accessible via JavaScript)
 	)
 
@@ -88,7 +107,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		-1,
 		"/",
 		"",
-		isProduction(),
+		isSecureRequest(c),
 		true,
 	)
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
