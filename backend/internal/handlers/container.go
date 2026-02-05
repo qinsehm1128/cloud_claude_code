@@ -469,13 +469,13 @@ func (h *ContainerHandler) GetContainerModels(c *gin.Context) {
 		return
 	}
 
-	if apiConfig.ApiURL == "" || apiConfig.ApiToken == "" {
+	if apiConfig.ApiUrl == "" || apiConfig.ApiToken == "" {
 		c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
 		return
 	}
 
 	// Build models URL from API URL
-	modelsURL, err := buildModelsURL(apiConfig.ApiURL)
+	modelsURL, err := buildModelsURL(apiConfig.ApiUrl)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid API URL: %v", err)})
 		return
