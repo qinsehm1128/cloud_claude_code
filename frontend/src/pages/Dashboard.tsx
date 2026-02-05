@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { 
-  Plus, 
-  Play, 
-  Square, 
-  Trash2, 
-  Terminal, 
+import {
+  Plus,
+  Play,
+  Square,
+  Trash2,
+  Terminal,
   RefreshCw,
   FileText,
   Loader2,
@@ -24,7 +24,8 @@ import {
   GitFork,
   AlertTriangle,
   FileCode,
-  Info
+  Info,
+  Shield
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -134,6 +135,7 @@ export default function Dashboard() {
     // New fields for claude config management
     skipGitRepo: false,
     enableYoloMode: false,
+    runAsRoot: false,
     selectedClaudeMD: undefined as number | undefined,
     selectedSkills: [] as number[],
     selectedMCPs: [] as number[],
@@ -310,7 +312,8 @@ export default function Dashboard() {
         formData.commandProfileId,
         formData.skipGitRepo,
         formData.enableYoloMode,
-        claudeConfigSelection
+        claudeConfigSelection,
+        formData.runAsRoot
       )
       setCreateDialogOpen(false)
       setFormData({
@@ -328,6 +331,7 @@ export default function Dashboard() {
         commandProfileId: undefined,
         skipGitRepo: false,
         enableYoloMode: false,
+        runAsRoot: false,
         selectedClaudeMD: undefined,
         selectedSkills: [],
         selectedMCPs: [],
@@ -934,8 +938,37 @@ export default function Dashboard() {
                           <AlertTriangle className="h-4 w-4" />
                           <AlertTitle>Warning: YOLO Mode Enabled</AlertTitle>
                           <AlertDescription>
-                            YOLO mode (--dangerously-skip-permissions) allows Claude Code to execute commands without permission prompts. 
+                            YOLO mode (--dangerously-skip-permissions) allows Claude Code to execute commands without permission prompts.
                             This can be dangerous as it bypasses all safety checks. Only enable this if you trust the code being executed.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                    </div>
+
+                    {/* Run As Root Option */}
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="runAsRoot"
+                          checked={formData.runAsRoot}
+                          onCheckedChange={(checked) =>
+                            setFormData({ ...formData, runAsRoot: checked === true })
+                          }
+                          data-testid="run-as-root-checkbox"
+                        />
+                        <label htmlFor="runAsRoot" className="text-sm leading-none flex items-center gap-2">
+                          <Shield className="h-4 w-4 text-orange-500" />
+                          Run as Root User
+                        </label>
+                      </div>
+                      {formData.runAsRoot && (
+                        <Alert variant="warning" className="mt-2" data-testid="run-as-root-warning">
+                          <Shield className="h-4 w-4" />
+                          <AlertTitle>Root Privileges Enabled</AlertTitle>
+                          <AlertDescription>
+                            Container will run as root user with full system privileges.
+                            This grants elevated permissions for system-level operations.
+                            Default: runs as 'dev' user with limited permissions.
                           </AlertDescription>
                         </Alert>
                       )}

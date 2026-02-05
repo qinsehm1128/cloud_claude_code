@@ -134,10 +134,17 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		}
 	}
 
+	// Determine user: root or dev (default)
+	user := "dev"
+	if config.RunAsRoot {
+		user = "root"
+	}
+
 	// Build container config
 	containerConfig := &container.Config{
 		Image:        imageName,
 		Env:          config.EnvVars,
+		User:         user,
 		Tty:          true,
 		OpenStdin:    true,
 		AttachStdin:  true,
@@ -294,6 +301,7 @@ type ContainerConfig struct {
 	Labels          map[string]string // Container labels (for Traefik routing)
 	UseTraefikNet   bool              // Connect to traefik-net network
 	UseCodeServer   bool              // Use image with code-server
+	RunAsRoot       bool              // Run as root user (default: false, runs as dev user)
 }
 
 // createBuildContext creates a tar archive of the build context

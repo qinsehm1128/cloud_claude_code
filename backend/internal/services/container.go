@@ -146,6 +146,7 @@ type CreateContainerInput struct {
 	SkipGitRepo      bool          `json:"skip_git_repo,omitempty"`      // Allow creating container without GitHub repository
 	SkipClaudeInit   bool          `json:"skip_claude_init,omitempty"`   // Skip Claude Code initialization
 	EnableYoloMode   bool          `json:"enable_yolo_mode,omitempty"`   // Enable YOLO mode (--dangerously-skip-permissions)
+	RunAsRoot        bool          `json:"run_as_root,omitempty"`        // Run container as root user (default: false)
 	MemoryLimit      int64         `json:"memory_limit,omitempty"`       // Memory limit in MB (0 = default 2048MB)
 	CPULimit         float64       `json:"cpu_limit,omitempty"`          // CPU limit in cores (0 = default 1)
 	PortMappings     []PortMapping `json:"port_mappings,omitempty"`      // Legacy port mappings
@@ -353,6 +354,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		Labels:        labels,
 		UseTraefikNet: useTraefikNet,
 		UseCodeServer: input.EnableCodeServer,
+		RunAsRoot:     input.RunAsRoot,
 	}
 
 	// Create Docker container
@@ -400,6 +402,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		SkipClaudeInit:          input.SkipClaudeInit,
 		SkipGitRepo:             input.SkipGitRepo,
 		EnableYoloMode:          input.EnableYoloMode,
+		RunAsRoot:               input.RunAsRoot,
 		MemoryLimit:             memoryLimit * 1024 * 1024, // Store in bytes
 		CPULimit:                cpuLimit,
 		ExposedPorts:            portMappingsJSON,
