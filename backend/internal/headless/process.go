@@ -55,11 +55,13 @@ func (s *HeadlessSession) StartClaudeProcess(ctx context.Context, prompt string)
 	}
 	log.Printf("[HeadlessSession %s] Ensuring WorkDir exists: %s", s.ID, workDir)
 
-	// 使用 sh -c 执行，确保命令在容器内正确运行
+	// 使用 root 用户执行 mkdir，因为 developer 用户可能没有在根目录创建文件夹的权限
+	// 创建目录后修改权限，让 developer 用户可以使用
 	ensureDirConfig := types.ExecConfig{
-		Cmd:          []string{"sh", "-c", fmt.Sprintf("mkdir -p '%s' && echo 'OK'", workDir)},
+		Cmd:          []string{"sh", "-c", fmt.Sprintf("mkdir -p '%s' && chown developer:developer '%s' && echo 'OK'", workDir, workDir)},
 		AttachStdout: true,
 		AttachStderr: true,
+		User:         "root", // 以 root 用户执行，确保有权限创建目录
 	}
 	ensureDirResp, err := cli.ContainerExecCreate(ctx, s.DockerID, ensureDirConfig)
 	if err != nil {
