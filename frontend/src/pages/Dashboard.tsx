@@ -53,7 +53,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { containerApi, repoApi, configProfileApi, PortMapping, ProxyConfig, GitHubTokenItem, EnvVarsProfile, StartupCommandProfile, ClaudeConfigSelection } from '@/services/api'
 import { claudeConfigApi } from '@/services/claudeConfigApi'
-import { ClaudeConfigTemplate, ConfigType, ConfigTypes, InjectionStatus } from '@/types/claudeConfig'
+import { ClaudeConfigTemplate, ConfigTypes, InjectionStatus } from '@/types/claudeConfig'
 import ConfigPreview from '@/components/ConfigPreview'
 import { toast } from '@/components/ui/toast'
 import {
