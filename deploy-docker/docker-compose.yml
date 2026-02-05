@@ -21,8 +21,8 @@
 #   docker compose logs -f            # View logs / 查看日志
 #
 # Port mapping / 端口映射:
-#   - Frontend: ${APP_PORT:-8080} -> Host Nginx -> Users
-#   - Traefik:  ${TRAEFIK_HTTP_PORT:-8081} -> Host Nginx -> Code-Server
+#   - Frontend: ${APP_PORT:-51080} -> Host Nginx -> Users
+#   - Traefik:  ${TRAEFIK_HTTP_PORT:-51081} -> Host Nginx -> Code-Server
 #
 # ============================================
 
@@ -40,7 +40,7 @@ services:
     ports:
       # Map to high port, host nginx will proxy to this
       # 映射到高位端口，宿主机 nginx 会代理到此端口
-      - "${APP_PORT:-8080}:80"
+      - "${APP_PORT:-51080}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -85,8 +85,8 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       # Traefik settings (fixed ports) / Traefik 设置（固定端口）
       - AUTO_START_TRAEFIK=${AUTO_START_TRAEFIK:-true}
-      - TRAEFIK_HTTP_PORT=${TRAEFIK_HTTP_PORT:-8081}
-      - TRAEFIK_DASHBOARD_PORT=${TRAEFIK_DASHBOARD_PORT:-8082}
+      - TRAEFIK_HTTP_PORT=${TRAEFIK_HTTP_PORT:-51081}
+      - TRAEFIK_DASHBOARD_PORT=${TRAEFIK_DASHBOARD_PORT:-51082}
       - TRAEFIK_PORT_RANGE_START=${TRAEFIK_PORT_RANGE_START:-30001}
       - TRAEFIK_PORT_RANGE_END=${TRAEFIK_PORT_RANGE_END:-30020}
       # Optional API keys / 可选 API 密钥

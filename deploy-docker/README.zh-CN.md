@@ -12,13 +12,13 @@
     ▼
 宿主机 Nginx (80/443)  ←── 用户只需配置这一层
     │
-    ├── 主站点 example.com ──────► Docker 前端 (127.0.0.1:8080)
+    ├── 主站点 example.com ──────► Docker 前端 (127.0.0.1:51080)
     │                                      │
     │                                      ▼
     │                              Docker 后端 (内部 8080)
     │                                      │
     │                                      ▼
-    │                              Traefik (127.0.0.1:8081)
+    │                              Traefik (127.0.0.1:51081)
     │                                      │
     └── *.code.example.com ────────────────┘
                                            │
@@ -104,9 +104,9 @@ deploy-docker/
 
 | 端口 | 用途 | 说明 |
 |------|------|------|
-| `APP_PORT` (8080) | 主应用 | 前端容器，宿主机 nginx 代理到此 |
-| `TRAEFIK_HTTP_PORT` (8081) | Code-Server | Traefik 代理，用于 code-server 子域名 |
-| `TRAEFIK_DASHBOARD_PORT` (8082) | Dashboard | Traefik 仪表板 |
+| `APP_PORT` (51080) | 主应用 | 前端容器，宿主机 nginx 代理到此 |
+| `TRAEFIK_HTTP_PORT` (51081) | Code-Server | Traefik 代理，用于 code-server 子域名 |
+| `TRAEFIK_DASHBOARD_PORT` (51082) | Dashboard | Traefik 仪表板 |
 | `30001-30020` | 直接端口 | 容器服务直接访问端口 |
 
 ## 配置详解
@@ -122,9 +122,9 @@ DOMAIN=cc.example.com       # 主站点域名
 CODE_SERVER_BASE_DOMAIN=code.example.com  # code-server 子域名
 
 # === 端口（一般不需要修改） ===
-APP_PORT=8080               # 主应用端口
-TRAEFIK_HTTP_PORT=8081      # Traefik HTTP 端口
-TRAEFIK_DASHBOARD_PORT=8082 # Traefik Dashboard 端口
+APP_PORT=51080               # 主应用端口
+TRAEFIK_HTTP_PORT=51081      # Traefik HTTP 端口
+TRAEFIK_DASHBOARD_PORT=51082 # Traefik Dashboard 端口
 
 # === 可选 ===
 GITHUB_TOKEN=xxx            # GitHub Token
@@ -135,8 +135,8 @@ ANTHROPIC_API_KEY=xxx       # Claude API Key
 
 运行 `./generate-nginx.sh` 会根据 `.env` 自动生成 `nginx-site.conf`：
 
-- **主站点** - 代理到 `127.0.0.1:8080`
-- **Code-Server 子域名** - 代理到 `127.0.0.1:8081` (Traefik)
+- **主站点** - 代理到 `127.0.0.1:51080`
+- **Code-Server 子域名** - 代理到 `127.0.0.1:51081` (Traefik)
 
 ## 常用命令
 
@@ -199,7 +199,7 @@ docker compose logs frontend    # 查看前端日志
 ### 端口被占用
 
 ```bash
-netstat -tlnp | grep 8080
+netstat -tlnp | grep 51080
 # 修改 .env 中的 APP_PORT
 ```
 
