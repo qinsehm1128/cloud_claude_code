@@ -23,6 +23,9 @@ export interface ClaudeConfigTemplate {
   description?: string
   created_at: string
   updated_at: string
+  // For archive-based skills (multi-file skills with folder structure)
+  is_archive?: boolean
+  archive_data?: string // Base64-encoded zip file
 }
 
 // Input type for creating a new config template
@@ -31,6 +34,9 @@ export interface CreateConfigInput {
   config_type: ConfigType
   content: string
   description?: string
+  // For archive-based skills
+  is_archive?: boolean
+  archive_data?: string // Base64-encoded zip file
 }
 
 // Input type for updating an existing config template
