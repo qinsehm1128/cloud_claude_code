@@ -12,9 +12,9 @@ WORKDIR /app
 # 先复制包文件以优化缓存
 COPY frontend/package*.json ./
 
-# Install dependencies
-# 安装依赖
-RUN npm ci --only=production=false
+# Install dependencies (including devDependencies for build)
+# 安装依赖（包括构建所需的开发依赖）
+RUN npm ci
 
 # Copy source code
 # 复制源代码
