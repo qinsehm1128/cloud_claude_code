@@ -308,6 +308,35 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, cmd []
 	return string(output), nil
 }
 
+// ExecAsRoot executes a command in a container as root user
+func (c *Client) ExecAsRoot(ctx context.Context, containerID string, cmd []string) (string, error) {
+	execConfig := types.ExecConfig{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+		User:         "root",
+		Env:          []string{"HOME=/root"},
+	}
+
+	execID, err := c.cli.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, types.ExecStartCheck{})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Close()
+
+	output, err := io.ReadAll(resp.Reader)
+	if err != nil {
+		return "", err
+	}
+
+	return string(output), nil
+}
+
 // ContainerConfig holds configuration for creating a container
 type ContainerConfig struct {
 	Name            string

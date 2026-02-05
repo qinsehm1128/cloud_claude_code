@@ -603,18 +603,31 @@ func (s *ContainerService) runInitialization(containerID uint) {
 	// Step 1: Clone repository or create default /app directory
 	if container.SkipGitRepo {
 		// Create default /app working directory for empty containers
+		// Use root user to create directory, then change ownership to developer
 		s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, "Creating default /app working directory...")
 		s.updateInitStatus(containerID, models.InitStatusCloning, "Creating working directory...")
 
 		createDirCmd := []string{
 			"bash", "-c",
-			"mkdir -p /app && chmod 755 /app",
+			"mkdir -p /app && chown developer:developer /app && chmod 755 /app",
 		}
-		if _, err := s.dockerClient.ExecInContainer(ctx, container.DockerID, createDirCmd); err != nil {
+		// Use ExecAsRoot to ensure we have permission to create directory in /
+		if _, err := s.dockerClient.ExecAsRoot(ctx, container.DockerID, createDirCmd); err != nil {
 			s.addLog(containerID, models.LogLevelError, models.LogStageClone, fmt.Sprintf("Failed to create /app directory: %v", err))
 			s.updateInitStatus(containerID, models.InitStatusFailed, fmt.Sprintf("Failed to create /app directory: %v", err))
 			return
 		}
+
+		// Also fix npm cache permissions to prevent cache corruption issues
+		fixNpmCmd := []string{
+			"bash", "-c",
+			"mkdir -p /home/developer/.npm && chown -R developer:developer /home/developer/.npm",
+		}
+		if _, err := s.dockerClient.ExecAsRoot(ctx, container.DockerID, fixNpmCmd); err != nil {
+			s.addLog(containerID, models.LogLevelWarn, models.LogStageClone, fmt.Sprintf("Warning: Failed to fix npm cache permissions: %v", err))
+			// Don't fail, just log warning
+		}
+
 		s.addLog(containerID, models.LogLevelInfo, models.LogStageClone, "Default /app working directory created successfully")
 	} else {
 		// Clone repository
