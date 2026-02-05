@@ -3,7 +3,18 @@
 # Docker Compose 配置
 # ============================================
 #
+# IMPORTANT / 重要:
+#   Before starting, build the base images first:
+#   启动前请先构建基础镜像:
+#     ./build-base.sh
+#
+#   This creates:
+#   这会创建:
+#     - cc-base:latest (without code-server)
+#     - cc-base:with-code-server (with code-server)
+#
 # Usage / 使用方法:
+#   ./start.sh                        # Full deployment (recommended) / 完整部署（推荐）
 #   docker compose up -d              # Start all services / 启动所有服务
 #   docker compose up -d --build      # Rebuild and start / 重新构建并启动
 #   docker compose down               # Stop all services / 停止所有服务

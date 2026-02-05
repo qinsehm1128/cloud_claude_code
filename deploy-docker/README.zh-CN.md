@@ -2,7 +2,10 @@
 
 ## 概述
 
-本目录包含 Claude Code 容器平台的 Docker 部署配置。采用多阶段构建方式创建最小化的生产就绪镜像。
+本目录包含 Claude Code 容器平台的 Docker 部署配置。部署包含两个部分：
+
+1. **平台服务** - 前端 (React/Nginx) + 后端 (Go)
+2. **基础镜像** - 用于创建用户开发容器的基础镜像
 
 ## 架构说明
 
@@ -10,35 +13,53 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                      客户端（浏览器）                         │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+          │                                    │
+          ▼                                    ▼
+┌─────────────────────┐            ┌─────────────────────────┐
+│  主站点访问          │            │  Code-Server 子域名访问   │
+│  example.com        │            │  *.code.example.com     │
+└─────────────────────┘            └─────────────────────────┘
+          │                                    │
+          ▼                                    ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    前端容器 (Nginx + React)                   │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │ • 托管 React 静态文件                                    ││
-│  │ • 代理 /api/* 请求到后端                                 ││
-│  │ • 支持 WebSocket                                         ││
-│  │ • Gzip 压缩                                              ││
-│  └─────────────────────────────────────────────────────────┘│
-│                         端口: 80                             │
+│                   宿主机 Nginx (可选)                        │
+│              用于域名访问和 SSL 终止                          │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+          │                                    │
+          ▼                                    ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      后端容器 (Go + Gin)                      │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │ • REST API 接口                                          ││
-│  │ • WebSocket（终端、聊天）                                 ││
-│  │ • Docker 容器管理                                        ││
-│  │ • SQLite 数据库                                          ││
-│  └─────────────────────────────────────────────────────────┘│
-│                         端口: 8080                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Docker Socket (宿主机)                     │
-│              /var/run/docker.sock (只读)                      │
+│                    Docker 容器                               │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │           前端容器 (cc-frontend)                       │  │
+│  │  • Nginx 托管 React 静态文件                           │  │
+│  │  • 代理 /api/* 到后端                                  │  │
+│  │  • 端口: 80                                           │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                           │                                  │
+│                           ▼                                  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │           后端容器 (cc-backend)                        │  │
+│  │  • Go API 服务                                        │  │
+│  │  • 容器管理（通过 Docker Socket）                       │  │
+│  │  • SQLite 数据库                                      │  │
+│  │  • 端口: 8080                                         │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                           │                                  │
+│                           ▼                                  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │           Traefik 容器 (可选)                          │  │
+│  │  • 路由到各个 code-server 容器                         │  │
+│  │  • 端口: 38000-39000 (HTTP)                           │  │
+│  │  • 端口: 30001-30020 (直接访问)                        │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                           │                                  │
+│                           ▼                                  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │           用户开发容器 (基于 cc-base)                   │  │
+│  │  • Ubuntu 22.04 + Node.js 20                          │  │
+│  │  • Claude Code CLI                                    │  │
+│  │  • code-server (可选)                                 │  │
+│  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,12 +67,14 @@
 
 ```
 deploy-docker/
-├── docker-compose.yml      # 服务编排配置
-├── Dockerfile.frontend     # 前端多阶段构建
-├── Dockerfile.backend      # 后端多阶段构建
-├── nginx.conf              # Nginx 配置
+├── start.sh                # 一键部署脚本（推荐）
+├── build-base.sh           # 基础镜像构建脚本
+├── docker-compose.yml      # 平台服务编排
+├── Dockerfile.frontend     # 前端镜像构建
+├── Dockerfile.backend      # 后端镜像构建
+├── nginx.conf              # 容器内 Nginx 配置
+├── nginx-host.conf         # 宿主机 Nginx 配置模板
 ├── .env.example            # 环境变量模板
-├── start.sh                # 快速启动脚本
 ├── README.md               # 英文文档
 └── README.zh-CN.md         # 本文件
 ```
@@ -62,103 +85,238 @@ deploy-docker/
 
 - Docker 20.10+
 - Docker Compose v2.0+
+- Node.js 20+ (用于构建 VS Code 扩展，可选)
 
-### 2. 配置环境变量
+### 2. 一键部署
 
 ```bash
 cd deploy-docker
 
-# 复制环境变量模板
+# 运行部署脚本
+chmod +x start.sh
+./start.sh
+```
+
+脚本会自动完成以下步骤：
+1. 检查 Docker 环境
+2. 构建基础镜像 (`cc-base:latest`, `cc-base:with-code-server`)
+3. 配置环境变量
+4. 构建并启动平台服务
+
+### 3. 访问平台
+
+部署完成后，访问：`http://localhost`（或配置的端口）
+
+默认凭据：
+- 用户名：`admin`
+- 密码：在 `.env` 中配置的 `ADMIN_PASSWORD`
+
+## 详细部署步骤
+
+### 步骤 1：配置环境变量
+
+```bash
+cd deploy-docker
+
+# 复制模板
 cp .env.example .env
 
 # 生成安全密钥
-echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
-echo "ENCRYPTION_KEY=$(openssl rand -hex 32)" >> .env
+JWT_SECRET=$(openssl rand -hex 32)
+ENCRYPTION_KEY=$(openssl rand -hex 32)
 
-# 编辑配置文件
+# 编辑配置
 nano .env
 ```
 
 **必须配置的变量：**
 
-| 变量 | 说明 | 示例 |
-|-----|------|-----|
-| `JWT_SECRET` | JWT 认证密钥 | 使用 `openssl rand -hex 32` 生成 |
-| `ENCRYPTION_KEY` | 数据加密密钥 | 使用 `openssl rand -hex 32` 生成 |
-| `ADMIN_PASSWORD` | 管理员密码 | 设置一个强密码 |
+| 变量 | 说明 |
+|-----|------|
+| `JWT_SECRET` | JWT 认证密钥 |
+| `ENCRYPTION_KEY` | 数据加密密钥 |
+| `ADMIN_PASSWORD` | 管理员密码 |
 
-### 3. 构建并启动
+### 步骤 2：构建基础镜像
+
+基础镜像用于创建用户的开发容器：
 
 ```bash
-# 构建并启动所有服务
+# 常规构建
+./build-base.sh
+
+# 清理后重新构建
+./build-base.sh --clean
+
+# 不使用缓存构建
+./build-base.sh --no-cache
+```
+
+构建完成后会生成两个镜像：
+- `cc-base:latest` - 基础开发环境（无 code-server）
+- `cc-base:with-code-server` - 含 Web IDE 的开发环境
+
+### 步骤 3：启动平台服务
+
+```bash
+# 构建并启动
 docker compose up -d --build
+
+# 查看状态
+docker compose ps
 
 # 查看日志
 docker compose logs -f
-
-# 检查状态
-docker compose ps
 ```
 
-或者使用快速启动脚本：
+## 生产环境部署
+
+### 方案 A：直接端口访问
+
+最简单的部署方式，直接通过端口访问：
 
 ```bash
-chmod +x start.sh
-./start.sh
+# .env 配置
+FRONTEND_PORT=80
 ```
 
-### 4. 访问
+访问：`http://服务器IP`
 
-打开浏览器访问：`http://localhost`（或你配置的端口）
+### 方案 B：域名 + Nginx 反向代理（推荐）
 
-默认管理员账户：
-- 用户名：`admin`（或 .env 中配置的 ADMIN_USERNAME）
-- 密码：你在 .env 中设置的 ADMIN_PASSWORD
+使用宿主机 Nginx 进行反向代理，支持域名和 SSL：
 
-## 配置详解
+#### 1. 配置 DNS
 
-### 环境变量说明
+```
+A 记录: example.com -> 服务器IP
+A 记录: *.code.example.com -> 服务器IP (泛域名，用于 code-server)
+```
 
-#### 核心配置（必填）
+#### 2. 配置宿主机 Nginx
 
-| 变量 | 默认值 | 说明 |
-|-----|--------|------|
-| `JWT_SECRET` | - | JWT 认证密钥，必须设置 |
-| `ENCRYPTION_KEY` | - | 敏感数据加密密钥，必须设置 |
-| `ADMIN_PASSWORD` | - | 管理员密码，必须设置 |
+```bash
+# 复制配置模板
+sudo cp nginx-host.conf /etc/nginx/sites-available/cc-platform.conf
 
-#### 可选配置
+# 编辑配置，替换占位符
+sudo nano /etc/nginx/sites-available/cc-platform.conf
+# 替换:
+#   YOUR_DOMAIN -> 你的域名 (如 cc.example.com)
+#   YOUR_CODE_DOMAIN -> code-server 域名 (如 code.example.com)
+#   TRAEFIK_HTTP_PORT -> Traefik HTTP 端口 (查看 docker ps)
 
-| 变量 | 默认值 | 说明 |
-|-----|--------|------|
-| `FRONTEND_PORT` | `80` | 前端服务暴露的端口 |
-| `ENVIRONMENT` | `production` | 运行环境 |
-| `ADMIN_USERNAME` | `admin` | 管理员用户名 |
-| `ALLOWED_ORIGINS` | - | 允许的 CORS 来源，多个用逗号分隔 |
-| `AUTO_START_TRAEFIK` | `false` | 是否自动启动 Traefik |
-| `TRAEFIK_PORT_RANGE_START` | `30001` | Traefik 端口范围起始 |
-| `TRAEFIK_PORT_RANGE_END` | `30020` | Traefik 端口范围结束 |
+# 启用配置
+sudo ln -s /etc/nginx/sites-available/cc-platform.conf /etc/nginx/sites-enabled/
 
-#### 可选 API 密钥
+# 测试并重载
+sudo nginx -t
+sudo systemctl reload nginx
+```
 
-| 变量 | 说明 |
-|-----|------|
-| `GITHUB_TOKEN` | GitHub 个人访问令牌 |
-| `ANTHROPIC_API_KEY` | Claude/Anthropic API 密钥 |
-| `ANTHROPIC_BASE_URL` | 自定义 Anthropic API 地址 |
-| `CODE_SERVER_BASE_DOMAIN` | Code-server 子域名基础域名 |
+#### 3. 配置 SSL（推荐）
 
-### 镜像大小
+```bash
+# 安装 certbot
+sudo apt install certbot python3-certbot-nginx
 
-本部署方案使用最小化镜像：
+# 获取主站点证书
+sudo certbot --nginx -d example.com
 
-| 镜像 | 大小 |
-|-----|------|
-| 前端 (nginx:alpine) | ~50MB |
-| 后端 (alpine:3.19) | ~30MB |
-| **总计** | **~80MB** |
+# 获取 code-server 泛域名证书（需要 DNS 验证）
+sudo certbot certonly --manual --preferred-challenges dns -d "*.code.example.com"
+```
 
-## 常用操作
+### 方案 C：启用 Code-Server 子域名访问
+
+如果需要通过子域名访问容器中的 code-server：
+
+#### 1. 修改 .env
+
+```bash
+# 启用 Traefik
+AUTO_START_TRAEFIK=true
+
+# 设置 code-server 基础域名
+CODE_SERVER_BASE_DOMAIN=code.example.com
+```
+
+#### 2. 重启后端
+
+```bash
+docker compose restart backend
+```
+
+#### 3. 配置宿主机 Nginx
+
+参考 `nginx-host.conf` 中的 code-server 子域名配置部分。
+
+#### 4. 获取 Traefik 端口
+
+```bash
+# 查看 Traefik 容器端口
+docker ps | grep traefik
+
+# 或查看后端日志
+docker compose logs backend | grep "Traefik HTTP port"
+```
+
+将获取到的端口填入 nginx-host.conf 的 `TRAEFIK_HTTP_PORT`。
+
+## Nginx 配置详解
+
+### 容器内 Nginx (nginx.conf)
+
+这是前端容器内的 Nginx 配置，主要功能：
+
+```nginx
+# 代理 API 请求到后端
+location /api/ {
+    proxy_pass http://backend:8080;
+    # WebSocket 支持
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+
+# 前端 SPA 路由
+location / {
+    try_files $uri $uri/ /index.html;
+}
+```
+
+### 宿主机 Nginx (nginx-host.conf)
+
+这是宿主机 Nginx 的配置模板，主要功能：
+
+1. **主站点代理** - 将请求代理到 Docker 前端容器
+2. **Code-Server 子域名** - 将子域名请求代理到 Traefik
+3. **SSL 终止** - 处理 HTTPS
+
+## 镜像说明
+
+### 平台镜像
+
+| 镜像 | 基础 | 大小 | 用途 |
+|-----|------|------|------|
+| cc-frontend | nginx:alpine | ~50MB | 前端服务 |
+| cc-backend | alpine:3.19 | ~30MB | 后端服务 |
+
+### 基础镜像
+
+| 镜像 | 基础 | 大小 | 用途 |
+|-----|------|------|------|
+| cc-base:latest | ubuntu:22.04 | ~500MB | 用户开发容器（无 IDE） |
+| cc-base:with-code-server | ubuntu:22.04 | ~700MB | 用户开发容器（含 Web IDE） |
+
+基础镜像包含：
+- Ubuntu 22.04
+- Node.js 20 LTS
+- Git
+- Claude Code CLI
+- code-server（仅 with-code-server 版本）
+- PTY Automation VS Code 扩展
+
+## 常用命令
 
 ### 服务管理
 
@@ -174,149 +332,90 @@ docker compose restart
 
 # 重新构建并启动
 docker compose up -d --build
+
+# 清理后重新构建
+docker compose down -v
+docker compose up -d --build --no-cache
 ```
 
 ### 日志查看
 
 ```bash
-# 查看所有服务日志
+# 所有服务
 docker compose logs -f
 
-# 仅查看前端日志
-docker compose logs -f frontend
-
-# 仅查看后端日志
+# 仅后端
 docker compose logs -f backend
 
-# 查看最近 100 行日志
+# 仅前端
+docker compose logs -f frontend
+
+# 最近 100 行
 docker compose logs --tail 100
 ```
 
-### 状态检查
+### 基础镜像管理
 
 ```bash
-# 查看容器状态
-docker compose ps
+# 重新构建基础镜像
+./build-base.sh
 
-# 查看资源使用
-docker stats cc-frontend cc-backend
+# 清理后重建
+./build-base.sh --clean
+
+# 查看基础镜像
+docker images cc-base
 ```
 
-## 数据管理
-
-### 数据持久化
-
-数据存储在名为 `cc-platform-data` 的 Docker 卷中，包括：
-- SQLite 数据库
-- 上传的文件
-- 配置数据
-
-### 备份数据
+### 数据管理
 
 ```bash
-# 创建备份
-docker run --rm \
-  -v cc-platform-data:/data \
-  -v $(pwd):/backup \
-  alpine tar czf /backup/cc-data-$(date +%Y%m%d).tar.gz -C /data .
+# 备份数据
+docker run --rm -v cc-platform-data:/data -v $(pwd):/backup \
+  alpine tar czf /backup/backup-$(date +%Y%m%d).tar.gz -C /data .
+
+# 恢复数据
+docker run --rm -v cc-platform-data:/data -v $(pwd):/backup \
+  alpine tar xzf /backup/backup-20240101.tar.gz -C /data
 ```
-
-### 恢复数据
-
-```bash
-# 从备份恢复
-docker run --rm \
-  -v cc-platform-data:/data \
-  -v $(pwd):/backup \
-  alpine tar xzf /backup/cc-data-20240101.tar.gz -C /data
-```
-
-### 清理数据
-
-```bash
-# 停止服务并删除卷（警告：会删除所有数据！）
-docker compose down -v
-
-# 删除未使用的镜像
-docker image prune -f
-```
-
-## 安全建议
-
-### 1. 设置强密码
-
-```bash
-# 生成安全密钥
-openssl rand -hex 32
-```
-
-### 2. 配置 HTTPS
-
-推荐使用反向代理（如 Nginx、Caddy）配置 SSL：
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name your-domain.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:80;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-### 3. 限制 CORS
-
-在生产环境中设置 `ALLOWED_ORIGINS`：
-
-```bash
-ALLOWED_ORIGINS=https://your-domain.com,https://admin.your-domain.com
-```
-
-### 4. Docker Socket 安全
-
-后端容器需要访问 Docker socket 来管理容器：
-- Socket 以只读方式挂载
-- 建议限制后端容器的网络访问
 
 ## 故障排除
+
+### 基础镜像构建失败
+
+```bash
+# 检查 Docker 是否运行
+docker info
+
+# 清理后重试
+./build-base.sh --clean
+
+# 查看详细错误
+docker build --no-cache -f ../docker/Dockerfile.base ../docker/
+```
 
 ### 容器无法启动
 
 ```bash
-# 查看详细日志
-docker compose logs backend
+# 查看日志
+docker compose logs
 
 # 检查端口占用
 netstat -tlnp | grep 80
 ss -tlnp | grep 80
 ```
 
-### 数据库错误
+### Code-Server 子域名无法访问
+
+1. 确认 `AUTO_START_TRAEFIK=true`
+2. 确认 Traefik 容器已启动：`docker ps | grep traefik`
+3. 确认 DNS 配置正确
+4. 检查宿主机 Nginx 配置中的 Traefik 端口是否正确
+
+### Docker Socket 权限问题
 
 ```bash
-# 检查卷状态
-docker volume inspect cc-platform-data
-
-# 重建数据库（警告：会删除数据）
-docker compose down -v
-docker compose up -d --build
-```
-
-### 权限问题
-
-```bash
-# 检查 Docker socket 权限
+# 检查权限
 ls -la /var/run/docker.sock
 
 # 将用户添加到 docker 组
@@ -324,73 +423,17 @@ sudo usermod -aG docker $USER
 # 重新登录生效
 ```
 
-### 网络问题
-
-```bash
-# 检查网络
-docker network inspect cc-platform-network
-
-# 重建网络
-docker compose down
-docker network rm cc-platform-network
-docker compose up -d
-```
-
 ## 与 Shell 部署对比
 
 | 特性 | Docker 部署 | Shell 部署 (deploy-sh) |
 |------|------------|------------------------|
-| 隔离性 | 高 | 低 |
+| 隔离性 | 高（容器隔离） | 低（系统环境） |
 | 可移植性 | 高 | 中 |
 | 依赖管理 | 容器内打包 | 依赖系统环境 |
 | 更新方式 | 重建镜像 | 执行脚本 |
 | 回滚 | 简单（切换镜像） | 需手动操作 |
 | 资源占用 | 较高 | 较低 |
 | 适用场景 | 云服务器、容器平台 | 传统服务器 |
-
-## 进阶配置
-
-### 自定义构建参数
-
-```yaml
-# docker-compose.yml
-services:
-  frontend:
-    build:
-      context: ..
-      dockerfile: deploy-docker/Dockerfile.frontend
-      args:
-        - NODE_ENV=production
-```
-
-### 资源限制
-
-```yaml
-# docker-compose.yml
-services:
-  backend:
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-```
-
-### 日志配置
-
-```yaml
-# docker-compose.yml
-services:
-  backend:
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-```
 
 ## 许可证
 
