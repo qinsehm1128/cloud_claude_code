@@ -48,6 +48,17 @@
 | 📊 **Turn Cards** | Visual display of user prompts and assistant responses |
 | 🔗 **Session Resume** | Resume existing Claude sessions with `--resume` flag |
 
+### 🆕 Claude Config Management (New!)
+
+| Feature | Description |
+|---------|-------------|
+| 📝 **Config Templates** | Create and manage Claude configuration templates (CLAUDE.md, Skills, MCP, Commands) |
+| 📦 **Multi-file Skills** | Upload zip archives containing complete skill folder structure |
+| 💉 **Auto Injection** | Automatically inject configs when creating containers |
+| 🔧 **Manual Injection** | Inject configs into running containers via Terminal page UI |
+| 👀 **Config Preview** | Preview configuration content before injection |
+| 🌐 **Dynamic Server Address** | Configure and switch between multiple server addresses |
+
 ### Advanced Features
 
 | Feature | Description |
@@ -199,10 +210,55 @@ start-dev.bat
 |---------|-----|
 | 🎨 Frontend | http://localhost:5173 |
 | 💬 Headless Chat | http://localhost:5173/chat |
+| 📝 Claude Config | http://localhost:5173/claude-config |
 | 🔧 Backend API | http://localhost:8080 |
 | 📊 Traefik Dashboard | http://localhost:8081/dashboard/ |
 
 > 💡 If `ADMIN_PASSWORD` is not set, a random password will be generated and shown in backend logs.
+
+---
+
+## 📝 Claude Config Management
+
+Claude Config Management allows you to create, manage, and inject Claude configurations into containers.
+
+### Configuration Types
+
+| Type | Description | File Location |
+|------|-------------|---------------|
+| 📄 **CLAUDE.md** | Project-level Claude instruction file | `~/.claude/CLAUDE.md` |
+| 🎯 **Skills** | Claude skill definitions | `~/.claude/skills/` |
+| 🔌 **MCP** | Model Context Protocol configuration | `~/.claude/mcp.json` |
+| ⌨️ **Commands** | Custom command configuration | `~/.claude/commands.json` |
+
+### Features
+
+- **Template Management** - Create, edit, delete configuration templates
+- **Multi-file Skills** - Upload zip archives containing complete skill folders (SKILL.md + scripts, resources, etc.)
+- **Auto Injection** - Automatically inject selected configs when creating containers
+- **Manual Injection** - Inject configs into running containers via Terminal page
+- **Config Preview** - Preview configuration content before injection
+
+### How to Use
+
+1. Go to **Claude Config** page
+2. Create a new configuration template, select type and fill in content
+3. For skill type, you can choose:
+   - **Single File Mode** - Edit SKILL.md content directly
+   - **Archive Mode** - Upload a zip file containing complete skill folder
+4. When creating a container, select configuration templates to inject
+5. For running containers, click "Inject Config" button on Terminal page
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/config-templates` | List all config templates |
+| POST | `/api/config-templates` | Create config template |
+| GET | `/api/config-templates/:id` | Get config template |
+| PUT | `/api/config-templates/:id` | Update config template |
+| DELETE | `/api/config-templates/:id` | Delete config template |
+| POST | `/api/containers/:id/inject-configs` | Inject configs into container |
 
 ---
 
@@ -219,6 +275,8 @@ Headless mode provides a chat-like interface for interacting with Claude CLI wit
 - **Real-time Streaming** - Live streaming of Claude responses via WebSocket
 - **Turn History** - View complete conversation history with token/cost tracking
 - **Session Resume** - Automatically resume existing Claude sessions
+- **Markdown Rendering** - Rich markdown display with syntax highlighting
+- **Tool Call Display** - Collapsible tool use and result blocks with preview
 
 ### How It Works
 
@@ -261,9 +319,29 @@ The Headless WebSocket supports the following message types:
 
 ## 📦 Deployment
 
-> 📖 **For production deployment, see the [Deployment Guide](deploy/README.md)**
+### 🐳 Docker Deployment (Recommended)
 
-### 🚀 Interactive Deployment Wizard (Recommended)
+The fastest way to deploy with minimal configuration:
+
+```bash
+cd deploy-docker
+cp .env.example .env
+# Edit .env with your settings
+./start.sh
+```
+
+**Features:**
+- Multi-stage build for minimal image sizes (~80MB total)
+- Frontend served by nginx:alpine
+- Backend as Go binary on alpine:3.19
+- docker-compose for service orchestration
+- Built-in nginx proxy with WebSocket support
+
+> 📖 **[View Docker Deployment Guide →](deploy-docker/README.md)**
+
+### 🔧 Shell Script Deployment
+
+For more control over the deployment process:
 
 ```bash
 # Launch interactive deployment wizard
@@ -283,6 +361,7 @@ The interactive wizard guides you through the entire deployment process with:
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
+| 🐳 **Docker** | Container-based deployment | Quick setup, isolated environment |
 | 🚀 **Quick Deploy** | One-click complete deployment | First-time setup, quick production |
 | 💻 **Development** | Build only, no installation | Local development |
 | 📦 **Production** | Full deployment with backup | Production updates |
@@ -290,7 +369,7 @@ The interactive wizard guides you through the entire deployment process with:
 
 **Estimated Time:** 3-5 minutes
 
-> 📖 **[View Full Deployment Guide →](deploy/README.md)**
+> 📖 **[View Shell Deployment Guide →](deploy-sh/README.md)**
 
 ---
 
@@ -602,6 +681,20 @@ npm run compile
 </details>
 
 <details>
+<summary>📝 <b>Config Templates</b></summary>
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/config-templates` | List all config templates |
+| POST | `/api/config-templates` | Create config template |
+| GET | `/api/config-templates/:id` | Get config template |
+| PUT | `/api/config-templates/:id` | Update config template |
+| DELETE | `/api/config-templates/:id` | Delete config template |
+| POST | `/api/containers/:id/inject-configs` | Inject configs into container |
+
+</details>
+
+<details>
 <summary>⚙️ <b>Config Profiles</b></summary>
 
 | Method | Endpoint | Description |
@@ -627,7 +720,10 @@ npm run compile
 │   ├── internal/            # Internal packages
 │   │   ├── config/          # Configuration
 │   │   ├── handlers/        # HTTP handlers
+│   │   │   └── config_template.go  # Config template API
 │   │   ├── services/        # Business logic
+│   │   │   ├── config_template_service.go    # Template management
+│   │   │   └── config_injection_service.go   # Config injection
 │   │   ├── terminal/        # Terminal management
 │   │   ├── headless/        # Headless mode (Claude CLI)
 │   │   ├── monitoring/      # PTY monitoring & automation
@@ -636,6 +732,7 @@ npm run compile
 │   │   ├── docker/          # Docker client & security
 │   │   ├── database/        # Database models
 │   │   └── models/          # Data models
+│   │       └── claude_config_template.go  # Config template model
 │   └── pkg/                 # Public packages
 │       ├── crypto/          # Encryption utilities
 │       ├── pathutil/        # Path validation
@@ -646,14 +743,21 @@ npm run compile
 │       ├── components/      # UI components
 │       │   ├── Automation/  # Automation UI components
 │       │   ├── Headless/    # Headless mode components
+│       │   │   ├── MarkdownRenderer.tsx  # Markdown with syntax highlight
+│       │   │   └── TurnCard.tsx          # Conversation turn display
 │       │   ├── FileManager/ # File manager components
 │       │   ├── layout/      # Layout components
-│       │   └── ui/          # shadcn/ui components
+│       │   ├── ui/          # shadcn/ui components
+│       │   ├── ConfigPreview.tsx         # Config preview component
+│       │   ├── ConfigTemplateEditor.tsx  # Template editor
+│       │   ├── ConfigInjectionDialog.tsx # Injection dialog
+│       │   └── ServerAddressInput.tsx    # Server address input
 │       ├── pages/           # Pages
 │       │   ├── Dashboard.tsx
 │       │   ├── HeadlessChat.tsx    # Standalone chat UI
 │       │   ├── HeadlessTerminal.tsx
 │       │   ├── ContainerTerminal.tsx
+│       │   ├── ClaudeConfig.tsx    # Config management page
 │       │   ├── Settings.tsx
 │       │   └── ...
 │       ├── hooks/           # React hooks
@@ -663,8 +767,11 @@ npm run compile
 │       │   ├── api.ts
 │       │   ├── headlessApi.ts
 │       │   ├── headlessWebsocket.ts
+│       │   ├── claudeConfigApi.ts        # Config API service
+│       │   ├── serverAddressManager.ts   # Server address manager
 │       │   └── ...
 │       └── types/           # TypeScript types
+│           └── claudeConfig.ts           # Config types
 │
 ├── 🧩 vscode-extension/     # VS Code extension
 │   └── src/
@@ -675,12 +782,20 @@ npm run compile
 │       ├── webview/         # Webview panels
 │       └── utils/           # Utilities
 │
-├── 🐳 docker/               # Docker configs
+├── 🐳 docker/               # Docker configs (dev containers)
 │   ├── Dockerfile.base      # Base image
 │   ├── extensions/          # VS Code extensions
 │   └── traefik/             # Traefik proxy config
 │
-├── 📦 deploy/               # Deployment configs
+├── 🐳 deploy-docker/        # Docker deployment
+│   ├── Dockerfile.backend   # Backend image
+│   ├── Dockerfile.frontend  # Frontend image
+│   ├── docker-compose.yml   # Service orchestration
+│   ├── nginx.conf           # Nginx config
+│   ├── start.sh             # Quick start script
+│   └── README.md            # Docker deployment guide
+│
+├── 📦 deploy-sh/            # Shell script deployment
 │   ├── README.md            # Deployment guide (EN)
 │   ├── README.zh-CN.md      # Deployment guide (CN)
 │   ├── flows/               # Deployment flows
