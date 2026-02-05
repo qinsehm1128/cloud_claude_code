@@ -33,15 +33,25 @@
 ```bash
 cd deploy-docker
 
-# 一键部署（构建基础镜像 + 启动服务）
+# 一键部署（自动安装依赖 + 构建镜像 + 启动服务）
 ./start.sh
+
+# 跳过自动安装依赖（如果已手动安装）
+./start.sh --no-install
 ```
 
-脚本会：
-1. 构建基础镜像 `cc-base:latest` 和 `cc-base:with-code-server`
-2. 生成安全密钥
-3. 提示你编辑 `.env` 配置
-4. 启动前后端服务
+脚本会自动：
+1. **检测系统类型**（Ubuntu/Debian、CentOS/RHEL/Fedora、Alpine）
+2. **自动安装缺失的依赖**（Docker、Docker Compose、Node.js/npm、OpenSSL）
+3. 构建基础镜像 `cc-base:latest` 和 `cc-base:with-code-server`
+4. 生成安全密钥
+5. 提示你编辑 `.env` 配置
+6. 启动前后端服务
+
+**支持的系统：**
+- Ubuntu / Debian (apt)
+- CentOS / RHEL / Fedora (yum/dnf)
+- Alpine Linux (apk)
 
 ### 2. 配置 .env
 
@@ -95,9 +105,8 @@ deploy-docker/
 ├── Dockerfile.frontend     # 前端镜像
 ├── Dockerfile.backend      # 后端镜像
 ├── nginx.conf              # 容器内 Nginx 配置
-├── nginx-host.conf         # 宿主机 Nginx 参考配置
 ├── .env.example            # 环境变量模板
-└── README.zh-CN.md         # 本文件
+└── README.md               # 本文件
 ```
 
 ## 端口说明
@@ -152,6 +161,7 @@ docker compose logs -f backend  # 仅后端日志
 docker compose up -d --build    # 重新构建
 ./start.sh --skip-base          # 跳过基础镜像构建
 ./start.sh --clean              # 完全重建
+./start.sh --no-install         # 跳过自动安装依赖
 
 # 基础镜像
 ./build-base.sh                 # 构建基础镜像
@@ -201,6 +211,20 @@ docker compose logs frontend    # 查看前端日志
 ```bash
 netstat -tlnp | grep 51080
 # 修改 .env 中的 APP_PORT
+```
+
+### 依赖安装失败
+
+```bash
+# 手动安装 Docker（Ubuntu/Debian）
+curl -fsSL https://get.docker.com | sh
+
+# 手动安装 Node.js（Ubuntu/Debian）
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 跳过自动安装，使用已有环境
+./start.sh --no-install
 ```
 
 ## 镜像大小
