@@ -1263,3 +1263,55 @@ func (s *ContainerService) RemoveDockerContainer(ctx context.Context, dockerID s
 	}
 	return s.dockerClient.RemoveContainer(ctx, dockerID, true)
 }
+
+// InjectConfigs manually injects Claude configurations into a running container
+// This can be called after container is running to inject or re-inject configs
+func (s *ContainerService) InjectConfigs(ctx context.Context, containerID uint, templateIDs []uint) (*models.InjectionStatus, error) {
+	container, err := s.GetContainer(containerID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify container is running
+	status, err := s.dockerClient.GetContainerStatus(ctx, container.DockerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container status: %w", err)
+	}
+	if status != "running" {
+		return nil, fmt.Errorf("container must be running to inject configs (current status: %s)", status)
+	}
+
+	// Check if injection service is available
+	if s.configInjectionService == nil {
+		return nil, fmt.Errorf("config injection service not available")
+	}
+
+	// Perform injection
+	injectionStatus, err := s.configInjectionService.InjectConfigs(ctx, container.DockerID, templateIDs)
+	if err != nil {
+		return nil, fmt.Errorf("config injection failed: %w", err)
+	}
+
+	// Update injection status in database
+	if injectionStatus != nil {
+		if err := s.db.Model(&models.Container{}).Where("id = ?", containerID).
+			Update("injection_status", injectionStatus).Error; err != nil {
+			log.Printf("Failed to store injection status for container %d: %v", containerID, err)
+		}
+
+		// Add log entries
+		if len(injectionStatus.Successful) > 0 {
+			s.addLog(containerID, models.LogLevelInfo, models.LogStageInit,
+				fmt.Sprintf("Manually injected configs: %v", injectionStatus.Successful))
+		}
+		if len(injectionStatus.Failed) > 0 {
+			for _, failed := range injectionStatus.Failed {
+				s.addLog(containerID, models.LogLevelWarn, models.LogStageInit,
+					fmt.Sprintf("Failed to inject config '%s' (%s): %s",
+						failed.TemplateName, failed.ConfigType, failed.Reason))
+			}
+		}
+	}
+
+	return injectionStatus, nil
+}

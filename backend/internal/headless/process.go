@@ -47,6 +47,21 @@ func (s *HeadlessSession) StartClaudeProcess(ctx context.Context, prompt string)
 		return fmt.Errorf("failed to create docker client: %w", err)
 	}
 
+	// 确保工作目录存在（防止 "no such file or directory" 错误）
+	ensureDirConfig := types.ExecConfig{
+		Cmd:          []string{"mkdir", "-p", s.WorkDir},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+	ensureDirResp, err := cli.ContainerExecCreate(ctx, s.DockerID, ensureDirConfig)
+	if err != nil {
+		log.Printf("[HeadlessSession %s] Warning: failed to create mkdir exec: %v", s.ID, err)
+	} else {
+		if err := cli.ContainerExecStart(ctx, ensureDirResp.ID, types.ExecStartCheck{}); err != nil {
+			log.Printf("[HeadlessSession %s] Warning: failed to ensure WorkDir exists: %v", s.ID, err)
+		}
+	}
+
 	// 创建 exec 实例 - 必须启用 TTY，否则 claude CLI 可能卡住或不输出
 	execConfig := types.ExecConfig{
 		Cmd:          cmd,
