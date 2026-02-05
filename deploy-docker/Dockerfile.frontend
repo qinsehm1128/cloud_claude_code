@@ -14,7 +14,8 @@ COPY frontend/package*.json ./
 
 # Install dependencies (including devDependencies for build)
 # 安装依赖（包括构建所需的开发依赖）
-RUN npm ci
+# Using npm install instead of npm ci to handle package.json updates
+RUN npm install
 
 # Copy source code
 # 复制源代码
