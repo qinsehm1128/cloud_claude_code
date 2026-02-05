@@ -238,6 +238,9 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		envSlice = append(envSlice, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	// 添加 CLAUDE_CODE_ALLOW_ROOT=1 环境变量，允许 root 用户使用 yolo 模式
+	envSlice = append(envSlice, "CLAUDE_CODE_ALLOW_ROOT=1")
+
 	// Get security config
 	securityConfig := docker.DefaultSecurityConfig()
 
