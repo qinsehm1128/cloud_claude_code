@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Star, Loader2, Info, Key, Terminal, FileCode } from 'lucide-react'
+import { Plus, Pencil, Trash2, Star, Loader2, Info, Key, Terminal, FileCode, Code, Globe } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -24,7 +24,10 @@ import {
 } from '@/components/ui/table'
 import { Checkbox } from '@/components/ui/checkbox'
 import { configProfileApi, GitHubTokenItem, EnvVarsProfile, StartupCommandProfile } from '@/services/api'
+import { claudeConfigApi } from '@/services/claudeConfigApi'
 import { toast } from '@/components/ui/toast'
+import type { ClaudeConfigTemplate, CreateConfigInput } from '@/types/claudeConfig'
+import { ConfigTypes } from '@/types/claudeConfig'
 
 export default function Settings() {
   // GitHub Tokens state
@@ -50,6 +53,24 @@ export default function Settings() {
   const [editingCmd, setEditingCmd] = useState<StartupCommandProfile | null>(null)
   const [cmdForm, setCmdForm] = useState({ name: '', description: '', command: 'claude --dangerously-skip-permissions', is_default: false })
   const [savingCmd, setSavingCmd] = useState(false)
+
+  // Codex Config state
+  const [codexConfigs, setCodexConfigs] = useState<ClaudeConfigTemplate[]>([])
+  const [codexAuths, setCodexAuths] = useState<ClaudeConfigTemplate[]>([])
+  const [loadingCodex, setLoadingCodex] = useState(true)
+  const [codexDialogOpen, setCodexDialogOpen] = useState(false)
+  const [editingCodex, setEditingCodex] = useState<ClaudeConfigTemplate | null>(null)
+  const [codexDialogType, setCodexDialogType] = useState<'config' | 'auth'>('config')
+  const [codexForm, setCodexForm] = useState<CreateConfigInput>({ name: '', config_type: ConfigTypes.CODEX_CONFIG, content: '', description: '' })
+  const [savingCodex, setSavingCodex] = useState(false)
+
+  // Gemini Env state
+  const [geminiEnvs, setGeminiEnvs] = useState<ClaudeConfigTemplate[]>([])
+  const [loadingGemini, setLoadingGemini] = useState(true)
+  const [geminiDialogOpen, setGeminiDialogOpen] = useState(false)
+  const [editingGemini, setEditingGemini] = useState<ClaudeConfigTemplate | null>(null)
+  const [geminiForm, setGeminiForm] = useState<CreateConfigInput>({ name: '', config_type: ConfigTypes.GEMINI_ENV, content: '', description: '' })
+  const [savingGemini, setSavingGemini] = useState(false)
 
   // Load all data
   const loadGitHubTokens = useCallback(async () => {
@@ -92,7 +113,38 @@ export default function Settings() {
     loadGitHubTokens()
     loadEnvProfiles()
     loadCommandProfiles()
+    loadCodexTemplates()
+    loadGeminiTemplates()
   }, [loadGitHubTokens, loadEnvProfiles, loadCommandProfiles])
+
+  // Codex & Gemini template loaders
+  const loadCodexTemplates = useCallback(async () => {
+    setLoadingCodex(true)
+    try {
+      const [configRes, authRes] = await Promise.all([
+        claudeConfigApi.list(ConfigTypes.CODEX_CONFIG),
+        claudeConfigApi.list(ConfigTypes.CODEX_AUTH),
+      ])
+      setCodexConfigs(configRes.data || [])
+      setCodexAuths(authRes.data || [])
+    } catch {
+      toast.error('Error', 'Failed to load Codex configurations')
+    } finally {
+      setLoadingCodex(false)
+    }
+  }, [])
+
+  const loadGeminiTemplates = useCallback(async () => {
+    setLoadingGemini(true)
+    try {
+      const res = await claudeConfigApi.list(ConfigTypes.GEMINI_ENV)
+      setGeminiEnvs(res.data || [])
+    } catch {
+      toast.error('Error', 'Failed to load Gemini configurations')
+    } finally {
+      setLoadingGemini(false)
+    }
+  }, [])
 
   // GitHub Token handlers
   const handleOpenTokenDialog = (token?: GitHubTokenItem) => {
@@ -314,6 +366,100 @@ export default function Settings() {
     }
   }
 
+  // Codex handlers
+  const handleOpenCodexDialog = (type: 'config' | 'auth', template?: ClaudeConfigTemplate) => {
+    setCodexDialogType(type)
+    if (template) {
+      setEditingCodex(template)
+      setCodexForm({ name: template.name, config_type: template.config_type, content: template.content, description: template.description || '' })
+    } else {
+      setEditingCodex(null)
+      setCodexForm({
+        name: '',
+        config_type: type === 'config' ? ConfigTypes.CODEX_CONFIG : ConfigTypes.CODEX_AUTH,
+        content: '',
+        description: '',
+      })
+    }
+    setCodexDialogOpen(true)
+  }
+
+  const handleSaveCodex = async () => {
+    if (!codexForm.name.trim()) { toast.error('Error', 'Name is required'); return }
+    if (!codexForm.content.trim()) { toast.error('Error', 'Content is required'); return }
+    setSavingCodex(true)
+    try {
+      if (editingCodex) {
+        await claudeConfigApi.update(editingCodex.id, { name: codexForm.name, content: codexForm.content, description: codexForm.description })
+        toast.success('Success', 'Codex config updated')
+      } else {
+        await claudeConfigApi.create(codexForm)
+        toast.success('Success', 'Codex config created')
+      }
+      setCodexDialogOpen(false)
+      loadCodexTemplates()
+    } catch {
+      toast.error('Error', 'Failed to save Codex config')
+    } finally {
+      setSavingCodex(false)
+    }
+  }
+
+  const handleDeleteCodex = async (id: number) => {
+    if (!confirm('Delete this Codex configuration?')) return
+    try {
+      await claudeConfigApi.delete(id)
+      toast.success('Success', 'Deleted')
+      loadCodexTemplates()
+    } catch {
+      toast.error('Error', 'Failed to delete')
+    }
+  }
+
+  // Gemini handlers
+  const handleOpenGeminiDialog = (template?: ClaudeConfigTemplate) => {
+    if (template) {
+      setEditingGemini(template)
+      setGeminiForm({ name: template.name, config_type: ConfigTypes.GEMINI_ENV, content: template.content, description: template.description || '' })
+    } else {
+      setEditingGemini(null)
+      setGeminiForm({ name: '', config_type: ConfigTypes.GEMINI_ENV, content: '', description: '' })
+    }
+    setGeminiDialogOpen(true)
+  }
+
+  const handleSaveGemini = async () => {
+    if (!geminiForm.name.trim()) { toast.error('Error', 'Name is required'); return }
+    if (!geminiForm.content.trim()) { toast.error('Error', 'Content is required'); return }
+    setSavingGemini(true)
+    try {
+      if (editingGemini) {
+        await claudeConfigApi.update(editingGemini.id, { name: geminiForm.name, content: geminiForm.content, description: geminiForm.description })
+        toast.success('Success', 'Gemini config updated')
+      } else {
+        await claudeConfigApi.create(geminiForm)
+        toast.success('Success', 'Gemini config created')
+      }
+      setGeminiDialogOpen(false)
+      loadGeminiTemplates()
+    } catch {
+      toast.error('Error', 'Failed to save Gemini config')
+    } finally {
+      setSavingGemini(false)
+    }
+  }
+
+  const handleDeleteGemini = async (id: number) => {
+    if (!confirm('Delete this Gemini configuration?')) return
+    try {
+      await claudeConfigApi.delete(id)
+      toast.success('Success', 'Deleted')
+      loadGeminiTemplates()
+    } catch {
+      toast.error('Error', 'Failed to delete')
+    }
+  }
+
   // Count env vars
   const countEnvVars = (envVars: string) => {
     if (!envVars) return 0
@@ -343,6 +489,14 @@ export default function Settings() {
           <TabsTrigger value="commands" className="flex items-center gap-1 md:gap-2 text-xs md:text-sm min-h-[44px]">
             <Terminal className="h-4 w-4" />
             <span className="hidden sm:inline">Startup</span> Commands
+          </TabsTrigger>
+          <TabsTrigger value="codex" className="flex items-center gap-1 md:gap-2 text-xs md:text-sm min-h-[44px]">
+            <Code className="h-4 w-4" />
+            Codex
+          </TabsTrigger>
+          <TabsTrigger value="gemini" className="flex items-center gap-1 md:gap-2 text-xs md:text-sm min-h-[44px]">
+            <Globe className="h-4 w-4" />
+            Gemini
           </TabsTrigger>
         </TabsList>
 
@@ -710,6 +864,135 @@ export default function Settings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Codex Tab */}
+        <TabsContent value="codex">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base md:text-lg">Codex CLI Configuration</CardTitle>
+              <CardDescription className="text-xs md:text-sm">
+                Manage Codex config.toml and auth.json. These are injected into containers at ~/.codex/
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {loadingCodex ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : (
+                <>
+                  {/* config.toml section */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-medium">config.toml Profiles</Label>
+                      <Button size="sm" onClick={() => handleOpenCodexDialog('config')} className="min-h-[36px]">
+                        <Plus className="mr-1 h-3 w-3" /> Add
+                      </Button>
+                    </div>
+                    <div className="flex items-start gap-2 p-3 text-sm text-blue-400 bg-blue-500/10 rounded-md">
+                      <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs">TOML configuration written to ~/.codex/config.toml in the container.</p>
+                    </div>
+                    {codexConfigs.length === 0 ? (
+                      <p className="text-center py-4 text-muted-foreground text-sm">No config.toml profiles yet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {codexConfigs.map(t => (
+                          <div key={t.id} className="border rounded-lg p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-sm">{t.name}</span>
+                              <div className="flex gap-1">
+                                <Button variant="ghost" size="sm" onClick={() => handleOpenCodexDialog('config', t)}><Pencil className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="sm" onClick={() => handleDeleteCodex(t.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                              </div>
+                            </div>
+                            {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
+                            <pre className="text-xs bg-muted p-2 rounded max-h-24 overflow-auto font-mono">{t.content}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* auth.json section */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-medium">auth.json Profiles</Label>
+                      <Button size="sm" onClick={() => handleOpenCodexDialog('auth')} className="min-h-[36px]">
+                        <Plus className="mr-1 h-3 w-3" /> Add
+                      </Button>
+                    </div>
+                    <div className="flex items-start gap-2 p-3 text-sm text-blue-400 bg-blue-500/10 rounded-md">
+                      <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs">JSON authentication written to ~/.codex/auth.json in the container.</p>
+                    </div>
+                    {codexAuths.length === 0 ? (
+                      <p className="text-center py-4 text-muted-foreground text-sm">No auth.json profiles yet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {codexAuths.map(t => (
+                          <div key={t.id} className="border rounded-lg p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-sm">{t.name}</span>
+                              <div className="flex gap-1">
+                                <Button variant="ghost" size="sm" onClick={() => handleOpenCodexDialog('auth', t)}><Pencil className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="sm" onClick={() => handleDeleteCodex(t.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                              </div>
+                            </div>
+                            {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
+                            <pre className="text-xs bg-muted p-2 rounded max-h-24 overflow-auto font-mono">{t.content}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Gemini Tab */}
+        <TabsContent value="gemini">
+          <Card>
+            <CardHeader className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-base md:text-lg">Gemini CLI Environment</CardTitle>
+                <CardDescription className="text-xs md:text-sm">
+                  Manage Gemini CLI environment variables. Injected into containers via ~/.gemini_env and sourced from ~/.bashrc
+                </CardDescription>
+              </div>
+              <Button onClick={() => handleOpenGeminiDialog()} className="w-full md:w-auto min-h-[44px]">
+                <Plus className="mr-2 h-4 w-4" /> Add Profile
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-start gap-2 p-3 mb-4 text-sm text-blue-400 bg-blue-500/10 rounded-md">
+                <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <p className="text-xs">Environment variables (e.g. GOOGLE_GEMINI_BASE_URL, GEMINI_API_KEY, GEMINI_MODEL) are written to ~/.gemini_env and auto-sourced from ~/.bashrc.</p>
+              </div>
+              {loadingGemini ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : geminiEnvs.length === 0 ? (
+                <p className="text-center py-8 text-muted-foreground text-sm">No Gemini environment profiles yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {geminiEnvs.map(t => (
+                    <div key={t.id} className="border rounded-lg p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{t.name}</span>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => handleOpenGeminiDialog(t)}><Pencil className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteGemini(t.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                        </div>
+                      </div>
+                      {t.description && <p className="text-sm text-muted-foreground">{t.description}</p>}
+                      <pre className="text-xs bg-muted p-2 rounded max-h-24 overflow-auto font-mono">{t.content}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* GitHub Token Dialog */}
@@ -925,6 +1208,100 @@ DEBUG=true`}
             <Button variant="outline" onClick={() => setCmdDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSaveCmd} disabled={savingCmd}>
               {savingCmd && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Codex Config/Auth Dialog */}
+      <Dialog open={codexDialogOpen} onOpenChange={setCodexDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingCodex ? 'Edit' : 'Add'} Codex {codexDialogType === 'config' ? 'config.toml' : 'auth.json'}
+            </DialogTitle>
+            <DialogDescription>
+              {codexDialogType === 'config'
+                ? 'TOML configuration for Codex CLI. Written to ~/.codex/config.toml'
+                : 'JSON authentication for Codex CLI. Written to ~/.codex/auth.json'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Name *</Label>
+                <Input placeholder="e.g., Default Codex" value={codexForm.name} onChange={(e) => setCodexForm({ ...codexForm, name: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Input placeholder="Optional" value={codexForm.description} onChange={(e) => setCodexForm({ ...codexForm, description: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Content *</Label>
+              <Textarea
+                rows={12}
+                className="font-mono text-sm"
+                placeholder={codexDialogType === 'config'
+                  ? `model_provider = "sub2api"\nmodel = "gpt-5.2-codex"\nmodel_reasoning_effort = "high"\nnetwork_access = "enabled"\ndisable_response_storage = true\nwindows_wsl_setup_acknowledged = true\nmodel_verbosity = "high"\n\n[model_providers.sub2api]\nname = "sub2api"\nbase_url = "http://sub.los.zeus.codes"\nwire_api = "responses"\nrequires_openai_auth = true`
+                  : `{\n  "OPENAI_API_KEY": "sk-your-key-here"\n}`}
+                value={codexForm.content}
+                onChange={(e) => setCodexForm({ ...codexForm, content: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                {codexDialogType === 'config' ? 'TOML format. Content is written as-is to ~/.codex/config.toml' : 'JSON format. Content is written as-is to ~/.codex/auth.json'}
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCodexDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveCodex} disabled={savingCodex}>
+              {savingCodex && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Gemini Env Dialog */}
+      <Dialog open={geminiDialogOpen} onOpenChange={setGeminiDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingGemini ? 'Edit' : 'Add'} Gemini Environment Profile</DialogTitle>
+            <DialogDescription>
+              Environment variables for Gemini CLI. Written to ~/.gemini_env and sourced from ~/.bashrc
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Name *</Label>
+                <Input placeholder="e.g., Default Gemini" value={geminiForm.name} onChange={(e) => setGeminiForm({ ...geminiForm, name: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Input placeholder="Optional" value={geminiForm.description} onChange={(e) => setGeminiForm({ ...geminiForm, description: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Environment Variables *</Label>
+              <Textarea
+                rows={6}
+                className="font-mono text-sm"
+                placeholder={`GOOGLE_GEMINI_BASE_URL=http://sub.los.zeus.codes\nGEMINI_API_KEY=sk-your-key-here\nGEMINI_MODEL=gemini-3-pro-preview`}
+                value={geminiForm.content}
+                onChange={(e) => setGeminiForm({ ...geminiForm, content: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                One per line in VAR=value format. Supports export prefix. Written to ~/.gemini_env and auto-sourced.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGeminiDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveGemini} disabled={savingGemini}>
+              {savingGemini && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save
             </Button>
           </DialogFooter>
