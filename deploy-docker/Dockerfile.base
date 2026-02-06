@@ -46,9 +46,11 @@ RUN if [ "$INSTALL_CODE_SERVER" = "true" ]; then \
         echo "Skipping code-server installation"; \
     fi
 
-# Create non-root user 'developer' with sudo privileges
+# Create non-root user 'developer' with sudo privileges and default password
+# 创建 developer 用户，设置默认密码 123456，并赋予 sudo 权限
 RUN useradd -m -s /bin/bash -G sudo developer \
-    && echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    && echo "developer:123456" | chpasswd \
+    && echo "developer ALL=(ALL:ALL) ALL" >> /etc/sudoers
 
 # Create workspace directory
 RUN mkdir -p /workspace && chown developer:developer /workspace
@@ -83,9 +85,15 @@ WORKDIR /workspace
 # Switch to non-root user
 USER developer
 
+# Configure npm global prefix for developer user (avoids EACCES on npm install -g)
+# 配置 npm 全局安装路径到用户目录（避免权限问题）
+RUN mkdir -p /home/developer/.npm-global \
+    && npm config set prefix '/home/developer/.npm-global'
+
 # Set environment variables
 ENV HOME=/home/developer
-ENV PATH="/home/developer/.local/bin:${PATH}"
+ENV NPM_CONFIG_PREFIX=/home/developer/.npm-global
+ENV PATH="/home/developer/.npm-global/bin:/home/developer/.local/bin:${PATH}"
 
 # Default command
 CMD ["/bin/bash"]
