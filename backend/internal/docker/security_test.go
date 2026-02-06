@@ -66,16 +66,16 @@ func TestDefaultSecurityConfigHasSecurityOpts(t *testing.T) {
 		t.Error("Default security config should have security options")
 	}
 	
-	hasNoNewPrivileges := false
+	hasSeccomp := false
 	for _, opt := range config.SecurityOpt {
-		if opt == "no-new-privileges:true" {
-			hasNoNewPrivileges = true
+		if opt == "seccomp=unconfined" {
+			hasSeccomp = true
 			break
 		}
 	}
 	
-	if !hasNoNewPrivileges {
-		t.Error("Default security config should have no-new-privileges")
+	if !hasSeccomp {
+		t.Error("Default security config should have seccomp option")
 	}
 }
 

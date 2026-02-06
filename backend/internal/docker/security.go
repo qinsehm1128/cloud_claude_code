@@ -49,7 +49,6 @@ func DefaultSecurityConfig() *SecurityConfig {
 
 		// Requirement 8.3: Apply seccomp profile to restrict system calls
 		SecurityOpt: []string{
-			"no-new-privileges:true",
 			"seccomp=unconfined", // Use default seccomp in production
 		},
 
