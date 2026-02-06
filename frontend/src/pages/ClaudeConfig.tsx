@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Loader2, FileText, Wrench, Server, Terminal, Code, Key, Globe } from 'lucide-react'
+import { Plus, Pencil, Trash2, Loader2, FileText, Wrench, Server, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -33,30 +33,21 @@ const tabConfig = [
   { value: 'skill', label: 'Skills', type: ConfigTypes.SKILL, icon: Wrench },
   { value: 'mcp', label: 'MCP', type: ConfigTypes.MCP, icon: Server },
   { value: 'command', label: 'Commands', type: ConfigTypes.COMMAND, icon: Terminal },
-  { value: 'codex_config', label: 'Codex Config', type: ConfigTypes.CODEX_CONFIG, icon: Code },
-  { value: 'codex_auth', label: 'Codex Auth', type: ConfigTypes.CODEX_AUTH, icon: Key },
-  { value: 'gemini_env', label: 'Gemini Env', type: ConfigTypes.GEMINI_ENV, icon: Globe },
 ]
 
 export default function ClaudeConfig() {
   // Templates state for each config type
-  const [templates, setTemplates] = useState<Record<ConfigType, ClaudeConfigTemplate[]>>({
+  const [templates, setTemplates] = useState<Record<string, ClaudeConfigTemplate[]>>({
     CLAUDE_MD: [],
     SKILL: [],
     MCP: [],
     COMMAND: [],
-    CODEX_CONFIG: [],
-    CODEX_AUTH: [],
-    GEMINI_ENV: [],
   })
-  const [loading, setLoading] = useState<Record<ConfigType, boolean>>({
+  const [loading, setLoading] = useState<Record<string, boolean>>({
     CLAUDE_MD: true,
     SKILL: true,
     MCP: true,
     COMMAND: true,
-    CODEX_CONFIG: true,
-    CODEX_AUTH: true,
-    GEMINI_ENV: true,
   })
 
   // Dialog state
@@ -184,12 +175,6 @@ export default function ClaudeConfig() {
         return '{\n  "command": "npx",\n  "args": ["-y", "@modelcontextprotocol/server-example"]\n}'
       case ConfigTypes.COMMAND:
         return '# Command Name\n\nDescribe what this command does...'
-      case ConfigTypes.CODEX_CONFIG:
-        return 'model_provider = "sub2api"\nmodel = "gpt-5.2-codex"\nmodel_reasoning_effort = "high"\nnetwork_access = "enabled"\ndisable_response_storage = true\nwindows_wsl_setup_acknowledged = true\nmodel_verbosity = "high"\n\n[model_providers.sub2api]\nname = "sub2api"\nbase_url = "http://your-api-url"\nwire_api = "responses"\nrequires_openai_auth = true'
-      case ConfigTypes.CODEX_AUTH:
-        return '{\n  "OPENAI_API_KEY": "sk-your-api-key-here"\n}'
-      case ConfigTypes.GEMINI_ENV:
-        return 'GOOGLE_GEMINI_BASE_URL=http://your-api-url\nGEMINI_API_KEY=sk-your-api-key-here\nGEMINI_MODEL=gemini-3-pro-preview'
       default:
         return ''
     }
@@ -296,9 +281,9 @@ export default function ClaudeConfig() {
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div>
-        <h1 className="text-xl md:text-2xl font-semibold">CLI Config</h1>
+        <h1 className="text-xl md:text-2xl font-semibold">Claude Config</h1>
         <p className="text-sm md:text-base text-muted-foreground">
-          Manage Claude, Codex, and Gemini CLI configuration templates
+          Manage Claude Code configuration templates
         </p>
       </div>
 
