@@ -21,7 +21,8 @@ export interface ConfigPreviewProps {
 
 // Get syntax type based on config type
 const getSyntaxType = (configType: ConfigType): 'markdown' | 'json' => {
-  return configType === ConfigTypes.MCP ? 'json' : 'markdown'
+  if (configType === ConfigTypes.MCP || configType === ConfigTypes.CODEX_AUTH) return 'json'
+  return 'markdown'
 }
 
 // Get syntax icon based on config type

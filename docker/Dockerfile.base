@@ -33,6 +33,12 @@ RUN node --version && npm --version
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install OpenAI Codex CLI globally
+RUN npm install -g @openai/codex
+
+# Install Google Gemini CLI globally
+RUN npm install -g @anthropic-ai/gemini-cli || npm install -g gemini-cli || echo "Gemini CLI not available via npm, skipping"
+
 # Install code-server (Web VS Code) - only if INSTALL_CODE_SERVER=true
 RUN if [ "$INSTALL_CODE_SERVER" = "true" ]; then \
         echo "Installing code-server..." && \

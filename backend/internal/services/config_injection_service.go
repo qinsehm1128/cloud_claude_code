@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"cc-platform/internal/docker"
@@ -34,6 +35,9 @@ type ConfigInjectionService interface {
 	InjectSkillArchive(ctx context.Context, containerID string, name string, archiveData string) error
 	InjectMCP(ctx context.Context, containerID string, configs []MCPServerConfig) error
 	InjectCommand(ctx context.Context, containerID string, name string, content string) error
+	InjectCodexConfig(ctx context.Context, containerID string, content string) error
+	InjectCodexAuth(ctx context.Context, containerID string, content string) error
+	InjectGeminiEnv(ctx context.Context, containerID string, content string) error
 }
 
 // configInjectionServiceImpl is the implementation of ConfigInjectionService
@@ -161,6 +165,15 @@ func (s *configInjectionServiceImpl) injectSingleConfig(ctx context.Context, con
 
 	case models.ConfigTypeCommand:
 		return s.InjectCommand(ctx, containerID, template.Name, template.Content)
+
+	case models.ConfigTypeCodexConf:
+		return s.InjectCodexConfig(ctx, containerID, template.Content)
+
+	case models.ConfigTypeCodexAuth:
+		return s.InjectCodexAuth(ctx, containerID, template.Content)
+
+	case models.ConfigTypeGeminiEnv:
+		return s.InjectGeminiEnv(ctx, containerID, template.Content)
 
 	default:
 		return fmt.Errorf("unknown config type: %s", template.ConfigType)
@@ -353,5 +366,69 @@ func (s *configInjectionServiceImpl) writeBinaryFile(ctx context.Context, contai
 		return fmt.Errorf("failed to decode binary file %s: %w", path, err)
 	}
 
+	return nil
+}
+
+// InjectCodexConfig injects Codex config.toml to ~/.codex/config.toml
+func (s *configInjectionServiceImpl) InjectCodexConfig(ctx context.Context, containerID string, content string) error {
+	// Create ~/.codex directory if it doesn't exist
+	if err := s.ensureDirectory(ctx, containerID, "$HOME/.codex"); err != nil {
+		return fmt.Errorf("failed to create ~/.codex directory: %w", err)
+	}
+
+	// Write content to ~/.codex/config.toml
+	return s.writeFile(ctx, containerID, "$HOME/.codex/config.toml", content)
+}
+
+// InjectCodexAuth injects Codex auth.json to ~/.codex/auth.json
+func (s *configInjectionServiceImpl) InjectCodexAuth(ctx context.Context, containerID string, content string) error {
+	// Create ~/.codex directory if it doesn't exist
+	if err := s.ensureDirectory(ctx, containerID, "$HOME/.codex"); err != nil {
+		return fmt.Errorf("failed to create ~/.codex directory: %w", err)
+	}
+
+	// Write content to ~/.codex/auth.json
+	return s.writeFile(ctx, containerID, "$HOME/.codex/auth.json", content)
+}
+
+// InjectGeminiEnv injects Gemini environment variables into the container's shell profile
+// The env vars are written to ~/.gemini_env and sourced from ~/.bashrc
+func (s *configInjectionServiceImpl) InjectGeminiEnv(ctx context.Context, containerID string, content string) error {
+	// Parse the content to extract env vars and build export statements
+	// Content format: multi-line VAR=value or export VAR=value
+	lines := strings.Split(content, "\n")
+	var exports []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Remove "export " prefix if present, we'll add it back
+		line = strings.TrimPrefix(line, "export ")
+		if strings.Contains(line, "=") {
+			exports = append(exports, fmt.Sprintf("export %s", line))
+		}
+	}
+
+	if len(exports) == 0 {
+		return fmt.Errorf("no valid environment variables found in Gemini config")
+	}
+
+	envContent := strings.Join(exports, "\n") + "\n"
+
+	// Write to ~/.gemini_env
+	if err := s.writeFile(ctx, containerID, "$HOME/.gemini_env", envContent); err != nil {
+		return fmt.Errorf("failed to write ~/.gemini_env: %w", err)
+	}
+
+	// Add source line to ~/.bashrc if not already present
+	sourceCmd := []string{"sh", "-c", `grep -q 'source.*\.gemini_env' $HOME/.bashrc 2>/dev/null || echo '# Gemini CLI environment variables
+[ -f "$HOME/.gemini_env" ] && source "$HOME/.gemini_env"' >> $HOME/.bashrc`}
+	_, err := s.dockerClient.ExecInContainer(ctx, containerID, sourceCmd)
+	if err != nil {
+		return fmt.Errorf("failed to update ~/.bashrc for Gemini env: %w", err)
+	}
+
+	log.Infof("Successfully injected Gemini environment variables to container %s", containerID)
 	return nil
 }

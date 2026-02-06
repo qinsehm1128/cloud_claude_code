@@ -201,6 +201,9 @@ export interface ClaudeConfigSelection {
   selected_skills?: number[]       // Multiple Skill template IDs
   selected_mcps?: number[]         // Multiple MCP template IDs
   selected_commands?: number[]     // Multiple Command template IDs
+  selected_codex_configs?: number[] // Multiple Codex Config template IDs
+  selected_codex_auths?: number[]   // Multiple Codex Auth template IDs
+  selected_gemini_envs?: number[]   // Multiple Gemini Env template IDs
 }
 
 // Container API
@@ -252,6 +255,9 @@ export const containerApi = {
       selected_skills: claudeConfigSelection?.selected_skills || [],
       selected_mcps: claudeConfigSelection?.selected_mcps || [],
       selected_commands: claudeConfigSelection?.selected_commands || [],
+      selected_codex_configs: claudeConfigSelection?.selected_codex_configs || [],
+      selected_codex_auths: claudeConfigSelection?.selected_codex_auths || [],
+      selected_gemini_envs: claudeConfigSelection?.selected_gemini_envs || [],
       // Permission option
       run_as_root: runAsRoot || false,
     }),

@@ -31,9 +31,12 @@ const configTypeLabels: Record<ConfigType, string> = {
   SKILL: 'Skills',
   MCP: 'MCP Servers',
   COMMAND: 'Commands',
+  CODEX_CONFIG: 'Codex Config',
+  CODEX_AUTH: 'Codex Auth',
+  GEMINI_ENV: 'Gemini Environment',
 }
 
-const configTypeOrder: ConfigType[] = ['CLAUDE_MD', 'SKILL', 'MCP', 'COMMAND']
+const configTypeOrder: ConfigType[] = ['CLAUDE_MD', 'SKILL', 'MCP', 'COMMAND', 'CODEX_CONFIG', 'CODEX_AUTH', 'GEMINI_ENV']
 
 export function ConfigInjectionDialog({
   containerId,

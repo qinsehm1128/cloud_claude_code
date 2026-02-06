@@ -18,7 +18,7 @@ var (
 	// ErrDuplicateTemplateName is returned when a template with the same name and type already exists
 	ErrDuplicateTemplateName = errors.New("template with this name already exists for this config type")
 	// ErrInvalidConfigType is returned when an invalid config type is provided
-	ErrInvalidConfigType = errors.New("invalid config_type, must be one of: CLAUDE_MD, SKILL, MCP, COMMAND")
+	ErrInvalidConfigType = errors.New("invalid config_type, must be one of: CLAUDE_MD, SKILL, MCP, COMMAND, CODEX_CONFIG, CODEX_AUTH, GEMINI_ENV")
 )
 
 // ConfigTemplateService defines the interface for managing Claude config templates
@@ -206,6 +206,35 @@ func (s *configTemplateServiceImpl) ValidateContent(configType models.ConfigType
 		return nil
 	case models.ConfigTypeCommand:
 		// Command is Markdown, basic validation (non-empty content is sufficient)
+		return nil
+	case models.ConfigTypeCodexConf:
+		// Codex config is TOML, basic validation (non-empty content is sufficient)
+		return nil
+	case models.ConfigTypeCodexAuth:
+		// Codex auth is JSON, validate it's valid JSON
+		var js json.RawMessage
+		if err := json.Unmarshal([]byte(content), &js); err != nil {
+			return fmt.Errorf("invalid Codex auth JSON: %w", err)
+		}
+		return nil
+	case models.ConfigTypeGeminiEnv:
+		// Gemini env vars, validate format (VAR=value or export VAR=value)
+		lines := strings.Split(content, "\n")
+		hasValidLine := false
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			line = strings.TrimPrefix(line, "export ")
+			if !strings.Contains(line, "=") {
+				return fmt.Errorf("invalid Gemini env var line (missing '='): %s", line)
+			}
+			hasValidLine = true
+		}
+		if !hasValidLine {
+			return errors.New("no valid environment variables found")
+		}
 		return nil
 	default:
 		return ErrInvalidConfigType

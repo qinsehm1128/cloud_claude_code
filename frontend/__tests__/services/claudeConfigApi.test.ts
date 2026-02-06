@@ -95,7 +95,7 @@ describe('claudeConfigApi', () => {
     })
 
     it('should handle all config types as filter', async () => {
-      const configTypes: ConfigType[] = ['CLAUDE_MD', 'SKILL', 'MCP', 'COMMAND']
+      const configTypes: ConfigType[] = ['CLAUDE_MD', 'SKILL', 'MCP', 'COMMAND', 'CODEX_CONFIG', 'CODEX_AUTH', 'GEMINI_ENV']
 
       for (const type of configTypes) {
         mockApi.get.mockResolvedValue(createMockResponse([]))
@@ -192,7 +192,7 @@ describe('claudeConfigApi', () => {
     })
 
     it('should handle all config types for creation', async () => {
-      const configTypes: ConfigType[] = ['CLAUDE_MD', 'SKILL', 'MCP', 'COMMAND']
+      const configTypes: ConfigType[] = ['CLAUDE_MD', 'SKILL', 'MCP', 'COMMAND', 'CODEX_CONFIG', 'CODEX_AUTH', 'GEMINI_ENV']
 
       for (const type of configTypes) {
         const input: CreateConfigInput = {
