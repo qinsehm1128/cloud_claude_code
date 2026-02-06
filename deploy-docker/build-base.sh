@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================
-# Build Base Images for Claude Code Containers
-# 构建 Claude Code 容器基础镜像
+# Build Base Images for AI Coding Agent Containers
+# 构建 AI 编程代理容器基础镜像 (Claude Code + Codex + Gemini)
 # ============================================
 #
 # This script builds two base images:
@@ -38,7 +38,7 @@ print_header() {
 # Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-DOCKER_DIR="${PROJECT_ROOT}/docker"
+DOCKER_DIR="${SCRIPT_DIR}"
 
 IMAGE_NAME="cc-base"
 EXTENSION_DIR="${DOCKER_DIR}/extensions"
@@ -192,6 +192,8 @@ docker run --rm "${IMAGE_NAME}:latest" bash -c "
     echo 'npm:' \$(npm --version 2>/dev/null || echo 'N/A')
     echo 'Git:' \$(git --version 2>/dev/null | cut -d' ' -f3 || echo 'N/A')
     echo 'Claude Code:' \$(which claude > /dev/null 2>&1 && echo 'installed' || echo 'not found')
+    echo 'Codex CLI:' \$(which codex > /dev/null 2>&1 && echo 'installed' || echo 'not found')
+    echo 'Gemini CLI:' \$(which gemini > /dev/null 2>&1 && echo 'installed' || echo 'not found')
     echo 'code-server:' \$(which code-server > /dev/null 2>&1 && echo 'installed' || echo 'not installed')
 "
 
@@ -202,6 +204,8 @@ docker run --rm "${IMAGE_NAME}:with-code-server" bash -c "
     echo 'npm:' \$(npm --version 2>/dev/null || echo 'N/A')
     echo 'Git:' \$(git --version 2>/dev/null | cut -d' ' -f3 || echo 'N/A')
     echo 'Claude Code:' \$(which claude > /dev/null 2>&1 && echo 'installed' || echo 'not found')
+    echo 'Codex CLI:' \$(which codex > /dev/null 2>&1 && echo 'installed' || echo 'not found')
+    echo 'Gemini CLI:' \$(which gemini > /dev/null 2>&1 && echo 'installed' || echo 'not found')
     echo 'code-server:' \$(which code-server > /dev/null 2>&1 && echo 'installed' || echo 'not installed')
 "
 

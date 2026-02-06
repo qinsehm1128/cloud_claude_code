@@ -1,5 +1,4 @@
-# Base image for Claude Code containers
-# Ubuntu 22.04 + Node.js 20 + Claude Code + Git
+# Ubuntu 22.04 + Node.js 20 + Claude Code + Codex CLI + Gemini CLI + Git
 # Optional: code-server (Web VS Code)
 
 FROM ubuntu:22.04
@@ -37,7 +36,7 @@ RUN npm install -g @anthropic-ai/claude-code
 RUN npm install -g @openai/codex
 
 # Install Google Gemini CLI globally
-RUN npm install -g @anthropic-ai/gemini-cli || npm install -g gemini-cli || echo "Gemini CLI not available via npm, skipping"
+RUN npm install -g @google/gemini-cli
 
 # Install code-server (Web VS Code) - only if INSTALL_CODE_SERVER=true
 RUN if [ "$INSTALL_CODE_SERVER" = "true" ]; then \
