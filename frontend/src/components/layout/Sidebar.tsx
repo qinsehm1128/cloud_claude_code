@@ -28,7 +28,7 @@ const navigation = [
   { name: 'Ports', href: '/ports', icon: Network },
   { name: 'Docker', href: '/docker', icon: Box },
   { name: 'Headless Chat', href: '/chat', icon: MessageSquare },
-  { name: 'Claude Config', href: '/claude-config', icon: FileCode2 },
+  { name: 'CLI Config', href: '/claude-config', icon: FileCode2 },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 

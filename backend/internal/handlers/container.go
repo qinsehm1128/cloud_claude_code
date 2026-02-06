@@ -65,6 +65,9 @@ type CreateContainerRequest struct {
 	SelectedSkills   []uint `json:"selected_skills,omitempty"`    // Multiple Skill template IDs (optional)
 	SelectedMCPs     []uint `json:"selected_mcps,omitempty"`      // Multiple MCP template IDs (optional)
 	SelectedCommands []uint `json:"selected_commands,omitempty"`  // Multiple Command template IDs (optional)
+	SelectedCodexConfigs []uint `json:"selected_codex_configs,omitempty"` // Multiple Codex Config template IDs (optional)
+	SelectedCodexAuths   []uint `json:"selected_codex_auths,omitempty"`   // Multiple Codex Auth template IDs (optional)
+	SelectedGeminiEnvs   []uint `json:"selected_gemini_envs,omitempty"`   // Multiple Gemini Env template IDs (optional)
 	// Container creation options
 	SkipGitRepo    bool `json:"skip_git_repo,omitempty"`    // Allow creating container without GitHub repository
 	EnableYoloMode bool `json:"enable_yolo_mode,omitempty"` // Enable YOLO mode (--dangerously-skip-permissions)
@@ -124,10 +127,13 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 			ServicePort: req.Proxy.ServicePort,
 		},
 		// Claude Config Template selections
-		SelectedClaudeMD: req.SelectedClaudeMD,
-		SelectedSkills:   req.SelectedSkills,
-		SelectedMCPs:     req.SelectedMCPs,
-		SelectedCommands: req.SelectedCommands,
+		SelectedClaudeMD:     req.SelectedClaudeMD,
+		SelectedSkills:       req.SelectedSkills,
+		SelectedMCPs:         req.SelectedMCPs,
+		SelectedCommands:     req.SelectedCommands,
+		SelectedCodexConfigs: req.SelectedCodexConfigs,
+		SelectedCodexAuths:   req.SelectedCodexAuths,
+		SelectedGeminiEnvs:   req.SelectedGeminiEnvs,
 		// Container creation options
 		SkipGitRepo:    req.SkipGitRepo,
 		EnableYoloMode: req.EnableYoloMode,

@@ -13,10 +13,13 @@ import (
 type ConfigType string
 
 const (
-	ConfigTypeClaudeMD ConfigType = "CLAUDE_MD"
-	ConfigTypeSkill    ConfigType = "SKILL"
-	ConfigTypeMCP      ConfigType = "MCP"
-	ConfigTypeCommand  ConfigType = "COMMAND"
+	ConfigTypeClaudeMD   ConfigType = "CLAUDE_MD"
+	ConfigTypeSkill      ConfigType = "SKILL"
+	ConfigTypeMCP        ConfigType = "MCP"
+	ConfigTypeCommand    ConfigType = "COMMAND"
+	ConfigTypeCodexConf  ConfigType = "CODEX_CONFIG"
+	ConfigTypeCodexAuth  ConfigType = "CODEX_AUTH"
+	ConfigTypeGeminiEnv  ConfigType = "GEMINI_ENV"
 )
 
 // ValidConfigTypes returns all valid ConfigType values
@@ -26,13 +29,17 @@ func ValidConfigTypes() []ConfigType {
 		ConfigTypeSkill,
 		ConfigTypeMCP,
 		ConfigTypeCommand,
+		ConfigTypeCodexConf,
+		ConfigTypeCodexAuth,
+		ConfigTypeGeminiEnv,
 	}
 }
 
 // IsValid checks if the ConfigType is a valid value
 func (ct ConfigType) IsValid() bool {
 	switch ct {
-	case ConfigTypeClaudeMD, ConfigTypeSkill, ConfigTypeMCP, ConfigTypeCommand:
+	case ConfigTypeClaudeMD, ConfigTypeSkill, ConfigTypeMCP, ConfigTypeCommand,
+		ConfigTypeCodexConf, ConfigTypeCodexAuth, ConfigTypeGeminiEnv:
 		return true
 	default:
 		return false

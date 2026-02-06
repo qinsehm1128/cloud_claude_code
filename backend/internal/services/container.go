@@ -157,10 +157,13 @@ type CreateContainerInput struct {
 	EnvVarsProfileID        *uint `json:"env_vars_profile_id,omitempty"`
 	StartupCommandProfileID *uint `json:"startup_command_profile_id,omitempty"`
 	// Claude Config Template selections
-	SelectedClaudeMD *uint  `json:"selected_claude_md,omitempty"` // Single CLAUDE.MD template ID (optional)
-	SelectedSkills   []uint `json:"selected_skills,omitempty"`    // Multiple Skill template IDs (optional)
-	SelectedMCPs     []uint `json:"selected_mcps,omitempty"`      // Multiple MCP template IDs (optional)
-	SelectedCommands []uint `json:"selected_commands,omitempty"`  // Multiple Command template IDs (optional)
+	SelectedClaudeMD     *uint  `json:"selected_claude_md,omitempty"` // Single CLAUDE.MD template ID (optional)
+	SelectedSkills       []uint `json:"selected_skills,omitempty"`    // Multiple Skill template IDs (optional)
+	SelectedMCPs         []uint `json:"selected_mcps,omitempty"`      // Multiple MCP template IDs (optional)
+	SelectedCommands     []uint `json:"selected_commands,omitempty"`  // Multiple Command template IDs (optional)
+	SelectedCodexConfigs []uint `json:"selected_codex_configs,omitempty"` // Multiple Codex Config template IDs (optional)
+	SelectedCodexAuths   []uint `json:"selected_codex_auths,omitempty"`   // Multiple Codex Auth template IDs (optional)
+	SelectedGeminiEnvs   []uint `json:"selected_gemini_envs,omitempty"`   // Multiple Gemini Env template IDs (optional)
 }
 
 // CreateContainer creates a new container and automatically starts initialization
@@ -485,6 +488,9 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	templateIDs = append(templateIDs, input.SelectedSkills...)
 	templateIDs = append(templateIDs, input.SelectedMCPs...)
 	templateIDs = append(templateIDs, input.SelectedCommands...)
+	templateIDs = append(templateIDs, input.SelectedCodexConfigs...)
+	templateIDs = append(templateIDs, input.SelectedCodexAuths...)
+	templateIDs = append(templateIDs, input.SelectedGeminiEnvs...)
 
 	// Store template IDs for initialization (will be retrieved during runInitialization)
 	if len(templateIDs) > 0 {

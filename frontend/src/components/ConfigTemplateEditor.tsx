@@ -34,12 +34,15 @@ interface ValidationErrors {
 
 // Get syntax type based on config type
 const getSyntaxType = (configType: ConfigType): 'markdown' | 'json' => {
-  return configType === ConfigTypes.MCP ? 'json' : 'markdown'
+  if (configType === ConfigTypes.MCP || configType === ConfigTypes.CODEX_AUTH) return 'json'
+  return 'markdown'
 }
 
 // Get accepted file extensions based on config type
 const getAcceptedFileTypes = (configType: ConfigType): string => {
-  return configType === ConfigTypes.MCP ? '.json' : '.md'
+  if (configType === ConfigTypes.MCP || configType === ConfigTypes.CODEX_AUTH) return '.json'
+  if (configType === ConfigTypes.CODEX_CONFIG) return '.toml'
+  return '.md'
 }
 
 // Get placeholder text based on config type
@@ -53,6 +56,12 @@ const getContentPlaceholder = (configType: ConfigType): string => {
       return '{\n  "command": "npx",\n  "args": ["-y", "@modelcontextprotocol/server-example"]\n}'
     case ConfigTypes.COMMAND:
       return '# Command Name\n\nDescribe what this command does...'
+    case ConfigTypes.CODEX_CONFIG:
+      return 'model_provider = "sub2api"\nmodel = "gpt-5.2-codex"\nmodel_reasoning_effort = "high"\nnetwork_access = "enabled"\ndisable_response_storage = true\n\n[model_providers.sub2api]\nname = "sub2api"\nbase_url = "http://your-api-url"\nwire_api = "responses"\nrequires_openai_auth = true'
+    case ConfigTypes.CODEX_AUTH:
+      return '{\n  "OPENAI_API_KEY": "sk-your-api-key-here"\n}'
+    case ConfigTypes.GEMINI_ENV:
+      return 'GOOGLE_GEMINI_BASE_URL=http://your-api-url\nGEMINI_API_KEY=sk-your-api-key-here\nGEMINI_MODEL=gemini-3-pro-preview'
     default:
       return ''
   }
@@ -69,6 +78,12 @@ const getConfigTypeDisplayName = (configType: ConfigType): string => {
       return 'MCP'
     case ConfigTypes.COMMAND:
       return 'Command'
+    case ConfigTypes.CODEX_CONFIG:
+      return 'Codex Config'
+    case ConfigTypes.CODEX_AUTH:
+      return 'Codex Auth'
+    case ConfigTypes.GEMINI_ENV:
+      return 'Gemini Env'
     default:
       return configType
   }
@@ -77,8 +92,14 @@ const getConfigTypeDisplayName = (configType: ConfigType): string => {
 // Validate file type based on config type
 export const validateFileType = (file: File, configType: ConfigType): boolean => {
   const fileName = file.name.toLowerCase()
-  if (configType === ConfigTypes.MCP) {
+  if (configType === ConfigTypes.MCP || configType === ConfigTypes.CODEX_AUTH) {
     return fileName.endsWith('.json')
+  }
+  if (configType === ConfigTypes.CODEX_CONFIG) {
+    return fileName.endsWith('.toml')
+  }
+  if (configType === ConfigTypes.GEMINI_ENV) {
+    return fileName.endsWith('.env') || fileName.endsWith('.txt') || fileName.endsWith('.sh')
   }
   return fileName.endsWith('.md')
 }

@@ -140,6 +140,9 @@ export default function Dashboard() {
     selectedSkills: [] as number[],
     selectedMCPs: [] as number[],
     selectedCommands: [] as number[],
+    selectedCodexConfigs: [] as number[],
+    selectedCodexAuths: [] as number[],
+    selectedGeminiEnvs: [] as number[],
   })
   const [newPortMapping, setNewPortMapping] = useState({ container_port: 0, host_port: 0 })
   const navigate = useNavigate()
@@ -295,6 +298,9 @@ export default function Dashboard() {
         selected_skills: formData.selectedSkills,
         selected_mcps: formData.selectedMCPs,
         selected_commands: formData.selectedCommands,
+        selected_codex_configs: formData.selectedCodexConfigs,
+        selected_codex_auths: formData.selectedCodexAuths,
+        selected_gemini_envs: formData.selectedGeminiEnvs,
       }
 
       await containerApi.create(
@@ -336,6 +342,9 @@ export default function Dashboard() {
         selectedSkills: [],
         selectedMCPs: [],
         selectedCommands: [],
+        selectedCodexConfigs: [],
+        selectedCodexAuths: [],
+        selectedGeminiEnvs: [],
       })
       setNewPortMapping({ container_port: 0, host_port: 0 })
       fetchContainers()
@@ -1188,11 +1197,116 @@ export default function Dashboard() {
                           )}
                         </div>
                       </div>
+
+                      {/* Codex Config Selection (Multi-Select) */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Codex Config</Label>
+                        <p className="text-xs text-muted-foreground">Select Codex config.toml templates (optional, writes to ~/.codex/config.toml)</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                          {claudeConfigs
+                            .filter(c => c.config_type === ConfigTypes.CODEX_CONFIG)
+                            .map(config => (
+                              <div key={config.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`codex-config-${config.id}`}
+                                  checked={formData.selectedCodexConfigs.includes(config.id)}
+                                  onCheckedChange={(checked) => {
+                                    setFormData({
+                                      ...formData,
+                                      selectedCodexConfigs: checked
+                                        ? [...formData.selectedCodexConfigs, config.id]
+                                        : formData.selectedCodexConfigs.filter(id => id !== config.id)
+                                    })
+                                  }}
+                                />
+                                <ConfigPreview content={config.content} configType={config.config_type} trigger="hover">
+                                  <label htmlFor={`codex-config-${config.id}`} className="text-sm cursor-pointer hover:underline">
+                                    {config.name}
+                                    {config.description && <span className="text-xs text-muted-foreground ml-2">- {config.description}</span>}
+                                  </label>
+                                </ConfigPreview>
+                              </div>
+                            ))}
+                          {claudeConfigs.filter(c => c.config_type === ConfigTypes.CODEX_CONFIG).length === 0 && (
+                            <p className="text-xs text-muted-foreground">No Codex config templates available</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Codex Auth Selection (Multi-Select) */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Codex Auth</Label>
+                        <p className="text-xs text-muted-foreground">Select Codex auth.json templates (optional, writes to ~/.codex/auth.json)</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                          {claudeConfigs
+                            .filter(c => c.config_type === ConfigTypes.CODEX_AUTH)
+                            .map(config => (
+                              <div key={config.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`codex-auth-${config.id}`}
+                                  checked={formData.selectedCodexAuths.includes(config.id)}
+                                  onCheckedChange={(checked) => {
+                                    setFormData({
+                                      ...formData,
+                                      selectedCodexAuths: checked
+                                        ? [...formData.selectedCodexAuths, config.id]
+                                        : formData.selectedCodexAuths.filter(id => id !== config.id)
+                                    })
+                                  }}
+                                />
+                                <ConfigPreview content={config.content} configType={config.config_type} trigger="hover">
+                                  <label htmlFor={`codex-auth-${config.id}`} className="text-sm cursor-pointer hover:underline">
+                                    {config.name}
+                                    {config.description && <span className="text-xs text-muted-foreground ml-2">- {config.description}</span>}
+                                  </label>
+                                </ConfigPreview>
+                              </div>
+                            ))}
+                          {claudeConfigs.filter(c => c.config_type === ConfigTypes.CODEX_AUTH).length === 0 && (
+                            <p className="text-xs text-muted-foreground">No Codex auth templates available</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Gemini Env Selection (Multi-Select) */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Gemini Environment</Label>
+                        <p className="text-xs text-muted-foreground">Select Gemini env var templates (optional, sourced from ~/.bashrc)</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                          {claudeConfigs
+                            .filter(c => c.config_type === ConfigTypes.GEMINI_ENV)
+                            .map(config => (
+                              <div key={config.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`gemini-env-${config.id}`}
+                                  checked={formData.selectedGeminiEnvs.includes(config.id)}
+                                  onCheckedChange={(checked) => {
+                                    setFormData({
+                                      ...formData,
+                                      selectedGeminiEnvs: checked
+                                        ? [...formData.selectedGeminiEnvs, config.id]
+                                        : formData.selectedGeminiEnvs.filter(id => id !== config.id)
+                                    })
+                                  }}
+                                />
+                                <ConfigPreview content={config.content} configType={config.config_type} trigger="hover">
+                                  <label htmlFor={`gemini-env-${config.id}`} className="text-sm cursor-pointer hover:underline">
+                                    {config.name}
+                                    {config.description && <span className="text-xs text-muted-foreground ml-2">- {config.description}</span>}
+                                  </label>
+                                </ConfigPreview>
+                              </div>
+                            ))}
+                          {claudeConfigs.filter(c => c.config_type === ConfigTypes.GEMINI_ENV).length === 0 && (
+                            <p className="text-xs text-muted-foreground">No Gemini env templates available</p>
+                          )}
+                        </div>
+                      </div>
                     </>
                   )}
 
                   {/* Selection Summary */}
-                  {(formData.selectedClaudeMD || formData.selectedSkills.length > 0 || formData.selectedMCPs.length > 0 || formData.selectedCommands.length > 0) && (
+                  {(formData.selectedClaudeMD || formData.selectedSkills.length > 0 || formData.selectedMCPs.length > 0 || formData.selectedCommands.length > 0 || formData.selectedCodexConfigs.length > 0 || formData.selectedCodexAuths.length > 0 || formData.selectedGeminiEnvs.length > 0) && (
                     <div className="rounded-md bg-muted p-3 text-sm">
                       <p className="font-medium mb-2">Selected Configurations:</p>
                       <ul className="list-disc list-inside space-y-1 text-xs text-muted-foreground">
@@ -1207,6 +1321,15 @@ export default function Dashboard() {
                         )}
                         {formData.selectedCommands.length > 0 && (
                           <li>Commands: {formData.selectedCommands.map(id => claudeConfigs.find(c => c.id === id)?.name).join(', ')}</li>
+                        )}
+                        {formData.selectedCodexConfigs.length > 0 && (
+                          <li>Codex Config: {formData.selectedCodexConfigs.map(id => claudeConfigs.find(c => c.id === id)?.name).join(', ')}</li>
+                        )}
+                        {formData.selectedCodexAuths.length > 0 && (
+                          <li>Codex Auth: {formData.selectedCodexAuths.map(id => claudeConfigs.find(c => c.id === id)?.name).join(', ')}</li>
+                        )}
+                        {formData.selectedGeminiEnvs.length > 0 && (
+                          <li>Gemini Env: {formData.selectedGeminiEnvs.map(id => claudeConfigs.find(c => c.id === id)?.name).join(', ')}</li>
                         )}
                       </ul>
                     </div>

@@ -4,7 +4,7 @@
  */
 
 // ConfigType enum matching backend ConfigType
-export type ConfigType = 'CLAUDE_MD' | 'SKILL' | 'MCP' | 'COMMAND'
+export type ConfigType = 'CLAUDE_MD' | 'SKILL' | 'MCP' | 'COMMAND' | 'CODEX_CONFIG' | 'CODEX_AUTH' | 'GEMINI_ENV'
 
 // ConfigType constants for convenience
 export const ConfigTypes = {
@@ -12,6 +12,9 @@ export const ConfigTypes = {
   SKILL: 'SKILL' as ConfigType,
   MCP: 'MCP' as ConfigType,
   COMMAND: 'COMMAND' as ConfigType,
+  CODEX_CONFIG: 'CODEX_CONFIG' as ConfigType,
+  CODEX_AUTH: 'CODEX_AUTH' as ConfigType,
+  GEMINI_ENV: 'GEMINI_ENV' as ConfigType,
 } as const
 
 // ClaudeConfigTemplate interface matching backend model
