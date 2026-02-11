@@ -306,8 +306,7 @@ export class TerminalWebSocket {
     }
   }
 
-  disconnect() {
-    this.maxReconnectAttempts = 0 // Prevent reconnection
+  disconnect(): void {
     if (this.ws) {
       this.ws.close()
       this.ws = null

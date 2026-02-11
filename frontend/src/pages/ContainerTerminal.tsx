@@ -15,13 +15,15 @@ import {
   Settings,
   Download,
 } from 'lucide-react'
-import { Terminal } from 'xterm'
-import { FitAddon } from 'xterm-addon-fit'
-import { WebLinksAddon } from 'xterm-addon-web-links'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { TerminalWebSocket, HistoryLoadProgress } from '@/services/websocket'
+import { useIsMobile } from '@/hooks/useMediaQuery'
+import { getScopedStorageKey } from '@/utils/windowId'
 import { containerApi } from '@/services/api'
 import { monitoringApi } from '@/services/monitoringApi'
 import { taskApi, Task as ApiTask } from '@/services/taskApi'
@@ -31,7 +33,7 @@ import { MonitoringConfigPanel, MonitoringConfig } from '@/components/Automation
 import { TaskPanel, Task } from '@/components/Automation/TaskPanel'
 import { TaskEditor } from '@/components/Automation/TaskEditor'
 import { ConfigInjectionDialog } from '@/components/ConfigInjectionDialog'
-import 'xterm/css/xterm.css'
+import '@xterm/xterm/css/xterm.css'
 
 interface Container {
   id: number
@@ -53,7 +55,7 @@ interface TerminalTab {
   historyProgress: number
 }
 
-const getStorageKey = (containerId: string) => `terminal_sessions_${containerId}`
+const getStorageKey = (containerId: string) => getScopedStorageKey(`terminal_sessions_${containerId}`)
 
 const loadSavedSessions = (containerId: string): { key: string; sessionId: string }[] => {
   try {
@@ -76,6 +78,7 @@ let tabCounter = 0
 export default function ContainerTerminal() {
   const { containerId } = useParams<{ containerId: string }>()
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const terminalRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [container, setContainer] = useState<Container | null>(null)
   const [loading, setLoading] = useState(true)
@@ -84,6 +87,7 @@ export default function ContainerTerminal() {
   const [activeKey, setActiveKey] = useState<string>('')
   const [filePanelOpen, setFilePanelOpen] = useState(false)
   const [taskPanelOpen, setTaskPanelOpen] = useState(false)
+  const [activeMobilePanel, setActiveMobilePanel] = useState<'file-browser' | 'terminal' | 'tasks'>('terminal')
   const [configDialogOpen, setConfigDialogOpen] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus>({
@@ -246,8 +250,8 @@ export default function ContainerTerminal() {
   const removeTab = useCallback((targetKey: string) => {
     const tab = tabs.find(t => t.key === targetKey)
     if (tab) {
-      // Close session permanently when user manually closes the tab
-      tab.ws?.closeSession()
+      // Disconnect current window WebSocket only; keep backend session alive for other windows
+      tab.ws?.disconnect()
       tab.terminal?.dispose()
     }
 
@@ -278,7 +282,7 @@ export default function ContainerTerminal() {
 
       const term = new Terminal({
         cursorBlink: true,
-        fontSize: 14,
+        fontSize: isMobile ? 12 : 14,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
         theme: {
           background: '#0a0a0a',
@@ -287,7 +291,7 @@ export default function ContainerTerminal() {
           cursorAccent: '#0a0a0a',
           selectionBackground: '#3f3f46',
         },
-        scrollback: 50000,
+        scrollback: isMobile ? 10000 : 50000,
       })
 
       const fitAddon = new FitAddon()
@@ -387,11 +391,14 @@ export default function ContainerTerminal() {
     }
 
     initTerminal()
-  }, [activeKey, container, containerId, tabs])
+  }, [activeKey, container, containerId, isMobile, tabs])
 
-  // Refit terminal when file panel or task panel toggles
+  // Refit terminal when visible panel changes
   useEffect(() => {
     const timer = setTimeout(() => {
+      if (isMobile && activeMobilePanel !== 'terminal') {
+        return
+      }
       tabs.forEach(tab => {
         if (tab.fitAddon && tab.terminal) {
           tab.fitAddon.fit()
@@ -399,7 +406,7 @@ export default function ContainerTerminal() {
       })
     }, 300) // Wait for transition
     return () => clearTimeout(timer)
-  }, [filePanelOpen, taskPanelOpen, tabs])
+  }, [activeMobilePanel, filePanelOpen, isMobile, taskPanelOpen, tabs])
 
   useEffect(() => {
     const handleResize = () => {
@@ -595,6 +602,331 @@ export default function ContainerTerminal() {
   }
 
   const activeTab = tabs.find(t => t.key === activeKey)
+  const pendingTaskCount = tasks.filter(t => t.status === 'pending').length
+
+  const closeFilePanel = () => {
+    if (isMobile) {
+      setActiveMobilePanel('terminal')
+      return
+    }
+    setFilePanelOpen(false)
+  }
+
+  const closeTaskPanel = () => {
+    if (isMobile) {
+      setActiveMobilePanel('terminal')
+      return
+    }
+    setTaskPanelOpen(false)
+  }
+
+  const openTaskPanel = () => {
+    if (isMobile) {
+      setActiveMobilePanel('tasks')
+      return
+    }
+    setTaskPanelOpen(true)
+  }
+
+  const toggleFilePanel = () => {
+    if (isMobile) {
+      setActiveMobilePanel(prev => (prev === 'file-browser' ? 'terminal' : 'file-browser'))
+      return
+    }
+    setFilePanelOpen(prev => !prev)
+  }
+
+  const toggleTaskPanel = () => {
+    if (isMobile) {
+      setActiveMobilePanel(prev => (prev === 'tasks' ? 'terminal' : 'tasks'))
+      return
+    }
+    setTaskPanelOpen(prev => !prev)
+  }
+
+  const terminalTabsBar = (
+    <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50 flex-shrink-0">
+      <div className="flex-1 flex gap-1 overflow-x-auto">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveKey(tab.key)}
+            className={`h-8 px-3 rounded-md gap-2 inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-colors ${
+              activeKey === tab.key
+                ? 'bg-secondary text-foreground'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                tab.connected ? 'bg-green-500' : 'bg-red-500'
+              }`}
+            />
+            {tab.label}
+            {tab.historyLoading && (
+              <span className="text-xs text-blue-400">{tab.historyProgress}%</span>
+            )}
+            {tabs.length > 1 && (
+              <span
+                className="ml-1 hover:bg-muted rounded p-0.5"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeTab(tab.key)
+                }}
+              >
+                <X className="h-3 w-3" />
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <Button variant="ghost" size="sm" onClick={() => addNewTab()}>
+        <Plus className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+
+  const terminalViewport = (
+    <div
+      className="flex-1 relative bg-[#0a0a0a] min-h-0"
+      onDragEnter={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (e.dataTransfer.types.includes('text/plain')) {
+          setIsDraggingOver(true)
+        }
+      }}
+    >
+      {isDraggingOver && (
+        <div
+          className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 border-2 border-dashed border-primary"
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            e.dataTransfer.dropEffect = 'copy'
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            const rect = e.currentTarget.getBoundingClientRect()
+            const x = e.clientX
+            const y = e.clientY
+            if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+              setIsDraggingOver(false)
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setIsDraggingOver(false)
+            const path = e.dataTransfer.getData('text/plain')
+            if (path && path.startsWith('/')) {
+              handleFileDrop(path)
+            }
+          }}
+        >
+          <div className="text-center pointer-events-none">
+            <FolderOpen className="h-12 w-12 mx-auto mb-2 text-primary" />
+            <p className="text-sm text-muted-foreground">Drop to insert file path</p>
+          </div>
+        </div>
+      )}
+      {activeTab?.historyLoading && (
+        <div className="absolute top-0 left-0 right-0 z-10 bg-background/90 p-3 border-b">
+          <div className="text-sm text-muted-foreground mb-2">
+            Restoring session history...
+          </div>
+          <Progress value={activeTab.historyProgress} className="h-1" />
+        </div>
+      )}
+      {tabs.map((tab) => (
+        <div
+          key={tab.key}
+          ref={(el) => setTerminalRef(tab.key, el)}
+          className={`absolute inset-0 ${tab.key === activeKey ? 'block' : 'hidden'}`}
+          style={{ padding: '8px' }}
+        />
+      ))}
+    </div>
+  )
+
+  const automationPanelBody = (
+    <>
+      <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
+        <h3 className="font-medium text-sm">Automation</h3>
+        <div className="flex items-center gap-1">
+          <TaskEditor
+            tasks={tasks}
+            onImport={handleImportTasks}
+            onClear={handleClearTasks}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={closeTaskPanel}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <Tabs defaultValue="tasks" className="flex-1 flex flex-col overflow-hidden">
+        <TabsList className="mx-4 mt-2 grid grid-cols-2">
+          <TabsTrigger value="tasks">
+            <ListTodo className="h-4 w-4 mr-1" />
+            Tasks
+          </TabsTrigger>
+          <TabsTrigger value="settings">
+            <Settings className="h-4 w-4 mr-1" />
+            Settings
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="tasks" className="flex-1 overflow-hidden mt-0 p-0">
+          <TaskPanel
+            tasks={tasks}
+            onAddTask={handleAddTask}
+            onRemoveTask={handleRemoveTask}
+            onReorderTasks={handleReorderTasks}
+            onClearTasks={handleClearTasks}
+          />
+        </TabsContent>
+
+        <TabsContent value="settings" className="flex-1 overflow-auto mt-0">
+          <MonitoringConfigPanel
+            config={monitoringConfig}
+            onSave={handleConfigSave}
+          />
+        </TabsContent>
+      </Tabs>
+    </>
+  )
+
+  if (isMobile) {
+    return (
+      <div className="flex h-[calc(100vh-1px)] flex-col">
+        <div className="flex items-center justify-between px-3 py-2 border-b bg-card gap-2">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <span className="text-xs text-muted-foreground min-w-0 truncate">
+            Container: <span className="text-foreground font-medium">{container?.name}</span>
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 px-3 py-2 border-b bg-card/80">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() => navigate(`/headless/${containerId}`)}
+          >
+            Switch to Headless
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() => setConfigDialogOpen(true)}
+          >
+            <Download className="h-4 w-4 mr-1" />
+            Inject Config
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 ml-auto"
+            onClick={() => {
+              addNewTab()
+              setActiveMobilePanel('terminal')
+            }}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            New
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 px-3 py-2 border-b bg-card/50">
+          <Button
+            variant={activeMobilePanel === 'file-browser' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setActiveMobilePanel('file-browser')}
+          >
+            <PanelLeft className="h-4 w-4 mr-1" />
+            Files
+          </Button>
+          <Button
+            variant={activeMobilePanel === 'terminal' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setActiveMobilePanel('terminal')}
+          >
+            Terminal
+          </Button>
+          <Button
+            variant={activeMobilePanel === 'tasks' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setActiveMobilePanel('tasks')}
+          >
+            <ListTodo className="h-4 w-4 mr-1" />
+            Tasks
+            {pendingTaskCount > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-primary-foreground rounded-full">
+                {pendingTaskCount}
+              </span>
+            )}
+          </Button>
+        </div>
+
+        <div className="flex-1 min-h-0">
+          {activeMobilePanel === 'file-browser' && (
+            <div className="h-full bg-card border-r flex flex-col">
+              <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
+                <h3 className="font-medium text-sm">File Browser</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={closeFilePanel}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex-1 overflow-auto p-3">
+                <FileBrowser containerId={parseInt(containerId || '0')} />
+              </div>
+            </div>
+          )}
+
+          {activeMobilePanel === 'terminal' && (
+            <div className="flex h-full flex-col min-w-0">
+              {terminalTabsBar}
+              {terminalViewport}
+              <MonitoringStatusBar
+                status={monitoringStatus}
+                onToggle={handleMonitoringToggle}
+                onOpenSettings={openTaskPanel}
+              />
+            </div>
+          )}
+
+          {activeMobilePanel === 'tasks' && (
+            <div className="h-full bg-card border-l flex flex-col overflow-hidden">
+              {automationPanelBody}
+            </div>
+          )}
+        </div>
+
+        <ConfigInjectionDialog
+          containerId={parseInt(containerId || '0')}
+          containerName={container?.name || ''}
+          open={configDialogOpen}
+          onOpenChange={setConfigDialogOpen}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-[calc(100vh-1px)]">
@@ -610,7 +942,7 @@ export default function ContainerTerminal() {
             variant="ghost" 
             size="sm" 
             className="h-7 w-7 p-0"
-            onClick={() => setFilePanelOpen(false)}
+            onClick={closeFilePanel}
           >
             <X className="h-4 w-4" />
           </Button>
@@ -646,7 +978,7 @@ export default function ContainerTerminal() {
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={() => setFilePanelOpen(!filePanelOpen)}
+              onClick={toggleFilePanel}
             >
               {filePanelOpen ? (
                 <PanelLeftClose className="h-4 w-4 mr-2" />
@@ -658,7 +990,7 @@ export default function ContainerTerminal() {
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={() => setTaskPanelOpen(!taskPanelOpen)}
+              onClick={toggleTaskPanel}
             >
               {taskPanelOpen ? (
                 <PanelRightClose className="h-4 w-4 mr-2" />
@@ -667,9 +999,9 @@ export default function ContainerTerminal() {
               )}
               <ListTodo className="h-4 w-4 mr-1" />
               Tasks
-              {tasks.filter(t => t.status === 'pending').length > 0 && (
+              {pendingTaskCount > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-primary-foreground rounded-full">
-                  {tasks.filter(t => t.status === 'pending').length}
+                  {pendingTaskCount}
                 </span>
               )}
             </Button>
@@ -688,117 +1020,14 @@ export default function ContainerTerminal() {
           </div>
         </div>
 
-        {/* Terminal Tabs - using custom tab buttons instead of Radix Tabs to avoid TabsContent requirement */}
-        <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50 flex-shrink-0">
-          <div className="flex-1 flex gap-1">
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveKey(tab.key)}
-                className={`h-8 px-3 rounded-md gap-2 inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-colors ${
-                  activeKey === tab.key
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    tab.connected ? 'bg-green-500' : 'bg-red-500'
-                  }`}
-                />
-                {tab.label}
-                {tab.historyLoading && (
-                  <span className="text-xs text-blue-400">{tab.historyProgress}%</span>
-                )}
-                {tabs.length > 1 && (
-                  <span
-                    className="ml-1 hover:bg-muted rounded p-0.5"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeTab(tab.key)
-                    }}
-                  >
-                    <X className="h-3 w-3" />
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => addNewTab()}>
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {/* Terminal Content */}
-        <div 
-          className="flex-1 relative bg-[#0a0a0a] min-h-0"
-          onDragEnter={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            if (e.dataTransfer.types.includes('text/plain')) {
-              setIsDraggingOver(true)
-            }
-          }}
-        >
-          {/* Drag overlay - captures drag events over terminal */}
-          {isDraggingOver && (
-            <div 
-              className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 border-2 border-dashed border-primary"
-              onDragOver={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                e.dataTransfer.dropEffect = 'copy'
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                // Only hide if leaving the overlay entirely
-                const rect = e.currentTarget.getBoundingClientRect()
-                const x = e.clientX
-                const y = e.clientY
-                if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-                  setIsDraggingOver(false)
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                setIsDraggingOver(false)
-                const path = e.dataTransfer.getData('text/plain')
-                if (path && path.startsWith('/')) {
-                  handleFileDrop(path)
-                }
-              }}
-            >
-              <div className="text-center pointer-events-none">
-                <FolderOpen className="h-12 w-12 mx-auto mb-2 text-primary" />
-                <p className="text-sm text-muted-foreground">Drop to insert file path</p>
-              </div>
-            </div>
-          )}
-          {activeTab?.historyLoading && (
-            <div className="absolute top-0 left-0 right-0 z-10 bg-background/90 p-3 border-b">
-              <div className="text-sm text-muted-foreground mb-2">
-                Restoring session history...
-              </div>
-              <Progress value={activeTab.historyProgress} className="h-1" />
-            </div>
-          )}
-          {tabs.map((tab) => (
-            <div
-              key={tab.key}
-              ref={(el) => setTerminalRef(tab.key, el)}
-              className={`absolute inset-0 ${tab.key === activeKey ? 'block' : 'hidden'}`}
-              style={{ padding: '8px' }}
-            />
-          ))}
-        </div>
+        {terminalTabsBar}
+        {terminalViewport}
 
         {/* Monitoring Status Bar */}
         <MonitoringStatusBar
           status={monitoringStatus}
           onToggle={handleMonitoringToggle}
-          onOpenSettings={() => setTaskPanelOpen(true)}
+          onOpenSettings={openTaskPanel}
         />
       </div>
 
@@ -808,57 +1037,7 @@ export default function ContainerTerminal() {
           taskPanelOpen ? 'w-96' : 'w-0'
         } overflow-hidden`}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
-          <h3 className="font-medium text-sm">Automation</h3>
-          <div className="flex items-center gap-1">
-            <TaskEditor
-              tasks={tasks}
-              onImport={handleImportTasks}
-              onClear={handleClearTasks}
-            />
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-7 w-7 p-0"
-              onClick={() => setTaskPanelOpen(false)}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-        
-        {/* Tabs for Settings and Tasks */}
-        {taskPanelOpen && (
-          <Tabs defaultValue="tasks" className="flex-1 flex flex-col overflow-hidden">
-            <TabsList className="mx-4 mt-2 grid grid-cols-2">
-              <TabsTrigger value="tasks">
-                <ListTodo className="h-4 w-4 mr-1" />
-                Tasks
-              </TabsTrigger>
-              <TabsTrigger value="settings">
-                <Settings className="h-4 w-4 mr-1" />
-                Settings
-              </TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="tasks" className="flex-1 overflow-hidden mt-0 p-0">
-              <TaskPanel
-                tasks={tasks}
-                onAddTask={handleAddTask}
-                onRemoveTask={handleRemoveTask}
-                onReorderTasks={handleReorderTasks}
-                onClearTasks={handleClearTasks}
-              />
-            </TabsContent>
-            
-            <TabsContent value="settings" className="flex-1 overflow-auto mt-0">
-              <MonitoringConfigPanel
-                config={monitoringConfig}
-                onSave={handleConfigSave}
-              />
-            </TabsContent>
-          </Tabs>
-        )}
+        {taskPanelOpen && automationPanelBody}
       </div>
 
       {/* Config Injection Dialog */}
