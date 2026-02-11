@@ -8,7 +8,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getBaseUrl } from '../../src/services/api'
+import {
+  getBaseUrl,
+  getContainerConversations,
+  deleteContainerConversation,
+} from '../../src/services/api'
 import {
   setServerAddress,
   clearServerAddress,
@@ -233,6 +237,280 @@ describe('API Client - Timeout Configuration', () => {
       // Check that timeout is set (should be 30000ms as per api.ts)
       expect(api.defaults.timeout).toBe(30000)
     })
+  })
+})
+
+describe('API Client - Container Conversations', () => {
+  beforeEach(() => {
+    clearServerAddress()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    clearServerAddress()
+    vi.unstubAllGlobals()
+  })
+
+  it('should fetch container conversations with typed payload', async () => {
+    setServerAddress('http://localhost:8088/')
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue([
+        {
+          id: '101',
+          title: 'Session 101',
+          state: 'running',
+          is_running: true,
+          total_turns: 12,
+          created_at: '2026-02-11T08:10:00Z',
+          updated_at: '2026-02-11T08:20:00Z',
+        },
+      ]),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await getContainerConversations(5)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8088/api/containers/5/conversations',
+      expect.objectContaining({
+        method: 'GET',
+        credentials: 'include',
+      })
+    )
+    expect(result).toEqual([
+      {
+        id: 101,
+        title: 'Session 101',
+        state: 'running',
+        is_running: true,
+        total_turns: 12,
+        created_at: '2026-02-11T08:10:00Z',
+        updated_at: '2026-02-11T08:20:00Z',
+      },
+    ])
+  })
+
+  it('should throw container not found error for 404 response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: vi.fn().mockResolvedValue({}),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getContainerConversations(999)).rejects.toThrow('Container not found')
+  })
+
+  it('should throw timeout error when request is aborted', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError'))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getContainerConversations(1)).rejects.toThrow('Request timed out while fetching conversations')
+  })
+
+  it('should reject invalid payload shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ conversations: [] }),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getContainerConversations(1)).rejects.toThrow('Invalid conversation list response')
+  })
+})
+
+describe('API Client - Delete Container Conversation', () => {
+  beforeEach(() => {
+    clearServerAddress()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    clearServerAddress()
+    vi.unstubAllGlobals()
+  })
+
+  it('should delete a container conversation', async () => {
+    setServerAddress('http://localhost:8088/')
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteContainerConversation(5, 101)).resolves.toBeUndefined()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8088/api/containers/5/conversations/101',
+      expect.objectContaining({
+        method: 'DELETE',
+        credentials: 'include',
+      })
+    )
+  })
+
+  it('should throw conversation not found for 404 response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: vi.fn().mockResolvedValue({}),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteContainerConversation(1, 999)).rejects.toThrow('Conversation not found')
+  })
+
+  it('should throw running conversation error for 409 response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: vi.fn().mockResolvedValue({}),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteContainerConversation(1, 2)).rejects.toThrow('Conversation is running and cannot be deleted')
+  })
+
+  it('should throw timeout error when delete request is aborted', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError'))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteContainerConversation(1, 2)).rejects.toThrow('Request timed out while deleting conversation')
+  })
+
+  it('should throw running error for 423 locked response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 423,
+      json: vi.fn().mockResolvedValue({}),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteContainerConversation(1, 2)).rejects.toThrow('Conversation is running and cannot be deleted')
+  })
+
+  it('should use server error message when available', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: vi.fn().mockResolvedValue({ error: 'Internal database error' }),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteContainerConversation(1, 2)).rejects.toThrow('Internal database error')
+  })
+
+  it('should fallback to generic message for unknown status codes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: vi.fn().mockResolvedValue({}),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteContainerConversation(1, 2)).rejects.toThrow('Failed to delete conversation (503)')
+  })
+})
+
+describe('API Client - Conversation Error Parsing', () => {
+  beforeEach(() => {
+    clearServerAddress()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    clearServerAddress()
+    vi.unstubAllGlobals()
+  })
+
+  it('should use message field when error field is missing', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: vi.fn().mockResolvedValue({ message: 'Bad request parameters' }),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getContainerConversations(1)).rejects.toThrow('Bad request parameters')
+  })
+
+  it('should handle generic non-404 error response for conversations', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: vi.fn().mockResolvedValue({}),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getContainerConversations(1)).rejects.toThrow('Failed to fetch conversations (500)')
+  })
+
+  it('should handle non-Error thrown objects in getContainerConversations', async () => {
+    const fetchMock = vi.fn().mockRejectedValue('string error')
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getContainerConversations(1)).rejects.toThrow('Failed to fetch conversations')
+  })
+
+  it('should handle non-Error thrown objects in deleteContainerConversation', async () => {
+    const fetchMock = vi.fn().mockRejectedValue('string error')
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deleteContainerConversation(1, 2)).rejects.toThrow('Failed to delete conversation')
+  })
+
+  it('should parse conversation with string id to number', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue([
+        {
+          id: '999',
+          title: null,
+          state: null,
+          is_running: null,
+          total_turns: null,
+          created_at: null,
+          updated_at: null,
+        },
+      ]),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await getContainerConversations(1)
+
+    expect(result).toEqual([
+      {
+        id: 999,
+        title: '',
+        state: 'idle',
+        is_running: false,
+        total_turns: 0,
+        created_at: '',
+        updated_at: '',
+      },
+    ])
   })
 })
 

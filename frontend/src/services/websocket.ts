@@ -1,5 +1,5 @@
 export interface TerminalMessage {
-  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session' | 'close' | 'monitoring_status' | 'task_update' | 'strategy_triggered'
+  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session' | 'close' | 'start' | 'monitoring_status' | 'task_update' | 'strategy_triggered'
   data?: string
   cols?: number
   rows?: number
@@ -59,6 +59,12 @@ export interface HistoryLoadProgress {
   percent: number
 }
 
+export interface ConversationConnectOptions {
+  startNew?: boolean
+}
+
+type WebSocketTarget = 'container' | 'conversation'
+
 // Helper to get cookie value
 function getCookie(name: string): string | null {
   const value = `; ${document.cookie}`
@@ -76,6 +82,10 @@ export class TerminalWebSocket {
   private reconnectDelay = 1000
   private containerId: string
   private sessionId: string | null = null
+  private targetType: WebSocketTarget = 'container'
+  private targetId: string
+  private startSessionOnConnect = false
+  private manualDisconnect = false
   private onMessage: (msg: TerminalMessage) => void
   private onConnect: () => void
   private onDisconnect: () => void
@@ -108,6 +118,7 @@ export class TerminalWebSocket {
     sessionId?: string
   ) {
     this.containerId = containerId
+    this.targetId = containerId
     this.sessionId = sessionId || null
     this.onMessage = callbacks.onMessage
     this.onConnect = callbacks.onConnect
@@ -124,34 +135,33 @@ export class TerminalWebSocket {
   }
 
   connect() {
-    // Get token from httpOnly cookie (for same-origin) or fallback
-    // Note: httpOnly cookies are not accessible via JS, but WebSocket
-    // will send them automatically for same-origin requests.
-    // For cross-origin or when cookie is not httpOnly, we use query param.
-    const token = getCookie('cc_token')
-    
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    let wsUrl = `${protocol}//${window.location.host}/api/ws/terminal/${this.containerId}`
-    
-    // Build query params
-    const params = new URLSearchParams()
-    if (token) {
-      params.set('token', token)
-    }
-    if (this.sessionId) {
-      params.set('session', this.sessionId)
-    }
-    
-    const queryString = params.toString()
-    if (queryString) {
-      wsUrl += `?${queryString}`
-    }
+    this.targetType = 'container'
+    this.targetId = this.containerId
+    this.startSessionOnConnect = false
+    this.manualDisconnect = false
+    this.connectInternal()
+  }
+
+  connectToConversation(conversationId: string | number, options: ConversationConnectOptions = {}) {
+    this.targetType = 'conversation'
+    this.targetId = String(conversationId)
+    this.startSessionOnConnect = Boolean(options.startNew)
+    this.manualDisconnect = false
+    this.connectInternal()
+  }
+
+  private connectInternal() {
+    const wsUrl = this.buildWebSocketUrl()
 
     this.ws = new WebSocket(wsUrl)
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0
       this.onConnect()
+
+      if (this.targetType === 'conversation' && this.startSessionOnConnect) {
+        this.sendStartSessionMessage()
+      }
     }
 
     let historyState = {
@@ -164,14 +174,13 @@ export class TerminalWebSocket {
     this.ws.onmessage = (event) => {
       try {
         const msg: TerminalMessage = JSON.parse(event.data)
-        
-        // Handle special message types
+
         if (msg.type === 'session' && msg.session_id) {
           this.sessionId = msg.session_id
           this.onSessionId?.(msg.session_id)
           return
         }
-        
+
         if (msg.type === 'history_start') {
           historyState = {
             loading: true,
@@ -186,10 +195,10 @@ export class TerminalWebSocket {
           })
           return
         }
-        
+
         if (msg.type === 'history' && msg.data) {
           historyState.loadedChunks++
-          const percent = historyState.totalChunks > 0 
+          const percent = historyState.totalChunks > 0
             ? Math.round((historyState.loadedChunks / historyState.totalChunks) * 100)
             : 0
           this.onHistoryChunk?.(msg.data, msg.chunk_index || 0, msg.total_chunks || 0)
@@ -197,11 +206,10 @@ export class TerminalWebSocket {
             ...historyState,
             percent,
           })
-          // Also send as output for terminal to display
           this.onMessage({ type: 'output', data: msg.data })
           return
         }
-        
+
         if (msg.type === 'history_end') {
           historyState.loading = false
           this.onHistoryEnd?.()
@@ -213,53 +221,123 @@ export class TerminalWebSocket {
           return
         }
 
-        // Handle monitoring status updates
         if (msg.type === 'monitoring_status' && msg.monitoring) {
           this.onMonitoringStatus?.(msg.monitoring)
           return
         }
 
-        // Handle task updates
         if (msg.type === 'task_update' && msg.task) {
           this.onTaskUpdate?.(msg.task as unknown as TaskUpdateMessage)
           return
         }
 
-        // Handle strategy triggered events
         if (msg.type === 'strategy_triggered' && msg.strategy) {
           this.onStrategyTriggered?.(msg.strategy as unknown as StrategyTriggeredMessage)
           return
         }
-        
+
         this.onMessage(msg)
       } catch {
-        // Handle raw text messages
         this.onMessage({ type: 'output', data: event.data })
       }
     }
 
     this.ws.onclose = () => {
       this.onDisconnect()
-      // Don't reconnect if:
-      // - We manually disconnected (maxReconnectAttempts = 0)
-      // - Server returned 404 (container not found) - code 1006 with specific error
-      // - Server returned 401 (unauthorized)
-      if (this.maxReconnectAttempts > 0) {
+      if (!this.manualDisconnect && this.maxReconnectAttempts > 0) {
         this.attemptReconnect()
       }
     }
 
     this.ws.onerror = () => {
-      // Check if this might be a 404/401 error by trying to fetch container status
-      this.checkContainerExists().then(exists => {
-        if (!exists) {
-          // Container doesn't exist, stop reconnecting
+      this.checkCurrentTarget().then((targetState) => {
+        if (!targetState.exists) {
           this.maxReconnectAttempts = 0
-          this.onError('Container not found or deleted')
+          this.onError(targetState.reason)
         } else {
           this.onError('WebSocket connection error')
         }
       })
+    }
+  }
+
+  private buildWebSocketUrl(): string {
+    const token = getCookie('cc_token')
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+
+    const path = this.targetType === 'conversation'
+      ? `/api/ws/conversations/${this.targetId}`
+      : `/api/ws/terminal/${this.containerId}`
+
+    const params = new URLSearchParams()
+    if (token) {
+      params.set('token', token)
+    }
+
+    if (this.targetType === 'container' && this.sessionId) {
+      params.set('session', this.sessionId)
+    }
+
+    const queryString = params.toString()
+    const baseUrl = `${protocol}//${window.location.host}${path}`
+
+    return queryString ? `${baseUrl}?${queryString}` : baseUrl
+  }
+
+  private sendStartSessionMessage() {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      return
+    }
+
+    const startMessage: TerminalMessage = { type: 'start' }
+    this.ws.send(JSON.stringify(startMessage))
+    this.startSessionOnConnect = false
+  }
+
+  private async checkCurrentTarget(): Promise<{ exists: boolean; reason: string }> {
+    if (this.targetType === 'conversation') {
+      return this.checkConversationExists()
+    }
+
+    const containerExists = await this.checkContainerExists()
+    return {
+      exists: containerExists,
+      reason: 'Container not found or deleted',
+    }
+  }
+
+  private async checkConversationExists(): Promise<{ exists: boolean; reason: string }> {
+    try {
+      const response = await fetch(`/api/containers/${this.containerId}/conversations`, {
+        credentials: 'include',
+      })
+
+      if (response.status === 400) {
+        return {
+          exists: false,
+          reason: 'Container is not running',
+        }
+      }
+
+      if (!response.ok) {
+        return {
+          exists: false,
+          reason: 'Conversation not found',
+        }
+      }
+
+      const conversations = await response.json() as Array<{ id?: string | number }>
+      const matchedConversation = conversations.some((conversation) => String(conversation.id) === this.targetId)
+
+      return {
+        exists: matchedConversation,
+        reason: matchedConversation ? '' : 'Conversation not found',
+      }
+    } catch {
+      return {
+        exists: true,
+        reason: '',
+      }
     }
   }
 
@@ -276,17 +354,16 @@ export class TerminalWebSocket {
 
   private async attemptReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      // Check if container still exists before reconnecting
-      const exists = await this.checkContainerExists()
-      if (!exists) {
+      const targetState = await this.checkCurrentTarget()
+      if (!targetState.exists) {
         this.maxReconnectAttempts = 0
-        this.onError('Container not found or deleted')
+        this.onError(targetState.reason)
         return
       }
-      
+
       this.reconnectAttempts++
       const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
-      setTimeout(() => this.connect(), delay)
+      setTimeout(() => this.connectInternal(), delay)
     } else {
       this.onError('Max reconnection attempts reached')
     }
@@ -307,13 +384,13 @@ export class TerminalWebSocket {
   }
 
   disconnect(): void {
+    this.manualDisconnect = true
     if (this.ws) {
       this.ws.close()
       this.ws = null
     }
   }
 
-  // Close session permanently (user manually closed the tab)
   closeSession() {
     if (this.ws?.readyState === WebSocket.OPEN && this.sessionId) {
       const msg: TerminalMessage = { type: 'close', session_id: this.sessionId }

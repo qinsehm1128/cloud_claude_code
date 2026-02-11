@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosResponse } from 'axios'
 import { toast } from '@/components/ui/toast'
 import { getApiBaseUrl } from './serverAddressManager'
+import type { ConversationInfo } from '@/types/conversation'
 
 // ==================== Base Axios Instance ====================
 
@@ -206,11 +207,165 @@ export interface ClaudeConfigSelection {
   selected_gemini_envs?: number[]   // Multiple Gemini Env template IDs
 }
 
+const CONVERSATION_REQUEST_TIMEOUT_MS = 10000
+
+interface ConversationErrorResponse {
+  error?: string
+  message?: string
+}
+
+async function parseConversationError(response: Response): Promise<string> {
+  try {
+    const errorResponse = await response.json() as ConversationErrorResponse
+    if (errorResponse.error) {
+      return errorResponse.error
+    }
+
+    if (errorResponse.message) {
+      return errorResponse.message
+    }
+  } catch {
+    // Ignore json parsing errors and fallback to default message.
+  }
+
+  return ''
+}
+
+interface ConversationInfoPayload {
+  id: number | string
+  title?: string | null
+  state?: string | null
+  is_running?: boolean | null
+  total_turns?: number | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+function parseConversationInfo(payload: ConversationInfoPayload): ConversationInfo {
+  const conversationId = typeof payload.id === 'number' ? payload.id : Number(payload.id)
+  if (!Number.isFinite(conversationId)) {
+    throw new Error('Invalid conversation id in response')
+  }
+
+  return {
+    id: conversationId,
+    title: typeof payload.title === 'string' ? payload.title : '',
+    state: typeof payload.state === 'string' ? payload.state : 'idle',
+    is_running: Boolean(payload.is_running),
+    total_turns: typeof payload.total_turns === 'number' ? payload.total_turns : 0,
+    created_at: typeof payload.created_at === 'string' ? payload.created_at : '',
+    updated_at: typeof payload.updated_at === 'string' ? payload.updated_at : '',
+  }
+}
+
+export async function getContainerConversations(containerId: number): Promise<ConversationInfo[]> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), CONVERSATION_REQUEST_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(`${getBaseUrl()}/containers/${containerId}/conversations`, {
+      method: 'GET',
+      credentials: 'include',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      let errorMessage = await parseConversationError(response)
+
+      if (!errorMessage) {
+        if (response.status === 404) {
+          errorMessage = 'Container not found'
+        } else {
+          errorMessage = `Failed to fetch conversations (${response.status})`
+        }
+      }
+
+      throw new Error(errorMessage)
+    }
+
+    const conversations = await response.json() as unknown
+    if (!Array.isArray(conversations)) {
+      throw new Error('Invalid conversation list response')
+    }
+
+    return conversations.map((item) => parseConversationInfo(item as ConversationInfoPayload))
+  } catch (error) {
+    const errorName = typeof error === 'object' && error !== null && 'name' in error
+      ? String((error as { name?: unknown }).name)
+      : ''
+
+    if (errorName === 'AbortError') {
+      throw new Error('Request timed out while fetching conversations')
+    }
+
+    if (error instanceof Error) {
+      throw error
+    }
+
+    throw new Error('Failed to fetch conversations')
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export async function deleteContainerConversation(containerId: number, conversationId: number): Promise<void> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), CONVERSATION_REQUEST_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(`${getBaseUrl()}/containers/${containerId}/conversations/${conversationId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      let errorMessage = await parseConversationError(response)
+
+      if (!errorMessage) {
+        if (response.status === 404) {
+          errorMessage = 'Conversation not found'
+        } else if (response.status === 409 || response.status === 423) {
+          errorMessage = 'Conversation is running and cannot be deleted'
+        } else {
+          errorMessage = `Failed to delete conversation (${response.status})`
+        }
+      }
+
+      throw new Error(errorMessage)
+    }
+  } catch (error) {
+    const errorName = typeof error === 'object' && error !== null && 'name' in error
+      ? String((error as { name?: unknown }).name)
+      : ''
+
+    if (errorName === 'AbortError') {
+      throw new Error('Request timed out while deleting conversation')
+    }
+
+    if (error instanceof Error) {
+      throw error
+    }
+
+    throw new Error('Failed to delete conversation')
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 // Container API
 export const containerApi = {
   list: () => api.get('/containers'),
   get: (id: number) => api.get(`/containers/${id}`),
   getStatus: (id: number) => api.get(`/containers/${id}/status`),
+  getContainerConversations,
+  deleteConversation: deleteContainerConversation,
   getLogs: (id: number, limit?: number) =>
     api.get(`/containers/${id}/logs`, { params: { limit: limit || 100 } }),
   getApiConfig: (id: number) => api.get<{ api_url: string; api_token: string }>(`/containers/${id}/api-config`),

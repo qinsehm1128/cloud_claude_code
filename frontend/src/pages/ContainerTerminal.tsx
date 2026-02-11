@@ -14,6 +14,7 @@ import {
   ListTodo,
   Settings,
   Download,
+  List,
 } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -25,6 +26,7 @@ import { TerminalWebSocket, HistoryLoadProgress } from '@/services/websocket'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { getScopedStorageKey } from '@/utils/windowId'
 import { containerApi } from '@/services/api'
+import { SessionSelector } from '@/components/terminal/SessionSelector'
 import { monitoringApi } from '@/services/monitoringApi'
 import { taskApi, Task as ApiTask } from '@/services/taskApi'
 import FileBrowser from '@/components/FileManager/FileBrowser'
@@ -88,6 +90,8 @@ export default function ContainerTerminal() {
   const [filePanelOpen, setFilePanelOpen] = useState(false)
   const [taskPanelOpen, setTaskPanelOpen] = useState(false)
   const [activeMobilePanel, setActiveMobilePanel] = useState<'file-browser' | 'terminal' | 'tasks'>('terminal')
+  const [sessionSelectionMode, setSessionSelectionMode] = useState(true)
+  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null)
   const [configDialogOpen, setConfigDialogOpen] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus>({
@@ -202,11 +206,13 @@ export default function ContainerTerminal() {
     if (!container || container.status !== 'running' || container.init_status !== 'ready') return
     if (initializedRef.current) return
     if (!containerId) return
-    
+    // Do not auto-initialize tabs while in session selection mode
+    if (sessionSelectionMode) return
+
     initializedRef.current = true
-    
+
     const savedSessions = loadSavedSessions(containerId)
-    
+
     if (savedSessions.length > 0) {
       const restoredTabs: TerminalTab[] = savedSessions.map((s, index) => {
         tabCounter = Math.max(tabCounter, index + 1)
@@ -227,7 +233,7 @@ export default function ContainerTerminal() {
     } else {
       addNewTab()
     }
-  }, [container, containerId])
+  }, [container, containerId, sessionSelectionMode])
 
   const addNewTab = useCallback((sessionId?: string) => {
     tabCounter++
@@ -375,7 +381,13 @@ export default function ContainerTerminal() {
         tab.sessionId || undefined
       )
 
-      ws.connect()
+      // Connect: use connectToConversation when a conversation is selected,
+      // otherwise use the default container-level connect
+      if (selectedConversationId !== null) {
+        ws.connectToConversation(selectedConversationId)
+      } else {
+        ws.connect()
+      }
 
       term.onData((data) => {
         ws.send(data)
@@ -385,13 +397,13 @@ export default function ContainerTerminal() {
         ws.resize(cols, rows)
       })
 
-      setTabs(prev => prev.map(t => 
+      setTabs(prev => prev.map(t =>
         t.key === currentTabKey ? { ...t, terminal: term, ws, fitAddon } : t
       ))
     }
 
     initTerminal()
-  }, [activeKey, container, containerId, isMobile, tabs])
+  }, [activeKey, container, containerId, isMobile, tabs, selectedConversationId])
 
   // Refit terminal when visible panel changes
   useEffect(() => {
@@ -578,6 +590,33 @@ export default function ContainerTerminal() {
     }
   }, [containerId])
 
+  // Session selection handlers
+  const handleSelectSession = useCallback((conversationId: number) => {
+    setSelectedConversationId(conversationId)
+    setSessionSelectionMode(false)
+    // Terminal will initialize via the useEffect that watches sessionSelectionMode
+    // The WebSocket connection uses connectToConversation for the selected session
+  }, [])
+
+  const handleCreateSession = useCallback(() => {
+    setSelectedConversationId(null)
+    setSessionSelectionMode(false)
+    // Terminal will initialize with a new session (no conversationId)
+  }, [])
+
+  const handleBackToList = useCallback(() => {
+    // Disconnect all WebSocket connections and dispose terminals
+    tabs.forEach(tab => {
+      tab.ws?.disconnect()
+      tab.terminal?.dispose()
+    })
+    setTabs([])
+    setActiveKey('')
+    setSelectedConversationId(null)
+    initializedRef.current = false
+    setSessionSelectionMode(true)
+  }, [tabs])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -596,6 +635,33 @@ export default function ContainerTerminal() {
         <div className="flex items-center gap-2 p-4 text-destructive bg-destructive/10 rounded-md">
           <AlertCircle className="h-5 w-5" />
           {error}
+        </div>
+      </div>
+    )
+  }
+
+  if (sessionSelectionMode) {
+    return (
+      <div className="flex h-[calc(100vh-1px)] flex-col">
+        <div className="flex items-center justify-between px-4 py-2 border-b bg-card flex-shrink-0">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Container: <span className="text-foreground font-medium">{container?.name}</span>
+            </span>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto p-4 sm:p-6">
+          <div className="max-w-3xl mx-auto">
+            <SessionSelector
+              containerId={containerId ?? null}
+              onSelect={handleSelectSession}
+              onCreateNew={handleCreateSession}
+            />
+          </div>
         </div>
       </div>
     )
@@ -821,6 +887,15 @@ export default function ContainerTerminal() {
             variant="outline"
             size="sm"
             className="h-8"
+            onClick={handleBackToList}
+          >
+            <List className="h-4 w-4 mr-1" />
+            Sessions
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
             onClick={() => navigate(`/headless/${containerId}`)}
           >
             Switch to Headless
@@ -968,6 +1043,14 @@ export default function ContainerTerminal() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBackToList}
+            >
+              <List className="h-4 w-4 mr-2" />
+              Sessions
+            </Button>
             <Button
               variant="outline"
               size="sm"
