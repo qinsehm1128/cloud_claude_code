@@ -275,7 +275,7 @@ describe('API Client - Container Conversations', () => {
     const result = await getContainerConversations(5)
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8088/api/containers/5/conversations',
+      'http://localhost:8088/api/containers/5/headless/conversations',
       expect.objectContaining({
         method: 'GET',
         credentials: 'include',
@@ -351,7 +351,7 @@ describe('API Client - Delete Container Conversation', () => {
     await expect(deleteContainerConversation(5, 101)).resolves.toBeUndefined()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8088/api/containers/5/conversations/101',
+      'http://localhost:8088/api/containers/5/headless/conversations/101',
       expect.objectContaining({
         method: 'DELETE',
         credentials: 'include',

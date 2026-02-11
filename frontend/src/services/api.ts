@@ -263,7 +263,7 @@ export async function getContainerConversations(containerId: number): Promise<Co
   const timeoutId = setTimeout(() => controller.abort(), CONVERSATION_REQUEST_TIMEOUT_MS)
 
   try {
-    const response = await fetch(`${getBaseUrl()}/containers/${containerId}/conversations`, {
+    const response = await fetch(`${getBaseUrl()}/containers/${containerId}/headless/conversations`, {
       method: 'GET',
       credentials: 'include',
       signal: controller.signal,
@@ -316,7 +316,7 @@ export async function deleteContainerConversation(containerId: number, conversat
   const timeoutId = setTimeout(() => controller.abort(), CONVERSATION_REQUEST_TIMEOUT_MS)
 
   try {
-    const response = await fetch(`${getBaseUrl()}/containers/${containerId}/conversations/${conversationId}`, {
+    const response = await fetch(`${getBaseUrl()}/containers/${containerId}/headless/conversations/${conversationId}`, {
       method: 'DELETE',
       credentials: 'include',
       signal: controller.signal,
