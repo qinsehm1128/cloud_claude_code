@@ -610,7 +610,12 @@ export default function ContainerTerminal() {
     setActiveKey('')
     setSelectedSessionId(null)
     initializedRef.current = false
-    setSessionSelectionMode(true)
+    tabCounter = 0
+    // Brief delay to allow server to process WebSocket disconnections
+    // so that session list shows accurate client_count
+    setTimeout(() => {
+      setSessionSelectionMode(true)
+    }, 300)
   }, [tabs])
 
   const activeTab = tabs.find(t => t.key === activeKey)
