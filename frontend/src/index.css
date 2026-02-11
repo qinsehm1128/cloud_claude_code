@@ -117,3 +117,16 @@
   background: rgba(255, 255, 255, 0.2);
   border-radius: 4px;
 }
+
+/* Mobile: reposition xterm hidden textarea so mobile browsers can trigger virtual keyboard */
+@media (max-width: 768px) {
+  .xterm .xterm-helper-textarea {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
+    opacity: 0.01 !important;
+    z-index: -1 !important;
+  }
+}

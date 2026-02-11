@@ -752,9 +752,16 @@ export default function ContainerTerminal() {
     </div>
   )
 
+  const handleTerminalTap = useCallback(() => {
+    if (isMobile && activeTab?.terminal) {
+      activeTab.terminal.focus()
+    }
+  }, [isMobile, activeTab])
+
   const terminalViewport = (
     <div
       className="flex-1 relative bg-[#0a0a0a] min-h-0"
+      onClick={handleTerminalTap}
       onDragEnter={(e) => {
         e.preventDefault()
         e.stopPropagation()
