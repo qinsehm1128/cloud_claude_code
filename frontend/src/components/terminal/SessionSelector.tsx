@@ -1,25 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Circle, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { AlertCircle, Circle, Loader2, Plus, RefreshCw } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { toast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
-import { containerApi, getContainerConversations } from '@/services/api'
-import type { ConversationInfo } from '@/types/conversation'
+import { getTerminalSessions } from '@/services/api'
+import type { TerminalSessionInfo } from '@/types/conversation'
 
 export interface SessionSelectorProps {
   containerId: number | string | null
-  onSelect: (conversationId: number) => void
+  onSelect: (sessionId: string) => void
   onCreateNew: () => void
   className?: string
 }
@@ -37,17 +27,23 @@ function formatDateTime(value: string): string {
   return date.toLocaleString()
 }
 
+function getDisplaySessionId(sessionId: string): string {
+  if (sessionId.length <= 16) {
+    return sessionId
+  }
+
+  return `${sessionId.slice(0, 8)}...${sessionId.slice(-6)}`
+}
+
 export function SessionSelector({
   containerId,
   onSelect,
   onCreateNew,
   className,
 }: SessionSelectorProps) {
-  const [sessions, setSessions] = useState<ConversationInfo[]>([])
+  const [sessions, setSessions] = useState<TerminalSessionInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pendingDeleteSession, setPendingDeleteSession] = useState<ConversationInfo | null>(null)
-  const [deletingSessionId, setDeletingSessionId] = useState<number | null>(null)
 
   const normalizedContainerId = useMemo(() => {
     if (containerId === null || containerId === undefined || containerId === '') {
@@ -69,9 +65,9 @@ export function SessionSelector({
     setError(null)
 
     try {
-      const response = await getContainerConversations(normalizedContainerId)
+      const response = await getTerminalSessions(normalizedContainerId)
       const orderedSessions = [...response].sort((first, second) => {
-        return new Date(second.updated_at).getTime() - new Date(first.updated_at).getTime()
+        return new Date(second.last_active).getTime() - new Date(first.last_active).getTime()
       })
       setSessions(orderedSessions)
     } catch (loadError) {
@@ -91,49 +87,6 @@ export function SessionSelector({
     onCreateNew()
   }, [onCreateNew])
 
-  const handleRequestDelete = useCallback((session: ConversationInfo, event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-
-    if (session.is_running) {
-      toast.error('Cannot Delete Session', 'Running sessions cannot be deleted')
-      return
-    }
-
-    setPendingDeleteSession(session)
-  }, [])
-
-  const handleDelete = useCallback(async () => {
-    if (normalizedContainerId === null || pendingDeleteSession === null) {
-      return
-    }
-
-    if (pendingDeleteSession.is_running) {
-      toast.error('Cannot Delete Session', 'Running sessions cannot be deleted')
-      setPendingDeleteSession(null)
-      return
-    }
-
-    setDeletingSessionId(pendingDeleteSession.id)
-
-    try {
-      await containerApi.deleteConversation(normalizedContainerId, pendingDeleteSession.id)
-      toast.success('Success', 'Session deleted successfully')
-      setPendingDeleteSession(null)
-      await loadSessions()
-    } catch (deleteError) {
-      const message = deleteError instanceof Error ? deleteError.message : 'Failed to delete session'
-      toast.error('Delete Failed', message)
-    } finally {
-      setDeletingSessionId(null)
-    }
-  }, [loadSessions, normalizedContainerId, pendingDeleteSession])
-
-  const handleDeleteDialogOpenChange = useCallback((open: boolean) => {
-    if (!open && deletingSessionId === null) {
-      setPendingDeleteSession(null)
-    }
-  }, [deletingSessionId])
-
   return (
     <Card className={cn('w-full', className)}>
       <CardHeader className="space-y-3">
@@ -141,7 +94,7 @@ export function SessionSelector({
           <div className="space-y-1">
             <CardTitle className="text-base sm:text-lg">Session Selector</CardTitle>
             <CardDescription className="text-xs sm:text-sm">
-              Select an active session or create a new one.
+              Select an active terminal session or create a new one.
             </CardDescription>
           </div>
 
@@ -199,7 +152,7 @@ export function SessionSelector({
 
         {normalizedContainerId !== null && !loading && !error && sessions.length === 0 && (
           <div className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-            No active sessions.
+            No active terminal sessions.
           </div>
         )}
 
@@ -220,93 +173,52 @@ export function SessionSelector({
                 className="group rounded-lg border px-3 py-3 text-left transition hover:border-primary/60 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium">
-                    {session.title?.trim() || `Session ${session.id}`}
+                  <span className="truncate text-sm font-medium" title={session.id}>
+                    Session {getDisplaySessionId(session.id)}
                   </span>
                   <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-[11px]">
+                      {session.client_count} connected
+                    </Badge>
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Circle
                         data-testid={`session-status-${session.id}`}
                         className={cn(
                           'h-3.5 w-3.5 fill-current',
-                          session.is_running ? 'text-emerald-500' : 'text-gray-400'
+                          session.running ? 'text-emerald-500' : 'text-gray-400'
                         )}
                       />
-                      {session.is_running ? 'Running' : 'Idle'}
+                      {session.running ? 'Running' : 'Stopped'}
                     </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      data-testid={`delete-session-${session.id}`}
-                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                      title={session.is_running ? 'Running sessions cannot be deleted' : 'Delete session'}
-                      aria-label={`Delete session ${session.id}`}
-                      onClick={(event) => handleRequestDelete(session, event)}
-                      disabled={session.is_running || deletingSessionId === session.id}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
                   </div>
                 </div>
 
                 <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground sm:text-sm">
-                  <div>
-                    <dt className="font-medium text-foreground/80">ID</dt>
-                    <dd>{session.id}</dd>
+                  <div className="col-span-2">
+                    <dt className="font-medium text-foreground/80">Session ID</dt>
+                    <dd className="truncate" title={session.id}>{session.id}</dd>
                   </div>
                   <div>
-                    <dt className="font-medium text-foreground/80">Turns</dt>
-                    <dd>{session.total_turns}</dd>
+                    <dt className="font-medium text-foreground/80">Size</dt>
+                    <dd>{session.width} x {session.height}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-foreground/80">Container</dt>
+                    <dd className="truncate" title={session.container_id}>{session.container_id}</dd>
                   </div>
                   <div className="col-span-2">
                     <dt className="font-medium text-foreground/80">Created</dt>
                     <dd>{formatDateTime(session.created_at)}</dd>
                   </div>
                   <div className="col-span-2">
-                    <dt className="font-medium text-foreground/80">State</dt>
-                    <dd>{session.state || '--'}</dd>
+                    <dt className="font-medium text-foreground/80">Last Active</dt>
+                    <dd>{formatDateTime(session.last_active)}</dd>
                   </div>
                 </dl>
               </div>
             ))}
           </div>
         )}
-
-        <AlertDialog open={pendingDeleteSession !== null} onOpenChange={handleDeleteDialogOpenChange}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete Session</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to delete
-                {' '}
-                "{pendingDeleteSession?.title?.trim() || `Session ${pendingDeleteSession?.id ?? ''}`}"
-                ?
-                This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={deletingSessionId !== null}>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={(event) => {
-                  event.preventDefault()
-                  void handleDelete()
-                }}
-                disabled={deletingSessionId !== null}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                {deletingSessionId !== null ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  'Delete'
-                )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </CardContent>
     </Card>
   )

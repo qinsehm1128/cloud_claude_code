@@ -1,7 +1,7 @@
 import axios, { AxiosError, AxiosResponse } from 'axios'
 import { toast } from '@/components/ui/toast'
 import { getApiBaseUrl } from './serverAddressManager'
-import type { ConversationInfo } from '@/types/conversation'
+import type { ConversationInfo, TerminalSessionInfo } from '@/types/conversation'
 
 // ==================== Base Axios Instance ====================
 
@@ -309,6 +309,11 @@ export async function getContainerConversations(containerId: number): Promise<Co
   } finally {
     clearTimeout(timeoutId)
   }
+}
+
+export async function getTerminalSessions(containerId: number): Promise<TerminalSessionInfo[]> {
+  const response = await api.get<TerminalSessionInfo[]>(`/terminals/${containerId}/sessions`)
+  return response.data
 }
 
 export async function deleteContainerConversation(containerId: number, conversationId: number): Promise<void> {

@@ -8,4 +8,15 @@ export interface ConversationInfo {
   updated_at: string
 }
 
+export interface TerminalSessionInfo {
+  id: string
+  container_id: string
+  width: number
+  height: number
+  client_count: number
+  created_at: string
+  last_active: string
+  running: boolean
+}
+
 

@@ -1,26 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { SessionSelector } from '@/components/terminal/SessionSelector'
-import type { ConversationInfo } from '@/types/conversation'
+import type { TerminalSessionInfo } from '@/types/conversation'
 
-const getContainerConversationsMock = vi.hoisted(() => vi.fn())
-const deleteConversationMock = vi.hoisted(() => vi.fn())
-const toastSuccessMock = vi.hoisted(() => vi.fn())
-const toastErrorMock = vi.hoisted(() => vi.fn())
+const getTerminalSessionsMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/services/api', () => ({
-  getContainerConversations: getContainerConversationsMock,
-  containerApi: {
-    deleteConversation: deleteConversationMock,
-  },
+  getTerminalSessions: getTerminalSessionsMock,
 }))
 
-vi.mock('@/components/ui/toast', () => ({
-  toast: {
-    success: toastSuccessMock,
-    error: toastErrorMock,
-  },
-}))
+function createSession(overrides: Partial<TerminalSessionInfo> = {}): TerminalSessionInfo {
+  return {
+    id: 'exec-abc123',
+    container_id: 'container-1',
+    width: 120,
+    height: 40,
+    client_count: 1,
+    created_at: '2026-02-11T08:00:00Z',
+    last_active: '2026-02-11T08:30:00Z',
+    running: true,
+    ...overrides,
+  }
+}
 
 describe('SessionSelector', () => {
   const onSelect = vi.fn()
@@ -30,71 +31,10 @@ describe('SessionSelector', () => {
     vi.clearAllMocks()
   })
 
-  it('renders session cards and triggers callbacks', async () => {
-    const sessions: ConversationInfo[] = [
-      {
-        id: 11,
-        title: 'Session A',
-        state: 'running',
-        is_running: true,
-        total_turns: 8,
-        created_at: '2026-02-11T08:00:00Z',
-        updated_at: '2026-02-11T08:30:00Z',
-      },
-      {
-        id: 22,
-        title: 'Session B',
-        state: 'idle',
-        is_running: false,
-        total_turns: 2,
-        created_at: '2026-02-10T08:00:00Z',
-        updated_at: '2026-02-10T08:30:00Z',
-      },
-    ]
-
-    getContainerConversationsMock.mockResolvedValue(sessions)
-
-    render(
-      <SessionSelector
-        containerId={3}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    await waitFor(() => {
-      expect(getContainerConversationsMock).toHaveBeenCalledWith(3)
-      expect(screen.getByText('Session A')).toBeInTheDocument()
-      expect(screen.getByText('Session B')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: /new session/i }))
-    expect(onCreateNew).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByText('Session A'))
-    expect(onSelect).toHaveBeenCalledWith(11)
-  })
-
-  it('shows running and idle indicators with expected colors', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 101,
-        title: 'Running Session',
-        state: 'running',
-        is_running: true,
-        total_turns: 5,
-        created_at: '2026-02-11T07:00:00Z',
-        updated_at: '2026-02-11T07:20:00Z',
-      },
-      {
-        id: 102,
-        title: 'Idle Session',
-        state: 'idle',
-        is_running: false,
-        total_turns: 1,
-        created_at: '2026-02-11T06:00:00Z',
-        updated_at: '2026-02-11T06:10:00Z',
-      },
+  it('loads terminal sessions and supports selecting a session', async () => {
+    getTerminalSessionsMock.mockResolvedValue([
+      createSession({ id: 'exec-running', client_count: 2, running: true }),
+      createSession({ id: 'exec-idle', client_count: 1, running: false }),
     ])
 
     render(
@@ -106,16 +46,108 @@ describe('SessionSelector', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTestId('session-status-101')).toBeInTheDocument()
-      expect(screen.getByTestId('session-status-102')).toBeInTheDocument()
+      expect(getTerminalSessionsMock).toHaveBeenCalledWith(3)
+      expect(screen.getByText('2 connected')).toBeInTheDocument()
+      expect(screen.getByText('1 connected')).toBeInTheDocument()
     })
 
-    expect(screen.getByTestId('session-status-101')).toHaveClass('text-emerald-500')
-    expect(screen.getByTestId('session-status-102')).toHaveClass('text-gray-400')
+    const runningSessionItem = screen
+      .getByTestId('session-status-exec-running')
+      .closest('[role="button"]')
+
+    expect(runningSessionItem).not.toBeNull()
+    fireEvent.click(runningSessionItem!)
+
+    expect(onSelect).toHaveBeenCalledWith('exec-running')
   })
 
-  it('renders empty state when no sessions are returned', async () => {
-    getContainerConversationsMock.mockResolvedValue([])
+  it('supports keyboard selection with Enter and Space', async () => {
+    getTerminalSessionsMock.mockResolvedValue([
+      createSession({ id: 'exec-keyboard' }),
+    ])
+
+    render(
+      <SessionSelector
+        containerId={9}
+        onSelect={onSelect}
+        onCreateNew={onCreateNew}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-status-exec-keyboard')).toBeInTheDocument()
+    })
+
+    const sessionItem = screen
+      .getByTestId('session-status-exec-keyboard')
+      .closest('[role="button"]')
+
+    expect(sessionItem).not.toBeNull()
+
+    fireEvent.keyDown(sessionItem!, { key: 'Enter' })
+    fireEvent.keyDown(sessionItem!, { key: ' ' })
+
+    expect(onSelect).toHaveBeenNthCalledWith(1, 'exec-keyboard')
+    expect(onSelect).toHaveBeenNthCalledWith(2, 'exec-keyboard')
+  })
+
+  it('shows running and stopped status indicators', async () => {
+    getTerminalSessionsMock.mockResolvedValue([
+      createSession({ id: 'exec-online', running: true }),
+      createSession({ id: 'exec-offline', running: false }),
+    ])
+
+    render(
+      <SessionSelector
+        containerId={6}
+        onSelect={onSelect}
+        onCreateNew={onCreateNew}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-status-exec-online')).toBeInTheDocument()
+      expect(screen.getByTestId('session-status-exec-offline')).toBeInTheDocument()
+    })
+
+    expect(screen.getByTestId('session-status-exec-online')).toHaveClass('text-emerald-500')
+    expect(screen.getByTestId('session-status-exec-offline')).toHaveClass('text-gray-400')
+    expect(screen.getByText('Running')).toBeInTheDocument()
+    expect(screen.getByText('Stopped')).toBeInTheDocument()
+  })
+
+  it('renders metadata fields for each terminal session', async () => {
+    getTerminalSessionsMock.mockResolvedValue([
+      createSession({
+        id: 'exec-meta',
+        container_id: 'docker-container',
+        width: 132,
+        height: 36,
+      }),
+    ])
+
+    render(
+      <SessionSelector
+        containerId={1}
+        onSelect={onSelect}
+        onCreateNew={onCreateNew}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Session ID')).toBeInTheDocument()
+      expect(screen.getByText('Size')).toBeInTheDocument()
+      expect(screen.getByText('Container')).toBeInTheDocument()
+      expect(screen.getByText('Created')).toBeInTheDocument()
+      expect(screen.getByText('Last Active')).toBeInTheDocument()
+      expect(screen.getByText('132 x 36')).toBeInTheDocument()
+      expect(screen.getByText('docker-container')).toBeInTheDocument()
+      expect(screen.getByText('exec-meta')).toBeInTheDocument()
+    })
+  })
+
+  it('renders empty state when no active sessions exist', async () => {
+    getTerminalSessionsMock.mockResolvedValue([])
 
     render(
       <SessionSelector
@@ -126,23 +158,15 @@ describe('SessionSelector', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('No active sessions.')).toBeInTheDocument()
+      expect(screen.getByText('No active terminal sessions.')).toBeInTheDocument()
     })
   })
 
-  it('renders error state and supports retry', async () => {
-    getContainerConversationsMock
-      .mockRejectedValueOnce(new Error('Container not found'))
+  it('renders error state and retries loading sessions', async () => {
+    getTerminalSessionsMock
+      .mockRejectedValueOnce(new Error('Failed to load'))
       .mockResolvedValueOnce([
-        {
-          id: 9,
-          title: 'Recovered Session',
-          state: 'idle',
-          is_running: false,
-          total_turns: 0,
-          created_at: '2026-02-11T05:00:00Z',
-          updated_at: '2026-02-11T05:00:00Z',
-        },
+        createSession({ id: 'exec-recovered' }),
       ])
 
     render(
@@ -154,31 +178,77 @@ describe('SessionSelector', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Container not found')).toBeInTheDocument()
+      expect(screen.getByText('Failed to load')).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole('button', { name: /retry/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Recovered Session')).toBeInTheDocument()
-      expect(getContainerConversationsMock).toHaveBeenCalledTimes(2)
+      expect(screen.getByText('exec-recovered')).toBeInTheDocument()
+      expect(getTerminalSessionsMock).toHaveBeenCalledTimes(2)
     })
   })
 
-  it('supports responsive grid layout classes', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 1,
-        title: 'Session Grid Test',
-        state: 'idle',
-        is_running: false,
-        total_turns: 3,
-        created_at: '2026-02-11T08:00:00Z',
-        updated_at: '2026-02-11T08:00:00Z',
-      },
+  it('refreshes sessions when refresh button is clicked', async () => {
+    getTerminalSessionsMock
+      .mockResolvedValueOnce([
+        createSession({ id: 'exec-first', last_active: '2026-02-11T08:00:00Z' }),
+      ])
+      .mockResolvedValueOnce([
+        createSession({ id: 'exec-first', last_active: '2026-02-11T08:00:00Z' }),
+        createSession({ id: 'exec-second', last_active: '2026-02-11T09:00:00Z' }),
+      ])
+
+    render(
+      <SessionSelector
+        containerId={5}
+        onSelect={onSelect}
+        onCreateNew={onCreateNew}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('exec-first')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('exec-second')).toBeInTheDocument()
+      expect(getTerminalSessionsMock).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('sorts sessions by last_active descending', async () => {
+    getTerminalSessionsMock.mockResolvedValue([
+      createSession({ id: 'older-session', last_active: '2026-02-10T08:00:00Z' }),
+      createSession({ id: 'newer-session', last_active: '2026-02-11T08:00:00Z' }),
     ])
 
-    const { container } = render(
+    render(
+      <SessionSelector
+        containerId={2}
+        onSelect={onSelect}
+        onCreateNew={onCreateNew}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('older-session')).toBeInTheDocument()
+      expect(screen.getByText('newer-session')).toBeInTheDocument()
+    })
+
+    const sessionList = screen.getByTestId('session-list')
+    const sessionItems = sessionList.querySelectorAll('[role="button"]')
+
+    expect(sessionItems[0]).toHaveTextContent('newer-session')
+    expect(sessionItems[1]).toHaveTextContent('older-session')
+  })
+
+  it('triggers create callback when New Session button is clicked', async () => {
+    getTerminalSessionsMock.mockResolvedValue([])
+
+    render(
       <SessionSelector
         containerId={4}
         onSelect={onSelect}
@@ -187,350 +257,14 @@ describe('SessionSelector', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Session Grid Test')).toBeInTheDocument()
+      expect(getTerminalSessionsMock).toHaveBeenCalledWith(4)
     })
 
-    const grid = container.querySelector('[data-testid="session-list"]')
-    expect(grid).toHaveClass('grid-cols-1')
-    expect(grid).toHaveClass('md:grid-cols-2')
+    fireEvent.click(screen.getByRole('button', { name: /new session/i }))
+    expect(onCreateNew).toHaveBeenCalledTimes(1)
   })
 
-  it('disables create button when container id is missing', () => {
-    render(
-      <SessionSelector
-        containerId={null}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    expect(screen.getByRole('button', { name: /new session/i })).toBeDisabled()
-    expect(screen.getByText('Select a container first.')).toBeInTheDocument()
-  })
-
-  it('disables delete button for running session', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 301,
-        title: 'Running Session',
-        state: 'running',
-        is_running: true,
-        total_turns: 7,
-        created_at: '2026-02-11T07:00:00Z',
-        updated_at: '2026-02-11T07:10:00Z',
-      },
-    ])
-
-    render(
-      <SessionSelector
-        containerId={9}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    const deleteButton = await screen.findByTestId('delete-session-301')
-    expect(deleteButton).toBeDisabled()
-    expect(deleteConversationMock).not.toHaveBeenCalled()
-  })
-
-  it('opens confirm dialog and deletes session successfully', async () => {
-    getContainerConversationsMock
-      .mockResolvedValueOnce([
-        {
-          id: 401,
-          title: 'Delete Me',
-          state: 'idle',
-          is_running: false,
-          total_turns: 4,
-          created_at: '2026-02-11T07:00:00Z',
-          updated_at: '2026-02-11T07:10:00Z',
-        },
-      ])
-      .mockResolvedValueOnce([])
-
-    deleteConversationMock.mockResolvedValue(undefined)
-
-    render(
-      <SessionSelector
-        containerId={5}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    const deleteButton = await screen.findByTestId('delete-session-401')
-    fireEvent.click(deleteButton)
-
-    expect(screen.getByRole('heading', { name: /delete session/i })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^delete$/i }))
-
-    await waitFor(() => {
-      expect(deleteConversationMock).toHaveBeenCalledWith(5, 401)
-      expect(getContainerConversationsMock).toHaveBeenCalledTimes(2)
-      expect(toastSuccessMock).toHaveBeenCalledWith('Success', 'Session deleted successfully')
-    })
-  })
-
-  it('shows error toast when deleting session fails', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 501,
-        title: 'Locked Session',
-        state: 'idle',
-        is_running: false,
-        total_turns: 2,
-        created_at: '2026-02-11T07:00:00Z',
-        updated_at: '2026-02-11T07:10:00Z',
-      },
-    ])
-
-    deleteConversationMock.mockRejectedValue(new Error('Conversation is running and cannot be deleted'))
-
-    render(
-      <SessionSelector
-        containerId={6}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    const deleteButton = await screen.findByTestId('delete-session-501')
-    fireEvent.click(deleteButton)
-    fireEvent.click(screen.getByRole('button', { name: /^delete$/i }))
-
-    await waitFor(() => {
-      expect(deleteConversationMock).toHaveBeenCalledWith(6, 501)
-      expect(toastErrorMock).toHaveBeenCalledWith(
-        'Delete Failed',
-        'Conversation is running and cannot be deleted'
-      )
-    })
-  })
-
-  it('normalizes string containerId to number', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 1,
-        title: 'String ID Test',
-        state: 'idle',
-        is_running: false,
-        total_turns: 0,
-        created_at: '2026-02-11T08:00:00Z',
-        updated_at: '2026-02-11T08:00:00Z',
-      },
-    ])
-
-    render(
-      <SessionSelector
-        containerId="42"
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    await waitFor(() => {
-      expect(getContainerConversationsMock).toHaveBeenCalledWith(42)
-      expect(screen.getByText('String ID Test')).toBeInTheDocument()
-    })
-  })
-
-  it('treats non-numeric string containerId as null', () => {
-    render(
-      <SessionSelector
-        containerId="abc"
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    expect(screen.getByText('Select a container first.')).toBeInTheDocument()
-    expect(getContainerConversationsMock).not.toHaveBeenCalled()
-  })
-
-  it('selects session via keyboard Enter key', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 77,
-        title: 'Keyboard Session',
-        state: 'idle',
-        is_running: false,
-        total_turns: 1,
-        created_at: '2026-02-11T08:00:00Z',
-        updated_at: '2026-02-11T08:00:00Z',
-      },
-    ])
-
-    render(
-      <SessionSelector
-        containerId={1}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Keyboard Session')).toBeInTheDocument()
-    })
-
-    const sessionItem = screen.getByText('Keyboard Session').closest('[role="button"]')!
-    fireEvent.keyDown(sessionItem, { key: 'Enter' })
-
-    expect(onSelect).toHaveBeenCalledWith(77)
-  })
-
-  it('selects session via keyboard Space key', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 88,
-        title: 'Space Key Session',
-        state: 'idle',
-        is_running: false,
-        total_turns: 0,
-        created_at: '2026-02-11T08:00:00Z',
-        updated_at: '2026-02-11T08:00:00Z',
-      },
-    ])
-
-    render(
-      <SessionSelector
-        containerId={1}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Space Key Session')).toBeInTheDocument()
-    })
-
-    const sessionItem = screen.getByText('Space Key Session').closest('[role="button"]')!
-    fireEvent.keyDown(sessionItem, { key: ' ' })
-
-    expect(onSelect).toHaveBeenCalledWith(88)
-  })
-
-  it('refreshes session list when refresh button is clicked', async () => {
-    getContainerConversationsMock
-      .mockResolvedValueOnce([
-        {
-          id: 1,
-          title: 'Initial Session',
-          state: 'idle',
-          is_running: false,
-          total_turns: 0,
-          created_at: '2026-02-11T08:00:00Z',
-          updated_at: '2026-02-11T08:00:00Z',
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          id: 1,
-          title: 'Initial Session',
-          state: 'idle',
-          is_running: false,
-          total_turns: 0,
-          created_at: '2026-02-11T08:00:00Z',
-          updated_at: '2026-02-11T08:00:00Z',
-        },
-        {
-          id: 2,
-          title: 'New Session',
-          state: 'running',
-          is_running: true,
-          total_turns: 3,
-          created_at: '2026-02-11T09:00:00Z',
-          updated_at: '2026-02-11T09:30:00Z',
-        },
-      ])
-
-    render(
-      <SessionSelector
-        containerId={5}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Initial Session')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: /refresh/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText('New Session')).toBeInTheDocument()
-      expect(getContainerConversationsMock).toHaveBeenCalledTimes(2)
-    })
-  })
-
-  it('sorts sessions by updated_at descending', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 1,
-        title: 'Older Session',
-        state: 'idle',
-        is_running: false,
-        total_turns: 0,
-        created_at: '2026-02-10T08:00:00Z',
-        updated_at: '2026-02-10T08:00:00Z',
-      },
-      {
-        id: 2,
-        title: 'Newer Session',
-        state: 'idle',
-        is_running: false,
-        total_turns: 0,
-        created_at: '2026-02-11T08:00:00Z',
-        updated_at: '2026-02-11T08:00:00Z',
-      },
-    ])
-
-    render(
-      <SessionSelector
-        containerId={1}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Newer Session')).toBeInTheDocument()
-    })
-
-    const sessionList = screen.getByTestId('session-list')
-    const sessionItems = sessionList.querySelectorAll('[role="button"]')
-    expect(sessionItems[0]).toHaveTextContent('Newer Session')
-    expect(sessionItems[1]).toHaveTextContent('Older Session')
-  })
-
-  it('shows session fallback title when title is empty', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 55,
-        title: '',
-        state: 'idle',
-        is_running: false,
-        total_turns: 0,
-        created_at: '2026-02-11T08:00:00Z',
-        updated_at: '2026-02-11T08:00:00Z',
-      },
-    ])
-
-    render(
-      <SessionSelector
-        containerId={1}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Session 55')).toBeInTheDocument()
-    })
-  })
-
-  it('disables refresh button when container id is null', () => {
+  it('disables actions and skips loading when container id is invalid', () => {
     render(
       <SessionSelector
         containerId={null}
@@ -540,34 +274,8 @@ describe('SessionSelector', () => {
     )
 
     expect(screen.getByRole('button', { name: /refresh/i })).toBeDisabled()
-  })
-
-  it('displays session metadata fields (ID, Turns, Created, State)', async () => {
-    getContainerConversationsMock.mockResolvedValue([
-      {
-        id: 42,
-        title: 'Metadata Test',
-        state: 'processing',
-        is_running: false,
-        total_turns: 15,
-        created_at: '2026-02-11T08:00:00Z',
-        updated_at: '2026-02-11T08:00:00Z',
-      },
-    ])
-
-    render(
-      <SessionSelector
-        containerId={1}
-        onSelect={onSelect}
-        onCreateNew={onCreateNew}
-      />
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('42')).toBeInTheDocument()
-      expect(screen.getByText('15')).toBeInTheDocument()
-      expect(screen.getByText('processing')).toBeInTheDocument()
-    })
+    expect(screen.getByRole('button', { name: /new session/i })).toBeDisabled()
+    expect(screen.getByText('Select a container first.')).toBeInTheDocument()
+    expect(getTerminalSessionsMock).not.toHaveBeenCalled()
   })
 })
-

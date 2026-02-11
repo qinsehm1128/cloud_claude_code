@@ -91,7 +91,7 @@ export default function ContainerTerminal() {
   const [taskPanelOpen, setTaskPanelOpen] = useState(false)
   const [activeMobilePanel, setActiveMobilePanel] = useState<'file-browser' | 'terminal' | 'tasks'>('terminal')
   const [sessionSelectionMode, setSessionSelectionMode] = useState(true)
-  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null)
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [configDialogOpen, setConfigDialogOpen] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus>({
@@ -211,6 +211,11 @@ export default function ContainerTerminal() {
 
     initializedRef.current = true
 
+    if (selectedSessionId) {
+      addNewTab(selectedSessionId)
+      return
+    }
+
     const savedSessions = loadSavedSessions(containerId)
 
     if (savedSessions.length > 0) {
@@ -233,7 +238,7 @@ export default function ContainerTerminal() {
     } else {
       addNewTab()
     }
-  }, [container, containerId, sessionSelectionMode])
+  }, [container, containerId, sessionSelectionMode, selectedSessionId])
 
   const addNewTab = useCallback((sessionId?: string) => {
     tabCounter++
@@ -381,13 +386,7 @@ export default function ContainerTerminal() {
         tab.sessionId || undefined
       )
 
-      // Connect: use connectToConversation when a conversation is selected,
-      // otherwise use the default container-level connect
-      if (selectedConversationId !== null) {
-        ws.connectToConversation(selectedConversationId)
-      } else {
-        ws.connect()
-      }
+      ws.connect()
 
       term.onData((data) => {
         ws.send(data)
@@ -403,7 +402,7 @@ export default function ContainerTerminal() {
     }
 
     initTerminal()
-  }, [activeKey, container, containerId, isMobile, tabs, selectedConversationId])
+  }, [activeKey, container, containerId, isMobile, tabs, selectedSessionId])
 
   // Refit terminal when visible panel changes
   useEffect(() => {
@@ -591,17 +590,14 @@ export default function ContainerTerminal() {
   }, [containerId])
 
   // Session selection handlers
-  const handleSelectSession = useCallback((conversationId: number) => {
-    setSelectedConversationId(conversationId)
+  const handleSelectSession = useCallback((sessionId: string) => {
+    setSelectedSessionId(sessionId)
     setSessionSelectionMode(false)
-    // Terminal will initialize via the useEffect that watches sessionSelectionMode
-    // The WebSocket connection uses connectToConversation for the selected session
   }, [])
 
   const handleCreateSession = useCallback(() => {
-    setSelectedConversationId(null)
+    setSelectedSessionId(null)
     setSessionSelectionMode(false)
-    // Terminal will initialize with a new session (no conversationId)
   }, [])
 
   const handleBackToList = useCallback(() => {
@@ -612,7 +608,7 @@ export default function ContainerTerminal() {
     })
     setTabs([])
     setActiveKey('')
-    setSelectedConversationId(null)
+    setSelectedSessionId(null)
     initializedRef.current = false
     setSessionSelectionMode(true)
   }, [tabs])
