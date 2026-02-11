@@ -617,6 +617,14 @@ export default function ContainerTerminal() {
     setSessionSelectionMode(true)
   }, [tabs])
 
+  const activeTab = tabs.find(t => t.key === activeKey)
+
+  const handleTerminalTap = useCallback(() => {
+    if (isMobile && activeTab?.terminal) {
+      activeTab.terminal.focus()
+    }
+  }, [isMobile, activeTab])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -667,7 +675,6 @@ export default function ContainerTerminal() {
     )
   }
 
-  const activeTab = tabs.find(t => t.key === activeKey)
   const pendingTaskCount = tasks.filter(t => t.status === 'pending').length
 
   const closeFilePanel = () => {
@@ -751,12 +758,6 @@ export default function ContainerTerminal() {
       </Button>
     </div>
   )
-
-  const handleTerminalTap = useCallback(() => {
-    if (isMobile && activeTab?.terminal) {
-      activeTab.terminal.focus()
-    }
-  }, [isMobile, activeTab])
 
   const terminalViewport = (
     <div
