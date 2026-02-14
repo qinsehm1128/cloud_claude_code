@@ -623,7 +623,7 @@ export default function ContainerTerminal() {
 
   const activeTab = tabs.find(t => t.key === activeKey)
 
-  const { executeCommand, handleScrollDial, activeModifiers, toggleModifier } = useAuxiliaryKeyboard({
+  const { executeCommand, handleScrollDial, activeModifiers, toggleModifier, sendModifiedKey } = useAuxiliaryKeyboard({
     terminal: activeTab?.terminal || null,
     websocket: activeTab?.ws || null
   })
@@ -1001,6 +1001,7 @@ export default function ContainerTerminal() {
                   onScrollDial={handleScrollDial}
                   activeModifiers={activeModifiers}
                   onToggleModifier={toggleModifier}
+                  onSendModifiedKey={sendModifiedKey}
                 />
               )}
               <MonitoringStatusBar
