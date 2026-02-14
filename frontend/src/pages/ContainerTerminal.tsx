@@ -61,6 +61,7 @@ interface TerminalTab {
 
 const getStorageKey = (containerId: string) => getScopedStorageKey(`terminal_sessions_${containerId}`)
 
+
 const loadSavedSessions = (containerId: string): { key: string; sessionId: string }[] => {
   try {
     const saved = localStorage.getItem(getStorageKey(containerId))
@@ -622,7 +623,7 @@ export default function ContainerTerminal() {
 
   const activeTab = tabs.find(t => t.key === activeKey)
 
-  const { executeCommand, handleScroll, handleScrollDial, activeModifiers, toggleModifier } = useAuxiliaryKeyboard({
+  const { executeCommand, handleScrollDial, activeModifiers, toggleModifier } = useAuxiliaryKeyboard({
     terminal: activeTab?.terminal || null,
     websocket: activeTab?.ws || null
   })
