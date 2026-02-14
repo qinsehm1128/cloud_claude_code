@@ -15,8 +15,6 @@ import {
   Settings,
   Download,
   List,
-  Sparkles,
-  Wand2,
 } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -27,7 +25,7 @@ import { Progress } from '@/components/ui/progress'
 import { TerminalWebSocket, HistoryLoadProgress } from '@/services/websocket'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { getScopedStorageKey } from '@/utils/windowId'
-import { containerApi, cliToolApi } from '@/services/api'
+import { containerApi } from '@/services/api'
 import { SessionSelector } from '@/components/terminal/SessionSelector'
 import { AuxiliaryKeyboard } from '@/components/terminal/AuxiliaryKeyboard'
 import { useAuxiliaryKeyboard } from '@/hooks/useAuxiliaryKeyboard'
@@ -39,8 +37,6 @@ import { MonitoringConfigPanel, MonitoringConfig } from '@/components/Automation
 import { TaskPanel, Task } from '@/components/Automation/TaskPanel'
 import { TaskEditor } from '@/components/Automation/TaskEditor'
 import { ConfigInjectionDialog } from '@/components/ConfigInjectionDialog'
-import { CLIWorkflowModal, WorkflowConfig } from '@/components/terminal/CLIWorkflowModal'
-import { CLIWorkflowPanel } from '@/components/terminal/CLIWorkflowPanel'
 import '@xterm/xterm/css/xterm.css'
 
 interface Container {
@@ -113,10 +109,6 @@ export default function ContainerTerminal() {
     activeStrategy: 'webhook',
   })
   const [tasks, setTasks] = useState<Task[]>([])
-  const [workflowModalOpen, setWorkflowModalOpen] = useState(false)
-  const [workflowType, setWorkflowType] = useState<'sequential' | 'analyze'>('analyze')
-  const [workflowResults, setWorkflowResults] = useState<{ gemini: string | null; codex: string | null } | null>(null)
-  const [workflowLoading, setWorkflowLoading] = useState(false)
   const initializedRef = useRef(false)
   const silenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -628,53 +620,9 @@ export default function ContainerTerminal() {
     }, 300)
   }, [tabs])
 
-  const handleAnalyzeClick = useCallback(() => {
-    setWorkflowType('analyze')
-    setWorkflowModalOpen(true)
-  }, [])
-
-  const handleAutoFixClick = useCallback(() => {
-    setWorkflowType('sequential')
-    setWorkflowModalOpen(true)
-  }, [])
-
-  const handleWorkflowSubmit = useCallback(async (config: WorkflowConfig) => {
-    if (!containerId) return
-    setWorkflowLoading(true)
-    setWorkflowResults(null)
-    try {
-      if (config.modificationPrompt) {
-        const response = await cliToolApi.triggerSequentialWorkflow(
-          containerId,
-          config.analysisPrompt,
-          config.modificationPrompt,
-          config.workdir
-        )
-        setWorkflowResults({
-          gemini: response.data.gemini_output || null,
-          codex: response.data.codex_output || null,
-        })
-      } else {
-        const response = await cliToolApi.triggerAnalysis(
-          containerId,
-          config.analysisPrompt,
-          config.workdir
-        )
-        setWorkflowResults({
-          gemini: response.data.output || null,
-          codex: null,
-        })
-      }
-    } catch {
-      // Error toast is handled by axios interceptor
-    } finally {
-      setWorkflowLoading(false)
-    }
-  }, [containerId])
-
   const activeTab = tabs.find(t => t.key === activeKey)
 
-  const { executeCommand, handleScroll } = useAuxiliaryKeyboard({
+  const { executeCommand, handleScroll, handleScrollDial, activeModifiers, toggleModifier } = useAuxiliaryKeyboard({
     terminal: activeTab?.terminal || null,
     websocket: activeTab?.ws || null
   })
@@ -980,26 +928,6 @@ export default function ContainerTerminal() {
           <Button
             variant="outline"
             size="sm"
-            className="h-8"
-            onClick={handleAnalyzeClick}
-            disabled={workflowLoading}
-          >
-            <Sparkles className="h-4 w-4 mr-1" />
-            Analyze
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            onClick={handleAutoFixClick}
-            disabled={workflowLoading}
-          >
-            <Wand2 className="h-4 w-4 mr-1" />
-            Auto-fix
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
             className="h-8 ml-auto"
             onClick={() => {
               addNewTab()
@@ -1069,15 +997,11 @@ export default function ContainerTerminal() {
               {isMobile && (
                 <AuxiliaryKeyboard
                   onCommand={executeCommand}
-                  onScroll={handleScroll}
+                  onScrollDial={handleScrollDial}
+                  activeModifiers={activeModifiers}
+                  onToggleModifier={toggleModifier}
                 />
               )}
-              <CLIWorkflowPanel
-                geminiOutput={workflowResults?.gemini ?? null}
-                codexOutput={workflowResults?.codex ?? null}
-                isLoading={workflowLoading}
-                onClose={() => { setWorkflowResults(null); setWorkflowLoading(false) }}
-              />
               <MonitoringStatusBar
                 status={monitoringStatus}
                 onToggle={handleMonitoringToggle}
@@ -1098,13 +1022,6 @@ export default function ContainerTerminal() {
           containerName={container?.name || ''}
           open={configDialogOpen}
           onOpenChange={setConfigDialogOpen}
-        />
-        <CLIWorkflowModal
-          isOpen={workflowModalOpen}
-          onClose={() => setWorkflowModalOpen(false)}
-          onSubmit={handleWorkflowSubmit}
-          workflowType={workflowType}
-          defaultWorkdir={container?.work_dir || '/app'}
         />
       </div>
     )
@@ -1198,22 +1115,6 @@ export default function ContainerTerminal() {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleAnalyzeClick}
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Analyze
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleAutoFixClick}
-            >
-              <Wand2 className="h-4 w-4 mr-2" />
-              Auto-fix
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
               onClick={() => setConfigDialogOpen(true)}
             >
               <Download className="h-4 w-4 mr-2" />
@@ -1228,14 +1129,6 @@ export default function ContainerTerminal() {
 
         {terminalTabsBar}
         {terminalViewport}
-
-        {/* CLI Workflow Results Panel */}
-        <CLIWorkflowPanel
-          geminiOutput={workflowResults?.gemini || null}
-          codexOutput={workflowResults?.codex || null}
-          isLoading={workflowLoading}
-          onClose={() => setWorkflowResults(null)}
-        />
 
         {/* Monitoring Status Bar */}
         <MonitoringStatusBar
@@ -1260,15 +1153,6 @@ export default function ContainerTerminal() {
         containerName={container?.name || ''}
         open={configDialogOpen}
         onOpenChange={setConfigDialogOpen}
-      />
-
-      {/* CLI Workflow Modal */}
-      <CLIWorkflowModal
-        isOpen={workflowModalOpen}
-        onClose={() => setWorkflowModalOpen(false)}
-        onSubmit={handleWorkflowSubmit}
-        workflowType={workflowType}
-        defaultWorkdir="/app"
       />
     </div>
   )
