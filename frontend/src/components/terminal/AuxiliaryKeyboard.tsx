@@ -6,6 +6,8 @@ import {
   XCircle,
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   type LucideIcon
 } from 'lucide-react'
 import { useRef } from 'react'
@@ -106,13 +108,13 @@ export function AuxiliaryKeyboard({
   return (
     <div className="w-full border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 space-y-2">
       {/* Row 1: Modifier toggles + Key combo presets */}
-      <div className="flex gap-1.5 overflow-x-auto">
+      <div className="flex flex-wrap gap-1.5">
         {/* Ctrl toggle */}
         <Button
           variant={activeModifiers.has('ctrl') ? 'default' : 'outline'}
           size="sm"
           onClick={() => onToggleModifier('ctrl')}
-          className={`min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center px-3 py-2 touch-manipulation font-mono font-bold ${
+          className={`min-h-[44px] min-w-[44px] flex items-center justify-center px-3 py-2 touch-manipulation font-mono font-bold ${
             activeModifiers.has('ctrl')
               ? 'bg-primary text-primary-foreground'
               : 'active:bg-gray-100 dark:active:bg-gray-700'
@@ -125,7 +127,7 @@ export function AuxiliaryKeyboard({
           variant={activeModifiers.has('shift') ? 'default' : 'outline'}
           size="sm"
           onClick={() => onToggleModifier('shift')}
-          className={`min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center px-3 py-2 touch-manipulation font-mono font-bold ${
+          className={`min-h-[44px] min-w-[44px] flex items-center justify-center px-3 py-2 touch-manipulation font-mono font-bold ${
             activeModifiers.has('shift')
               ? 'bg-primary text-primary-foreground'
               : 'active:bg-gray-100 dark:active:bg-gray-700'
@@ -135,7 +137,7 @@ export function AuxiliaryKeyboard({
         </Button>
 
         {/* Separator */}
-        <div className="w-px bg-gray-200 dark:bg-gray-700 flex-shrink-0 my-1" />
+        <div className="w-px bg-gray-200 dark:bg-gray-700 my-1" />
 
         {/* Key combo preset buttons */}
         {KEY_COMBOS.map((combo) => (
@@ -144,7 +146,7 @@ export function AuxiliaryKeyboard({
             variant="outline"
             size="sm"
             onClick={() => handleComboClick(combo.command)}
-            className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center px-3 py-2 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation font-mono"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center px-3 py-2 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation font-mono"
           >
             <span className="text-xs">{combo.label}</span>
           </Button>
@@ -182,6 +184,46 @@ export function AuxiliaryKeyboard({
             <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </div>
         </div>
+      </div>
+
+      {/* Row 3: Arrow keys */}
+      <div className="flex gap-1.5 justify-center">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onCommand('\x1b[D')}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center px-3 py-2 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation"
+          aria-label="Arrow Left"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onCommand('\x1b[B')}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center px-3 py-2 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation"
+          aria-label="Arrow Down"
+        >
+          <ChevronDown className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onCommand('\x1b[A')}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center px-3 py-2 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation"
+          aria-label="Arrow Up"
+        >
+          <ChevronUp className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onCommand('\x1b[C')}
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center px-3 py-2 active:bg-gray-100 dark:active:bg-gray-700 touch-manipulation"
+          aria-label="Arrow Right"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </Button>
       </div>
     </div>
   )
