@@ -722,3 +722,18 @@ func (m *PTYManager) CloseSessionsForDockerID(dockerID string) int {
 
 	return len(sessionsToClose)
 }
+
+// generateScrollSequence generates ANSI escape sequences for terminal scrolling
+// ANSI control sequences:
+// - ESC[S: Scroll up one line (pan)
+// - ESC[T: Scroll down one line (pan)
+func generateScrollSequence(direction string) []byte {
+	switch direction {
+	case "up":
+		return []byte("\x1b[S") // Scroll up
+	case "down":
+		return []byte("\x1b[T") // Scroll down
+	default:
+		return []byte("") // Invalid direction
+	}
+}

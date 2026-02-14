@@ -445,6 +445,33 @@ export const portApi = {
   listAll: () => api.get('/ports'),
 }
 
+// CLI Tool Workflow API
+export const cliToolApi = {
+  triggerAnalysis: (containerId: string, prompt: string, workdir: string) =>
+    api.post<{ output: string; status: string; error?: string }>('/cli-tools/analyze', {
+      container_id: containerId,
+      prompt,
+      workdir,
+    }, { timeout: 600000 }), // 10min timeout for long-running analysis
+
+  triggerSequentialWorkflow: (
+    containerId: string,
+    analysisPrompt: string,
+    modificationPrompt: string,
+    workdir: string
+  ) =>
+    api.post<{ gemini_output: string; codex_output: string; status: string; error?: string }>(
+      '/cli-tools/sequential',
+      {
+        container_id: containerId,
+        analysis_prompt: analysisPrompt,
+        modification_prompt: modificationPrompt,
+        workdir,
+      },
+      { timeout: 600000 }
+    ),
+}
+
 // File API
 export const fileApi = {
   listDirectory: (containerId: number, path: string) =>

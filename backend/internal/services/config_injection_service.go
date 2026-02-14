@@ -38,6 +38,7 @@ type ConfigInjectionService interface {
 	InjectCodexConfig(ctx context.Context, containerID string, content string) error
 	InjectCodexAuth(ctx context.Context, containerID string, content string) error
 	InjectGeminiEnv(ctx context.Context, containerID string, content string) error
+	InjectSerenaMCP(ctx context.Context, containerID string) error
 }
 
 // configInjectionServiceImpl is the implementation of ConfigInjectionService
@@ -431,4 +432,14 @@ func (s *configInjectionServiceImpl) InjectGeminiEnv(ctx context.Context, contai
 
 	log.Infof("Successfully injected Gemini environment variables to container %s", containerID)
 	return nil
+}
+
+// InjectSerenaMCP injects Serena MCP configuration for file operation support
+func (s *configInjectionServiceImpl) InjectSerenaMCP(ctx context.Context, containerID string) error {
+	serenaCfg := MCPServerConfig{
+		Name:    "serena",
+		Command: "npx",
+		Args:    []string{"-y", "@anthropic/serena-mcp"},
+	}
+	return s.InjectMCP(ctx, containerID, []MCPServerConfig{serenaCfg})
 }

@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"fmt"
+
 	"github.com/docker/docker/api/types/container"
 )
 
@@ -30,6 +32,18 @@ type SecurityConfig struct {
 
 // DefaultSecurityConfig returns the default security configuration
 // This implements Requirements 5.2, 8.1-8.9
+//
+// Default Resource Limits:
+//   - Memory: 2GB (2147483648 bytes) - prevents memory exhaustion
+//   - MemorySwap: 2GB (no additional swap) - disables swap to maintain performance
+//   - CPUQuota: 100000 microseconds (1 CPU core) - limits CPU usage per period
+//   - CPUPeriod: 100000 microseconds (100ms) - scheduling period for CPU quota
+//   - PidsLimit: 256 - limits number of processes to prevent fork bombs
+//
+// CPUQuota Calculation: cores * CPUPeriod
+//   - 0.5 cores = 50000 microseconds (50% of one core)
+//   - 1.0 cores = 100000 microseconds (one full core)
+//   - 2.0 cores = 200000 microseconds (two full cores)
 func DefaultSecurityConfig() *SecurityConfig {
 	return &SecurityConfig{
 		// Requirement 8.1: Run containers with non-root user by default
@@ -157,4 +171,33 @@ func IsSecurityCompliant(config *ContainerConfig) bool {
 	}
 
 	return true
+}
+
+// ValidateResourceConfig validates resource limits in container configuration
+// Returns error if any resource limit violates Docker API constraints
+func ValidateResourceConfig(resources *container.Resources) error {
+	const (
+		minCPUPeriod     = 1000                      // Minimum CPU period (1ms)
+		maxCPUPeriod     = 1000000                   // Maximum CPU period (1s)
+		maxMemoryBytes   = int64(128) * 1024 * 1024 * 1024 // Max 128GB
+	)
+
+	// Validate memory limit
+	if resources.Memory < 0 || resources.Memory > maxMemoryBytes {
+		return fmt.Errorf("invalid memory limit: must be between 0 and %d bytes", maxMemoryBytes)
+	}
+
+	// Validate CPU period (Docker API constraint: 1000-1000000 microseconds)
+	if resources.CPUPeriod > 0 && (resources.CPUPeriod < minCPUPeriod || resources.CPUPeriod > maxCPUPeriod) {
+		return fmt.Errorf("invalid CPU period: must be between %d and %d microseconds", minCPUPeriod, maxCPUPeriod)
+	}
+
+	// Validate CPUQuota calculation (ensure minimum quantum if specified)
+	if resources.CPUQuota > 0 && resources.CPUPeriod > 0 {
+		if resources.CPUQuota < 1000 {
+			return fmt.Errorf("invalid CPU quota: resulting quota (%d) is below minimum quantum (1000 microseconds)", resources.CPUQuota)
+		}
+	}
+
+	return nil
 }

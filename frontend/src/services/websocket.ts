@@ -1,5 +1,5 @@
 export interface TerminalMessage {
-  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session' | 'close' | 'start' | 'monitoring_status' | 'task_update' | 'strategy_triggered'
+  type: 'input' | 'output' | 'resize' | 'error' | 'ping' | 'pong' | 'history' | 'history_start' | 'history_end' | 'session' | 'close' | 'start' | 'monitoring_status' | 'task_update' | 'strategy_triggered' | 'keyboard_command' | 'scroll'
   data?: string
   cols?: number
   rows?: number
@@ -409,5 +409,19 @@ export class TerminalWebSocket {
 
   setSessionId(sessionId: string) {
     this.sessionId = sessionId
+  }
+
+  sendKeyboardCommand(command: string) {
+    if (this.ws?.readyState === WebSocket.OPEN && command) {
+      const msg: TerminalMessage = { type: 'keyboard_command', data: command }
+      this.ws.send(JSON.stringify(msg))
+    }
+  }
+
+  sendScroll(direction: 'up' | 'down') {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      const msg: TerminalMessage = { type: 'scroll', data: direction }
+      this.ws.send(JSON.stringify(msg))
+    }
   }
 }

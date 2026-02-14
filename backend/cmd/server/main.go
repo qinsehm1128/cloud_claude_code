@@ -12,6 +12,7 @@ import (
 
 	"cc-platform/internal/config"
 	"cc-platform/internal/database"
+	"cc-platform/internal/docker"
 	"cc-platform/internal/handlers"
 	"cc-platform/internal/headless"
 	"cc-platform/internal/middleware"
@@ -149,6 +150,17 @@ func main() {
 	taskQueueHandler := handlers.NewTaskQueueHandler(services.NewTaskQueueService(db))
 	headlessHandler := handlers.NewHeadlessHandler(headlessManager, modeManager, containerService, authService)
 
+	// Initialize CLI tool service for Gemini→Codex workflow
+	cliToolDockerClient, err := docker.NewClient()
+	if err != nil {
+		log.Printf("Warning: Failed to create Docker client for CLI tool service: %v", err)
+	}
+	var cliToolHandler *handlers.CLIToolHandler
+	if cliToolDockerClient != nil {
+		cliToolService := services.NewCLIToolService(cliToolDockerClient)
+		cliToolHandler = handlers.NewCLIToolHandler(cliToolService)
+	}
+
 	// Health check endpoint (for Docker healthcheck / load balancers)
 	router.GET("/api/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -236,6 +248,13 @@ func main() {
 		protected.GET("/containers/:id/headless/conversations/:conversationId", headlessHandler.GetConversation)
 		protected.DELETE("/containers/:id/headless/conversations/:conversationId", headlessHandler.DeleteConversation)
 		protected.GET("/containers/:id/headless/conversations/:conversationId/turns", headlessHandler.GetConversationTurns)
+
+		// CLI tool workflow routes
+		if cliToolHandler != nil {
+			cliTools := protected.Group("/cli-tools")
+			cliTools.POST("/sequential", cliToolHandler.HandleSequentialWorkflow)
+			cliTools.POST("/analyze", cliToolHandler.HandleGeminiAnalysis)
+		}
 	}
 
 	// WebSocket routes (with JWT query param auth)
