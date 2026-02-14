@@ -12,7 +12,6 @@ import (
 
 	"cc-platform/internal/config"
 	"cc-platform/internal/database"
-	"cc-platform/internal/docker"
 	"cc-platform/internal/handlers"
 	"cc-platform/internal/headless"
 	"cc-platform/internal/middleware"
