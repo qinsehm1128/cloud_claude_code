@@ -54,25 +54,25 @@ function ToolUseBlock({
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   return (
-    <div className="my-2 rounded-lg border border-border/50 bg-muted/30 overflow-hidden">
+    <div className="my-2 rounded-lg border border-border/50 bg-muted/30 overflow-hidden max-w-full">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors min-w-0"
       >
         <Wrench className="h-4 w-4 text-blue-500 flex-shrink-0" />
-        <span className="text-sm font-medium flex-1 text-left truncate">
+        <span className="text-sm font-medium flex-1 text-left truncate min-w-0">
           {content.name}
         </span>
-        <Badge variant="outline" className="text-xs">Tool</Badge>
+        <Badge variant="outline" className="text-xs flex-shrink-0">Tool</Badge>
         {expanded ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         )}
       </button>
       {expanded && content.input && (
-        <div className="px-3 pb-3 border-t border-border/30">
-          <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2">
+        <div className="px-3 pb-3 border-t border-border/30 overflow-hidden">
+          <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 max-w-full">
             {JSON.stringify(content.input, null, 2)}
           </pre>
         </div>
@@ -102,31 +102,31 @@ function ToolResultBlock({
 
   return (
     <div className={cn(
-      "my-2 rounded-lg border overflow-hidden",
+      "my-2 rounded-lg border overflow-hidden max-w-full",
       content.is_error
         ? "border-red-500/30 bg-red-500/5"
         : "border-border/50 bg-muted/20"
     )}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/30 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/30 transition-colors min-w-0"
       >
         <Terminal className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-        <span className="text-xs text-muted-foreground flex-1 text-left truncate">
+        <span className="text-xs text-muted-foreground flex-1 text-left truncate min-w-0">
           {preview || 'Tool Result'}
         </span>
         {content.is_error && (
-          <Badge variant="destructive" className="text-xs">Error</Badge>
+          <Badge variant="destructive" className="text-xs flex-shrink-0">Error</Badge>
         )}
         {expanded ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         )}
       </button>
       {expanded && (
-        <div className="px-3 pb-3 border-t border-border/30">
-          <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 max-h-96">
+        <div className="px-3 pb-3 border-t border-border/30 overflow-hidden">
+          <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 max-h-96 max-w-full">
             {typeof content.content === 'string'
               ? content.content
               : JSON.stringify(content.content, null, 2)}
@@ -284,24 +284,24 @@ export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
         </div>
       </CardHeader>
 
-      <CardContent className="pt-0">
+      <CardContent className="pt-0 overflow-hidden">
         {/* 助手响应 */}
         {(textContent || hasToolCalls) && (
-          <div className="flex items-start gap-2 mt-3">
-            <div className="p-1.5 rounded-full bg-secondary">
+          <div className="flex items-start gap-2 mt-3 min-w-0">
+            <div className="p-1.5 rounded-full bg-secondary flex-shrink-0">
               <Bot className="h-4 w-4" />
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 overflow-hidden">
               {/* 文本内容（Markdown 渲染） */}
               {textContent && (
-                <div className="text-sm">
+                <div className="text-sm overflow-hidden">
                   <MarkdownRenderer content={textContent} />
                 </div>
               )}
 
               {/* 工具调用（可折叠区域） */}
               {hasToolCalls && showToolCalls && (
-                <div className="mt-3 space-y-1">
+                <div className="mt-3 space-y-1 overflow-hidden">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
                     <Wrench className="h-3 w-3" />
                     <span>Tool Calls ({toolCalls.length})</span>

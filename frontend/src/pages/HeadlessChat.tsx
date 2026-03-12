@@ -92,6 +92,17 @@ export default function HeadlessChat() {
     onError: (code, message) => {
       console.error(`Headless error [${code}]: ${message}`);
     },
+    onSessionCreated: (conversationId, _sessionId) => {
+      // 新会话创建后，更新 URL 参数以包含 conversation ID
+      if (selectedContainerId) {
+        setSearchParams({
+          container: selectedContainerId.toString(),
+          conversation: conversationId.toString()
+        });
+        // 刷新对话列表
+        fetchConversations();
+      }
+    },
   });
 
   // 只在组件首次挂载时加载容器列表
@@ -281,21 +292,20 @@ export default function HeadlessChat() {
   // 创建新对话
   const handleNewConversation = useCallback(async () => {
     if (!selectedContainerId || !selectedContainer) return;
-    
+
     // 断开现有连接
     headless.disconnect();
-    
-    // 连接到容器（创建新会话模式）
-    await headless.connectToContainer(selectedContainerId);
-    
-    // 创建新会话
-    headless.startSession(selectedContainer.work_dir);
+
+    // 清除当前对话选择，URL 会在 onSessionCreated 回调中更新
     setSearchParams({ container: selectedContainerId.toString() });
     setSidebarOpen(false);
-    
-    // 刷新对话列表
-    setTimeout(() => fetchConversations(), 1000);
-  }, [selectedContainerId, selectedContainer, headless, setSearchParams, fetchConversations]);
+
+    // 连接到容器（创建新会话模式）
+    await headless.connectToContainer(selectedContainerId);
+
+    // 创建新会话 - 后端返回 session_info 后，onSessionCreated 会自动更新 URL 和刷新列表
+    headless.startSession(selectedContainer.work_dir);
+  }, [selectedContainerId, selectedContainer, headless, setSearchParams]);
 
   const handleDeleteConversation = useCallback(async (conversationId: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -650,7 +660,7 @@ export default function HeadlessChat() {
                 onValueChange={(value) => setSelectedModel(value)}
                 disabled={loadingModels}
               >
-                <SelectTrigger className="h-7 w-[180px] text-xs">
+                <SelectTrigger className="h-7 w-[120px] sm:w-[180px] text-xs">
                   {loadingModels ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   ) : (

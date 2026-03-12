@@ -140,6 +140,13 @@ func (m *HeadlessManager) CreateSessionForConversation(containerID uint, dockerI
 	session := NewHeadlessSession(sessionID, containerID, dockerID, workDir, m.historyManager)
 	session.SetConversationID(conversationID)
 
+	// 从数据库加载已有的 ClaudeSessionID，用于 --resume 恢复历史会话上下文
+	conversation, err := m.historyManager.GetConversationByID(conversationID)
+	if err == nil && conversation != nil && conversation.ClaudeSessionID != "" {
+		session.ClaudeSessionID = conversation.ClaudeSessionID
+		log.Printf("[HeadlessManager] Restored ClaudeSessionID %s for conversation %d (will use --resume)", conversation.ClaudeSessionID, conversationID)
+	}
+
 	// 更新数据库对话记录的 session_id
 	if err := m.historyManager.UpdateConversationSessionID(conversationID, sessionID); err != nil {
 		log.Printf("[HeadlessManager] Warning: failed to update conversation session_id: %v", err)
