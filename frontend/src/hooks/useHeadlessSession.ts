@@ -41,10 +41,11 @@ export interface UseHeadlessSessionOptions {
   autoConnect?: boolean;
   onModeSwitch?: (mode: 'tui' | 'headless', closedSessions: number) => void;
   onError?: (code: string, message: string) => void;
+  onSessionCreated?: (conversationId: number, sessionId: string) => void;
 }
 
 export function useHeadlessSession(options: UseHeadlessSessionOptions) {
-  const { containerId, conversationId, autoConnect = false, onModeSwitch, onError } = options;
+  const { containerId, conversationId, autoConnect = false, onModeSwitch, onError, onSessionCreated } = options;
   
   const [state, setState] = useState<HeadlessSessionState>(initialState);
   const [connectedConversationId, setConnectedConversationId] = useState<number | null>(null);
@@ -63,14 +64,24 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
 
   // 处理 session_info 消息
   const handleSessionInfo = useCallback((payload: SessionInfo) => {
-    safeSetState(prev => ({
-      ...prev,
-      sessionId: payload.session_id,
-      claudeSessionId: payload.claude_session_id || null,
-      state: payload.state,
-      conversationId: payload.conversation_id,
-      currentTurnId: payload.current_turn_id || null,
-    }));
+    safeSetState(prev => {
+      // 如果是新会话（之前没有 conversationId 或 conversationId 变了），通知父组件
+      if (payload.conversation_id && prev.conversationId !== payload.conversation_id) {
+        // 使用 setTimeout 避免在 setState 中触发外部回调
+        setTimeout(() => {
+          onSessionCreated?.(payload.conversation_id, payload.session_id);
+        }, 0);
+      }
+
+      return {
+        ...prev,
+        sessionId: payload.session_id,
+        claudeSessionId: payload.claude_session_id || null,
+        state: payload.state,
+        conversationId: payload.conversation_id,
+        currentTurnId: payload.current_turn_id || null,
+      };
+    });
 
     // 如果有 pending prompt，现在发送
     if (pendingPromptRef.current && payload.state === 'idle') {
@@ -82,7 +93,7 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
         }
       }, 50);
     }
-  }, [safeSetState]);
+  }, [safeSetState, onSessionCreated]);
 
   // 处理 history 消息
   const handleHistory = useCallback((payload: HistoryPayload, isMore: boolean) => {

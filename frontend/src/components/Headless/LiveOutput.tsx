@@ -92,14 +92,14 @@ export function LiveOutput({ events, className }: LiveOutputProps) {
       case 'tool_use': {
         const msg = content as MessageContent;
         return (
-          <div key={key} className="py-2">
-            <div className="flex items-center gap-2 text-sm">
-              <Wrench className="h-4 w-4 text-blue-500" />
-              <span className="font-medium">{msg.name}</span>
-              <Badge variant="outline" className="text-xs">Tool Call</Badge>
+          <div key={key} className="py-2 overflow-hidden">
+            <div className="flex items-center gap-2 text-sm min-w-0">
+              <Wrench className="h-4 w-4 text-blue-500 flex-shrink-0" />
+              <span className="font-medium truncate">{msg.name}</span>
+              <Badge variant="outline" className="text-xs flex-shrink-0">Tool Call</Badge>
             </div>
             {msg.input && (
-              <pre className="mt-1 p-2 bg-muted/50 rounded text-xs overflow-x-auto">
+              <pre className="mt-1 p-2 bg-muted/50 rounded text-xs overflow-x-auto max-w-full">
                 {JSON.stringify(msg.input, null, 2)}
               </pre>
             )}
@@ -110,17 +110,17 @@ export function LiveOutput({ events, className }: LiveOutputProps) {
       case 'tool_result': {
         const msg = content as MessageContent;
         return (
-          <div key={key} className="py-2">
+          <div key={key} className="py-2 overflow-hidden">
             <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
               {msg.is_error ? (
-                <AlertCircle className="h-3 w-3 text-destructive" />
+                <AlertCircle className="h-3 w-3 text-destructive flex-shrink-0" />
               ) : (
-                <CheckCircle2 className="h-3 w-3 text-green-500" />
+                <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
               )}
               <span>Tool Result</span>
-              {msg.is_error && <Badge variant="destructive" className="text-xs">Error</Badge>}
+              {msg.is_error && <Badge variant="destructive" className="text-xs flex-shrink-0">Error</Badge>}
             </div>
-            <pre className="p-2 bg-muted/30 rounded text-xs overflow-x-auto max-h-[200px]">
+            <pre className="p-2 bg-muted/30 rounded text-xs overflow-x-auto max-h-[200px] max-w-full">
               {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}
             </pre>
           </div>
@@ -151,8 +151,8 @@ export function LiveOutput({ events, className }: LiveOutputProps) {
 
 
   return (
-    <Card className={cn('border-blue-500/50', className)}>
-      <CardContent className="p-4">
+    <Card className={cn('border-blue-500/50 overflow-hidden', className)}>
+      <CardContent className="p-4 overflow-hidden">
         <div className="flex items-center gap-2 mb-3">
           <div className="p-1.5 rounded-full bg-blue-500/10">
             <Bot className="h-4 w-4 text-blue-500" />
