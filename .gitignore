@@ -2,6 +2,7 @@
 .kiro/
 .vscode/
 .claude/
+.workflow/
 
 # Environment files
 .env
