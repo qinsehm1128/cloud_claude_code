@@ -59,7 +59,7 @@ function ToolUseBlock({
   }, [defaultExpanded]);
 
   return (
-    <div className="my-2 rounded-lg border border-border/50 bg-muted/30 overflow-hidden max-w-full">
+    <div className="my-2 rounded-lg border border-border/50 bg-muted/30 overflow-hidden w-full">
       <button
         type="button"
         aria-label={`Tool ${content.name || 'call'}`}
@@ -80,7 +80,7 @@ function ToolUseBlock({
       </button>
       {expanded && content.input && (
         <div className="px-3 pb-3 border-t border-border/30 overflow-hidden" data-testid="tool-use-body">
-          <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 max-w-full">
+          <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 w-full">
             {JSON.stringify(content.input, null, 2)}
           </pre>
         </div>
@@ -113,7 +113,7 @@ function ToolResultBlock({
 
   return (
     <div className={cn(
-      'my-2 rounded-lg border overflow-hidden max-w-full',
+      'my-2 rounded-lg border overflow-hidden w-full',
       content.is_error
         ? 'border-red-500/30 bg-red-500/5'
         : 'border-border/50 bg-muted/20',
@@ -140,7 +140,7 @@ function ToolResultBlock({
       </button>
       {expanded && (
         <div className="px-3 pb-3 border-t border-border/30 overflow-hidden" data-testid="tool-result-body">
-          <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 max-h-96 max-w-full">
+          <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 max-h-96 w-full">
             {typeof content.content === 'string'
               ? content.content
               : JSON.stringify(content.content, null, 2)}
@@ -232,7 +232,7 @@ export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
   const hasAssistantContent = renderItems.length > 0;
 
   return (
-    <Card className={cn('transition-all', className)}>
+    <Card className={cn('transition-all overflow-hidden', className)}>
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between">
           {/* 用户输入 */}
