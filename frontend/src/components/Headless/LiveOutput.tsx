@@ -99,7 +99,7 @@ export function LiveOutput({ events, className }: LiveOutputProps) {
               <Badge variant="outline" className="text-xs flex-shrink-0">Tool Call</Badge>
             </div>
             {msg.input && (
-              <pre className="mt-1 p-2 bg-muted/50 rounded text-xs overflow-x-auto max-w-full">
+              <pre className="mt-1 p-2 bg-muted/50 rounded text-xs overflow-x-auto w-full">
                 {JSON.stringify(msg.input, null, 2)}
               </pre>
             )}
@@ -120,7 +120,7 @@ export function LiveOutput({ events, className }: LiveOutputProps) {
               <span>Tool Result</span>
               {msg.is_error && <Badge variant="destructive" className="text-xs flex-shrink-0">Error</Badge>}
             </div>
-            <pre className="p-2 bg-muted/30 rounded text-xs overflow-x-auto max-h-[200px] max-w-full">
+            <pre className="p-2 bg-muted/30 rounded text-xs overflow-x-auto max-h-[200px] w-full">
               {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}
             </pre>
           </div>
