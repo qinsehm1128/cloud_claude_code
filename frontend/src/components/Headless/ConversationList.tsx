@@ -58,7 +58,7 @@ export function ConversationList({
     <ScrollArea className={cn('h-full', className)}>
       <div
         ref={scrollRef}
-        className="p-4 space-y-4"
+        className="p-4 space-y-4 overflow-x-hidden"
         onScroll={handleScroll}
       >
         {/* 加载更多按钮 */}
