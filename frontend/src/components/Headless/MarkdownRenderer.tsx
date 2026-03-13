@@ -69,7 +69,7 @@ function CodeBlock({
 export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
-      className={cn('markdown-content overflow-hidden w-full', className)}
+      className={cn('markdown-content overflow-hidden w-full break-words', className)}
       remarkPlugins={[remarkGfm]}
       components={{
         // 代码块
