@@ -28,7 +28,7 @@ function CodeBlock({
   }, [children]);
 
   return (
-    <div className="relative group my-3 overflow-hidden max-w-full">
+    <div className="relative group my-3 overflow-hidden w-full">
       <div className="absolute right-2 top-2 z-10">
         <button
           onClick={handleCopy}
@@ -57,7 +57,7 @@ function CodeBlock({
           padding: '1.25rem 1rem 1rem',
           fontSize: '0.875rem',
           overflowX: 'auto',
-          maxWidth: '100%',
+          width: '100%',
         }}
       >
         {children}
@@ -69,7 +69,7 @@ function CodeBlock({
 export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
-      className={cn('markdown-content overflow-hidden max-w-full', className)}
+      className={cn('markdown-content overflow-hidden w-full break-words', className)}
       remarkPlugins={[remarkGfm]}
       components={{
         // 代码块

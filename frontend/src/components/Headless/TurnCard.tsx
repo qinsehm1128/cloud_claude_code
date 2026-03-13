@@ -177,7 +177,7 @@ function ThinkingBlock({ content }: { content: string }) {
       </button>
       {expanded && (
         <div className="px-3 pb-3 border-t border-purple-500/20">
-          <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">
+          <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap break-words">
             {content}
           </div>
         </div>
@@ -200,7 +200,7 @@ function renderAssistantItem(
   switch (content.type) {
     case 'text':
       return (
-        <div key={key} className="text-sm overflow-hidden">
+        <div key={key} className="text-sm break-words">
           <MarkdownRenderer content={content.text || ''} />
         </div>
       );

@@ -431,7 +431,7 @@ export default function HeadlessTerminal() {
 
         {/* Live Output (when running) */}
         {headless.isRunning && headless.currentTurnEvents.length > 0 && (
-          <div className="px-4 py-2 border-t">
+          <div className="px-4 py-2 border-t overflow-hidden">
             <LiveOutput events={headless.currentTurnEvents} />
           </div>
         )}

@@ -68,7 +68,7 @@ export function LiveOutput({ events, className }: LiveOutputProps) {
       case 'text': {
         const msg = content as MessageContent;
         return (
-          <div key={key} className="whitespace-pre-wrap text-sm py-1">
+          <div key={key} className="whitespace-pre-wrap break-words text-sm py-1">
             {msg.text}
           </div>
         );
@@ -82,7 +82,7 @@ export function LiveOutput({ events, className }: LiveOutputProps) {
               <Brain className="h-3 w-3" />
               <span>Thinking</span>
             </div>
-            <div className="text-sm text-muted-foreground italic border-l-2 border-muted pl-3 whitespace-pre-wrap">
+            <div className="text-sm text-muted-foreground italic border-l-2 border-muted pl-3 whitespace-pre-wrap break-words">
               {msg.thinking}
             </div>
           </div>
