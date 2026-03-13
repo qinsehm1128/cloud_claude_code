@@ -40,6 +40,8 @@ export interface MessageContent {
   is_error?: boolean;
 }
 
+export type AssistantResponse = string | MessageContent[];
+
 // Token 使用信息
 export interface UsageInfo {
   input_tokens: number;
@@ -54,7 +56,7 @@ export interface TurnInfo {
   turn_index: number;
   user_prompt: string;
   prompt_source: 'user' | 'strategy' | 'monitoring';
-  assistant_response?: string | MessageContent[];
+  assistant_response?: AssistantResponse;
   model?: string;
   input_tokens: number;
   output_tokens: number;
@@ -75,6 +77,125 @@ export interface EventInfo {
   event_subtype?: string;
   raw_json: string;
   created_at: string;
+}
+
+function isMessageContent(value: unknown): value is MessageContent {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const type = (value as { type?: unknown }).type;
+  return type === 'text' || type === 'thinking' || type === 'tool_use' || type === 'tool_result';
+}
+
+function cloneMessageContent(content: MessageContent): MessageContent {
+  return {
+    ...content,
+    input: content.input ? { ...content.input } : undefined,
+  };
+}
+
+function collectAssistantMessageContent(content: unknown): MessageContent[] {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  return content.filter(isMessageContent).map(cloneMessageContent);
+}
+
+function dedupeMessageContents(contents: MessageContent[]): MessageContent[] {
+  const seen = new Set<string>();
+
+  return contents.filter(content => {
+    const key = JSON.stringify(content);
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function hasEquivalentTextContent(text: string, contents: MessageContent[]): boolean {
+  const normalizedText = text.trim();
+  if (!normalizedText) {
+    return true;
+  }
+
+  return contents.some(content => content.type === 'text' && content.text?.trim() === normalizedText);
+}
+
+export function extractAssistantMessageContentFromStreamEvents(events: StreamEvent[]): MessageContent[] {
+  const contents: MessageContent[] = [];
+
+  for (const event of events) {
+    if (event.type !== 'assistant' || !event.message?.content) {
+      continue;
+    }
+
+    contents.push(...collectAssistantMessageContent(event.message.content));
+  }
+
+  return dedupeMessageContents(contents);
+}
+
+export function extractAssistantMessageContentFromEventInfos(events: EventInfo[] = []): MessageContent[] {
+  const contents: MessageContent[] = [];
+
+  for (const event of events) {
+    try {
+      const parsed = JSON.parse(event.raw_json) as StreamEvent;
+      if (parsed.type !== 'assistant' || !parsed.message?.content) {
+        continue;
+      }
+
+      contents.push(...collectAssistantMessageContent(parsed.message.content));
+    } catch {
+      // 历史事件中可能混有非 JSON 行，忽略即可。
+    }
+  }
+
+  return dedupeMessageContents(contents);
+}
+
+export function normalizeAssistantResponse(
+  assistantResponse?: AssistantResponse,
+  eventContents: MessageContent[] = [],
+): AssistantResponse | undefined {
+  if (Array.isArray(assistantResponse)) {
+    return assistantResponse.length > 0 ? assistantResponse : (eventContents.length > 0 ? eventContents : undefined);
+  }
+
+  if (!assistantResponse?.trim()) {
+    return eventContents.length > 0 ? eventContents : undefined;
+  }
+
+  if (eventContents.length === 0) {
+    return assistantResponse;
+  }
+
+  const normalizedContents = hasEquivalentTextContent(assistantResponse, eventContents)
+    ? eventContents
+    : [{ type: 'text', text: assistantResponse } as MessageContent, ...eventContents];
+
+  return dedupeMessageContents(normalizedContents);
+}
+
+export function normalizeTurnInfo(turn: TurnInfo): TurnInfo {
+  const assistantResponse = normalizeAssistantResponse(
+    turn.assistant_response,
+    extractAssistantMessageContentFromEventInfos(turn.events),
+  );
+
+  if (assistantResponse === turn.assistant_response) {
+    return turn;
+  }
+
+  return {
+    ...turn,
+    assistant_response: assistantResponse,
+  };
 }
 
 // 会话信息

@@ -154,6 +154,28 @@ func TestHistoryManager_RecentAndBeforeTurns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("StartTurn error: %v", err)
 		}
+		switch i {
+		case 1:
+			if err := mgr.AppendEvent(turn.ID, models.HeadlessEventTypeAssistant, "", `{"step":1}`); err != nil {
+				t.Fatalf("AppendEvent error: %v", err)
+			}
+			if err := mgr.AppendEvent(turn.ID, models.HeadlessEventTypeResult, "", `{"step":2}`); err != nil {
+				t.Fatalf("AppendEvent error: %v", err)
+			}
+		case 2:
+			if err := mgr.AppendEvent(turn.ID, models.HeadlessEventTypeAssistant, "", `{"step":"a"}`); err != nil {
+				t.Fatalf("AppendEvent error: %v", err)
+			}
+			if err := mgr.AppendEvent(turn.ID, models.HeadlessEventTypeAssistant, "", `{"step":"b"}`); err != nil {
+				t.Fatalf("AppendEvent error: %v", err)
+			}
+			if err := mgr.AppendEvent(turn.ID, models.HeadlessEventTypeResult, "", `{"step":"c"}`); err != nil {
+				t.Fatalf("AppendEvent error: %v", err)
+			}
+			if err := mgr.CompleteTurn(turn.ID, "summary-2", "model", 3, 5, 0.02, 120); err != nil {
+				t.Fatalf("CompleteTurn error: %v", err)
+			}
+		}
 		turns = append(turns, *turn)
 	}
 
@@ -167,6 +189,15 @@ func TestHistoryManager_RecentAndBeforeTurns(t *testing.T) {
 	if recent[0].TurnIndex != 2 || recent[2].TurnIndex != 4 {
 		t.Fatalf("unexpected turn order: %d..%d", recent[0].TurnIndex, recent[2].TurnIndex)
 	}
+	if recent[0].AssistantResponse != "summary-2" {
+		t.Fatalf("expected assistant_response to be preserved, got %q", recent[0].AssistantResponse)
+	}
+	if len(recent[0].Events) != 3 {
+		t.Fatalf("expected 3 events on recent turn, got %d", len(recent[0].Events))
+	}
+	if recent[0].Events[0].EventIndex != 0 || recent[0].Events[1].EventIndex != 1 || recent[0].Events[2].EventIndex != 2 {
+		t.Fatalf("unexpected recent event order: %d, %d, %d", recent[0].Events[0].EventIndex, recent[0].Events[1].EventIndex, recent[0].Events[2].EventIndex)
+	}
 
 	beforeID := turns[3].ID // TurnIndex 3
 	before, beforeMore, err := mgr.GetTurnsBefore(conv.ID, beforeID, 2)
@@ -178,5 +209,17 @@ func TestHistoryManager_RecentAndBeforeTurns(t *testing.T) {
 	}
 	if before[0].TurnIndex != 1 || before[1].TurnIndex != 2 {
 		t.Fatalf("unexpected before order: %d, %d", before[0].TurnIndex, before[1].TurnIndex)
+	}
+	if len(before[0].Events) != 2 {
+		t.Fatalf("expected 2 events on before turn, got %d", len(before[0].Events))
+	}
+	if before[0].Events[0].EventIndex != 0 || before[0].Events[1].EventIndex != 1 {
+		t.Fatalf("unexpected before event order: %d, %d", before[0].Events[0].EventIndex, before[0].Events[1].EventIndex)
+	}
+	if len(before[1].Events) != 3 {
+		t.Fatalf("expected 3 events on completed before turn, got %d", len(before[1].Events))
+	}
+	if before[1].AssistantResponse != "summary-2" {
+		t.Fatalf("expected assistant_response in before turns, got %q", before[1].AssistantResponse)
 	}
 }

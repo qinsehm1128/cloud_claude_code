@@ -8,16 +8,19 @@ import {
   isErrorPayload,
   isModeSwitchedPayload,
 } from '../services/headlessWebsocket';
-import type {
-  HeadlessSessionState,
-  HeadlessResponseType,
-  TurnInfo,
-  StreamEvent,
-  SessionInfo,
-  HistoryPayload,
-  TurnCompletePayload,
-  ErrorPayload,
-  ModeSwitchedPayload,
+import {
+  extractAssistantMessageContentFromStreamEvents,
+  normalizeAssistantResponse,
+  normalizeTurnInfo,
+  type HeadlessSessionState,
+  type HeadlessResponseType,
+  type TurnInfo,
+  type StreamEvent,
+  type SessionInfo,
+  type HistoryPayload,
+  type TurnCompletePayload,
+  type ErrorPayload,
+  type ModeSwitchedPayload,
 } from '../types/headless';
 
 const initialState: HeadlessSessionState = {
@@ -98,9 +101,10 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
   // 处理 history 消息
   const handleHistory = useCallback((payload: HistoryPayload, isMore: boolean) => {
     safeSetState(prev => {
+      const normalizedTurns = payload.turns.map(normalizeTurnInfo);
       const newTurns = isMore
-        ? [...payload.turns, ...prev.turns]
-        : payload.turns;
+        ? [...normalizedTurns, ...prev.turns]
+        : normalizedTurns;
       
       return {
         ...prev,
@@ -133,32 +137,19 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
         return fallback || '';
       };
 
-      const extractAssistantResponse = (events: StreamEvent[]) => {
-        const texts: string[] = [];
-        for (const event of events) {
-          if (event.type === 'assistant' && event.message?.content?.length) {
-            for (const c of event.message.content) {
-              if (c.type === 'text' && c.text) {
-                texts.push(c.text);
-              } else if (c.type === 'thinking' && c.thinking) {
-                texts.push(`[Thinking] ${c.thinking}`);
-              }
-            }
-          }
-        }
-        return texts.join('\n');
-      };
-
       const lastPrompt = lastPromptRef.current;
       const userPrompt = extractUserPrompt(prev.currentTurnEvents, lastPrompt?.text);
-      const assistantResponse = extractAssistantResponse(prev.currentTurnEvents);
+      const assistantResponse = normalizeAssistantResponse(
+        undefined,
+        extractAssistantMessageContentFromStreamEvents(prev.currentTurnEvents),
+      );
 
-      const completedTurn: TurnInfo = {
+      const completedTurn: TurnInfo = normalizeTurnInfo({
         id: payload.turn_id,
         turn_index: payload.turn_index,
         user_prompt: userPrompt,
         prompt_source: (lastPrompt?.source || 'user') as TurnInfo['prompt_source'],
-        assistant_response: assistantResponse || undefined,
+        assistant_response: assistantResponse,
         model: payload.model,
         input_tokens: payload.input_tokens,
         output_tokens: payload.output_tokens,
@@ -168,7 +159,7 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
         error_message: payload.error_message,
         created_at: new Date().toISOString(),
         completed_at: new Date().toISOString(),
-      };
+      });
 
       const existingIndex = prev.turns.findIndex(t => t.id === payload.turn_id);
       let newTurns: TurnInfo[];
@@ -176,14 +167,15 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
       if (existingIndex >= 0) {
         newTurns = [...prev.turns];
         const existing = newTurns[existingIndex];
-        newTurns[existingIndex] = {
+        newTurns[existingIndex] = normalizeTurnInfo({
           ...existing,
           ...completedTurn,
           user_prompt: existing.user_prompt || completedTurn.user_prompt,
           prompt_source: existing.prompt_source || completedTurn.prompt_source,
+          assistant_response: completedTurn.assistant_response ?? existing.assistant_response,
           created_at: existing.created_at,
           completed_at: existing.completed_at || completedTurn.completed_at,
-        };
+        });
       } else {
         newTurns = [...prev.turns, completedTurn];
       }

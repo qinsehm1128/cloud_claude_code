@@ -274,6 +274,10 @@ func (m *HeadlessHistoryManager) GetRecentTurns(conversationID uint, limit int) 
 		turns[i], turns[j] = turns[j], turns[i]
 	}
 
+	if err := m.attachEventsToTurns(turns); err != nil {
+		return nil, false, err
+	}
+
 	return turns, hasMore, nil
 }
 
@@ -309,7 +313,41 @@ func (m *HeadlessHistoryManager) GetTurnsBefore(conversationID uint, beforeTurnI
 		turns[i], turns[j] = turns[j], turns[i]
 	}
 
+	if err := m.attachEventsToTurns(turns); err != nil {
+		return nil, false, err
+	}
+
 	return turns, hasMore, nil
+}
+
+func (m *HeadlessHistoryManager) attachEventsToTurns(turns []models.HeadlessTurn) error {
+	if len(turns) == 0 {
+		return nil
+	}
+
+	turnIndexByID := make(map[uint]int, len(turns))
+	turnIDs := make([]uint, 0, len(turns))
+	for i := range turns {
+		turnIndexByID[turns[i].ID] = i
+		turnIDs = append(turnIDs, turns[i].ID)
+	}
+
+	var events []models.HeadlessEvent
+	if err := m.db.Where("turn_id IN ?", turnIDs).
+		Order("turn_id ASC, event_index ASC").
+		Find(&events).Error; err != nil {
+		return fmt.Errorf("failed to attach turn events: %w", err)
+	}
+
+	for _, event := range events {
+		idx, ok := turnIndexByID[event.TurnID]
+		if !ok {
+			continue
+		}
+		turns[idx].Events = append(turns[idx].Events, event)
+	}
+
+	return nil
 }
 
 // GetTurnEvents 获取指定轮次的所有事件

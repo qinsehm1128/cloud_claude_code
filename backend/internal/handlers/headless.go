@@ -612,6 +612,20 @@ func convertTurnToInfo(turn *models.HeadlessTurn) headless.TurnInfo {
 		info.CompletedAt = turn.CompletedAt.Format(time.RFC3339)
 	}
 
+	if len(turn.Events) > 0 {
+		info.Events = make([]headless.EventInfo, len(turn.Events))
+		for i, event := range turn.Events {
+			info.Events[i] = headless.EventInfo{
+				ID:           event.ID,
+				EventIndex:   event.EventIndex,
+				EventType:    event.EventType,
+				EventSubtype: event.EventSubtype,
+				RawJSON:      event.RawJSON,
+				CreatedAt:    event.CreatedAt.Format(time.RFC3339),
+			}
+		}
+	}
+
 	return info
 }
 
@@ -688,7 +702,7 @@ func (h *HeadlessHandler) GetConversationStatus(c *gin.Context) {
 	}
 
 	isRunning := h.headlessManager.IsConversationRunning(uint(conversationID))
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"conversation_id": conversationID,
 		"is_running":      isRunning,

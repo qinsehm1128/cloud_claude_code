@@ -1,4 +1,7 @@
 import api from './api'
+import { normalizeTurnInfo, type TurnInfo } from '../types/headless'
+
+export type { TurnInfo } from '../types/headless'
 
 // ==================== Types ====================
 
@@ -15,26 +18,16 @@ export interface Conversation {
   updated_at: string
 }
 
-export interface TurnInfo {
-  id: number
-  turn_index: number
-  user_prompt: string
-  prompt_source: 'user' | 'strategy' | 'monitoring'
-  assistant_response?: string
-  model?: string
-  input_tokens: number
-  output_tokens: number
-  cost_usd: number
-  duration_ms: number
-  state: 'pending' | 'running' | 'completed' | 'error'
-  error_message?: string
-  created_at: string
-  completed_at?: string
-}
-
 export interface TurnsResponse {
   turns: TurnInfo[]
   has_more: boolean
+}
+
+function normalizeTurnsResponse(data: TurnsResponse): TurnsResponse {
+  return {
+    ...data,
+    turns: (data.turns || []).map(normalizeTurnInfo),
+  }
 }
 
 // ==================== Headless API ====================
@@ -52,7 +45,10 @@ export const headlessApi = {
   getConversationTurns: (containerId: number, conversationId: number, limit?: number, before?: number) =>
     api.get<TurnsResponse>(`/containers/${containerId}/headless/conversations/${conversationId}/turns`, {
       params: { limit, before },
-    }),
+    }).then(response => ({
+      ...response,
+      data: normalizeTurnsResponse(response.data),
+    })),
 }
 
 export default headlessApi

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { buildAssistantRenderItems, isToolRenderItem, type AssistantRenderItem } from './renderItems';
 import type { TurnInfo, StreamEvent, MessageContent } from '@/types/headless';
 
 interface TurnCardProps {
@@ -46,16 +47,23 @@ const stateColors = {
 // 工具调用组件（可折叠）
 function ToolUseBlock({
   content,
-  defaultExpanded = false
+  defaultExpanded = false,
 }: {
   content: MessageContent;
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
+  useEffect(() => {
+    setExpanded(defaultExpanded);
+  }, [defaultExpanded]);
+
   return (
     <div className="my-2 rounded-lg border border-border/50 bg-muted/30 overflow-hidden max-w-full">
       <button
+        type="button"
+        aria-label={`Tool ${content.name || 'call'}`}
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors min-w-0"
       >
@@ -71,7 +79,7 @@ function ToolUseBlock({
         )}
       </button>
       {expanded && content.input && (
-        <div className="px-3 pb-3 border-t border-border/30 overflow-hidden">
+        <div className="px-3 pb-3 border-t border-border/30 overflow-hidden" data-testid="tool-use-body">
           <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 max-w-full">
             {JSON.stringify(content.input, null, 2)}
           </pre>
@@ -84,14 +92,17 @@ function ToolUseBlock({
 // 工具结果组件（可折叠）
 function ToolResultBlock({
   content,
-  defaultExpanded = false
+  defaultExpanded = false,
 }: {
   content: MessageContent;
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
-  // 截取内容预览
+  useEffect(() => {
+    setExpanded(defaultExpanded);
+  }, [defaultExpanded]);
+
   const preview = useMemo(() => {
     if (!content.content) return '';
     const text = typeof content.content === 'string'
@@ -102,12 +113,15 @@ function ToolResultBlock({
 
   return (
     <div className={cn(
-      "my-2 rounded-lg border overflow-hidden max-w-full",
+      'my-2 rounded-lg border overflow-hidden max-w-full',
       content.is_error
-        ? "border-red-500/30 bg-red-500/5"
-        : "border-border/50 bg-muted/20"
+        ? 'border-red-500/30 bg-red-500/5'
+        : 'border-border/50 bg-muted/20',
     )}>
       <button
+        type="button"
+        aria-label={`Tool result ${content.tool_use_id || 'output'}`}
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/30 transition-colors min-w-0"
       >
@@ -125,7 +139,7 @@ function ToolResultBlock({
         )}
       </button>
       {expanded && (
-        <div className="px-3 pb-3 border-t border-border/30 overflow-hidden">
+        <div className="px-3 pb-3 border-t border-border/30 overflow-hidden" data-testid="tool-result-body">
           <pre className="mt-2 text-xs overflow-x-auto bg-background/50 rounded p-2 max-h-96 max-w-full">
             {typeof content.content === 'string'
               ? content.content
@@ -144,6 +158,9 @@ function ThinkingBlock({ content }: { content: string }) {
   return (
     <div className="my-2 rounded-lg border border-purple-500/30 bg-purple-500/5 overflow-hidden">
       <button
+        type="button"
+        aria-label="Thinking"
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-500/10 transition-colors"
       >
@@ -169,71 +186,50 @@ function ThinkingBlock({ content }: { content: string }) {
   );
 }
 
+function renderAssistantItem(
+  item: AssistantRenderItem,
+  shouldExpandToolCards: boolean,
+  showToolCalls: boolean,
+) {
+  const { content, key } = item;
+
+  if (isToolRenderItem(item) && !showToolCalls) {
+    return null;
+  }
+
+  switch (content.type) {
+    case 'text':
+      return (
+        <div key={key} className="text-sm overflow-hidden">
+          <MarkdownRenderer content={content.text || ''} />
+        </div>
+      );
+    case 'tool_use':
+      return <ToolUseBlock key={key} content={content} defaultExpanded={shouldExpandToolCards} />;
+    case 'tool_result':
+      return <ToolResultBlock key={key} content={content} defaultExpanded={shouldExpandToolCards} />;
+    case 'thinking':
+      return <ThinkingBlock key={key} content={content.thinking || ''} />;
+    default:
+      return null;
+  }
+}
+
 export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [showToolCalls, setShowToolCalls] = useState(true);
 
   const StateIcon = stateIcons[turn.state];
-
-  // 从事件中提取内容，分离文本和工具调用
-  const { textContent, toolCalls, hasToolCalls } = useMemo(() => {
-    const textParts: string[] = [];
-    const tools: MessageContent[] = [];
-
-    // 首先检查 turn.assistant_response
-    if (turn.assistant_response) {
-      if (typeof turn.assistant_response === 'string') {
-        textParts.push(turn.assistant_response);
-      } else if (Array.isArray(turn.assistant_response)) {
-        for (const content of turn.assistant_response) {
-          if (content.type === 'text' && content.text) {
-            textParts.push(content.text);
-          } else if (content.type === 'tool_use' || content.type === 'tool_result' || content.type === 'thinking') {
-            tools.push(content);
-          }
-        }
-      }
-    }
-
-    // 然后处理 events（实时数据）
-    if (events?.length) {
-      for (const event of events) {
-        if (event.type === 'assistant' && event.message?.content) {
-          for (const content of event.message.content) {
-            if (content.type === 'text' && content.text) {
-              // 只有当不在 assistant_response 中时才添加
-              if (!turn.assistant_response) {
-                textParts.push(content.text);
-              }
-            } else if (content.type === 'tool_use' || content.type === 'tool_result' || content.type === 'thinking') {
-              // 工具调用总是添加（实时显示）
-              tools.push(content);
-            }
-          }
-        }
-      }
-    }
-
-    return {
-      textContent: textParts.join('\n'),
-      toolCalls: tools,
-      hasToolCalls: tools.length > 0,
-    };
-  }, [turn.assistant_response, events]);
-
-  // 渲染工具调用
-  const renderToolCall = (content: MessageContent, index: number) => {
-    switch (content.type) {
-      case 'tool_use':
-        return <ToolUseBlock key={`tool-${content.id || index}`} content={content} defaultExpanded={isLive} />;
-      case 'tool_result':
-        return <ToolResultBlock key={`result-${content.tool_use_id || index}`} content={content} />;
-      case 'thinking':
-        return <ThinkingBlock key={`thinking-${index}`} content={content.thinking || ''} />;
-      default:
-        return null;
-    }
-  };
+  const renderItems = useMemo(
+    () => buildAssistantRenderItems(turn, events),
+    [turn, events],
+  );
+  const toolCallCount = useMemo(
+    () => renderItems.filter(isToolRenderItem).length,
+    [renderItems],
+  );
+  const shouldExpandToolCards = Boolean(isLive && turn.state === 'running');
+  const hasAssistantContent = renderItems.length > 0;
 
   return (
     <Card className={cn('transition-all', className)}>
@@ -258,7 +254,7 @@ export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
           {/* 状态和操作按钮 */}
           <div className="flex items-center gap-1">
             <StateIcon className={cn('h-4 w-4', stateColors[turn.state], turn.state === 'running' && 'animate-spin')} />
-            {hasToolCalls && (
+            {toolCallCount > 0 && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -267,7 +263,7 @@ export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
                 title={showToolCalls ? 'Hide tool calls' : 'Show tool calls'}
               >
                 <Wrench className="h-3 w-3" />
-                <span>{toolCalls.length}</span>
+                <span>{toolCallCount}</span>
                 {showToolCalls ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
               </Button>
             )}
@@ -286,29 +282,13 @@ export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
 
       <CardContent className="pt-0 overflow-hidden">
         {/* 助手响应 */}
-        {(textContent || hasToolCalls) && (
+        {hasAssistantContent && (
           <div className="flex items-start gap-2 mt-3 min-w-0">
             <div className="p-1.5 rounded-full bg-secondary flex-shrink-0">
               <Bot className="h-4 w-4" />
             </div>
-            <div className="flex-1 min-w-0 overflow-hidden">
-              {/* 文本内容（Markdown 渲染） */}
-              {textContent && (
-                <div className="text-sm overflow-hidden">
-                  <MarkdownRenderer content={textContent} />
-                </div>
-              )}
-
-              {/* 工具调用（可折叠区域） */}
-              {hasToolCalls && showToolCalls && (
-                <div className="mt-3 space-y-1 overflow-hidden">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                    <Wrench className="h-3 w-3" />
-                    <span>Tool Calls ({toolCalls.length})</span>
-                  </div>
-                  {toolCalls.map((tool, idx) => renderToolCall(tool, idx))}
-                </div>
-              )}
+            <div className="flex-1 min-w-0 overflow-hidden space-y-3" data-testid="assistant-response">
+              {renderItems.map(item => renderAssistantItem(item, shouldExpandToolCards, showToolCalls))}
             </div>
           </div>
         )}
