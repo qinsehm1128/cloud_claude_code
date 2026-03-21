@@ -522,7 +522,92 @@ func (s *HeadlessSession) OnTurnComplete(success bool, errorMsg string) {
 	
 	log.Printf("[HeadlessSession %s] Broadcasting turn_complete event: turnID=%d, state=%s", s.ID, turnID, completePayload.State)
 	s.broadcastToClients(completeEvent)
-	
+
 	// 重置 CurrentTurnID，防止重复触发
 	s.SetCurrentTurnID(0)
+
+	// 自动执行队列中的下一个消息
+	go s.ProcessNextQueuedTurn()
+}
+
+// BroadcastQueueUpdate 广播队列变更给所有客户端
+func (s *HeadlessSession) BroadcastQueueUpdate(hm *HeadlessHistoryManager) {
+	if hm == nil {
+		return
+	}
+	pendingTurns, err := hm.GetPendingTurns(s.ConversationID)
+	if err != nil {
+		log.Printf("[HeadlessSession %s] Failed to get pending turns for broadcast: %v", s.ID, err)
+		return
+	}
+
+	queuedInfos := make([]QueuedTurnInfo, len(pendingTurns))
+	for i, turn := range pendingTurns {
+		queuedInfos[i] = QueuedTurnInfo{
+			TurnID:    turn.ID,
+			TurnIndex: turn.TurnIndex,
+			Prompt:    turn.UserPrompt,
+			Source:    turn.PromptSource,
+			State:     turn.State,
+		}
+	}
+
+	payload := &QueueUpdatePayload{QueuedTurns: queuedInfos}
+
+	// 使用 meta event 广播
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	evt := &StreamEvent{
+		Type:   "queue_update",
+		IsMeta: true,
+		Result: string(payloadJSON),
+	}
+	s.broadcastToClients(evt)
+}
+
+// ProcessNextQueuedTurn 从队列取出下一个 pending turn 并执行
+func (s *HeadlessSession) ProcessNextQueuedTurn() {
+	if s.historyManager == nil || s.ConversationID == 0 || s.IsClosed() {
+		return
+	}
+
+	// 小延迟确保状态传播完成
+	time.Sleep(100 * time.Millisecond)
+
+	if s.GetState() != HeadlessStateIdle && s.GetState() != HeadlessStateError {
+		return
+	}
+
+	nextTurn, err := s.historyManager.PopNextPendingTurn(s.ConversationID)
+	if err != nil {
+		log.Printf("[HeadlessSession %s] Failed to pop next queued turn: %v", s.ID, err)
+		return
+	}
+	if nextTurn == nil {
+		// 没有排队的消息，广播空队列
+		s.BroadcastQueueUpdate(s.historyManager)
+		return
+	}
+
+	log.Printf("[HeadlessSession %s] Auto-dequeuing turn %d: %s", s.ID, nextTurn.ID, nextTurn.UserPrompt)
+
+	s.SetCurrentTurnID(nextTurn.ID)
+	s.responseBuilder.Reset()
+	s.SetState(HeadlessStateRunning)
+
+	// 广播队列更新（移除了刚出队的 turn）
+	s.BroadcastQueueUpdate(s.historyManager)
+
+	// 启动 Claude 进程
+	ctx := context.Background()
+	if err := s.StartClaudeProcess(ctx, nextTurn.UserPrompt); err != nil {
+		log.Printf("[HeadlessSession %s] Failed to start claude for queued turn %d: %v", s.ID, nextTurn.ID, err)
+		s.historyManager.FailTurn(nextTurn.ID, err.Error())
+		s.SetState(HeadlessStateError)
+		s.SetCurrentTurnID(0)
+		// 尝试执行下一个
+		go s.ProcessNextQueuedTurn()
+	}
 }

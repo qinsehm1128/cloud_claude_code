@@ -2,6 +2,7 @@ package headless
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -249,6 +250,142 @@ func (m *HeadlessHistoryManager) FailTurn(turnID uint, errorMessage string) erro
 	}
 
 	return nil
+}
+
+// FixStaleTurns 修正对话中残留的 "running" 或 "pending" 状态的轮次
+// 当 session 已经不在运行（idle/closed/无 session），但 DB 中的 turn 还是 running/pending 状态时
+// 将其修正为 "error" 状态，避免前端一直显示 processing
+func (m *HeadlessHistoryManager) FixStaleTurns(conversationID uint) {
+	result := m.db.Model(&models.HeadlessTurn{}).
+		Where("conversation_id = ? AND state IN ?", conversationID, []string{
+			models.HeadlessTurnStateRunning,
+			models.HeadlessTurnStatePending,
+		}).
+		Updates(map[string]interface{}{
+			"state":         models.HeadlessTurnStateError,
+			"error_message": "Session ended unexpectedly",
+			"completed_at":  time.Now(),
+		})
+	if result.Error != nil {
+		log.Printf("[HeadlessHistoryManager] Failed to fix stale turns for conversation %d: %v", conversationID, result.Error)
+	} else if result.RowsAffected > 0 {
+		log.Printf("[HeadlessHistoryManager] Fixed %d stale turns for conversation %d", result.RowsAffected, conversationID)
+	}
+}
+
+// CreatePendingTurn 创建排队中的轮次（state=pending）
+func (m *HeadlessHistoryManager) CreatePendingTurn(conversationID uint, prompt string, source string) (*models.HeadlessTurn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var lastErr error
+	for attempt := 0; attempt < maxInsertRetries; attempt++ {
+		var turn *models.HeadlessTurn
+
+		err := m.db.Transaction(func(tx *gorm.DB) error {
+			var maxIndex int
+			tx.Model(&models.HeadlessTurn{}).
+				Where("conversation_id = ?", conversationID).
+				Select("COALESCE(MAX(turn_index), -1)").
+				Scan(&maxIndex)
+
+			turn = &models.HeadlessTurn{
+				ConversationID: conversationID,
+				TurnIndex:      maxIndex + 1,
+				UserPrompt:     prompt,
+				PromptSource:   source,
+				State:          models.HeadlessTurnStatePending,
+			}
+
+			if err := tx.Create(turn).Error; err != nil {
+				return fmt.Errorf("failed to create pending turn: %w", err)
+			}
+			return nil
+		})
+
+		if err == nil {
+			return turn, nil
+		}
+		lastErr = err
+		if !isUniqueConstraintError(err) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("failed to create pending turn after retries: %w", lastErr)
+}
+
+// GetPendingTurns 获取对话中所有排队中的轮次（按 turn_index 升序）
+func (m *HeadlessHistoryManager) GetPendingTurns(conversationID uint) ([]models.HeadlessTurn, error) {
+	var turns []models.HeadlessTurn
+	if err := m.db.Where("conversation_id = ? AND state = ?", conversationID, models.HeadlessTurnStatePending).
+		Order("turn_index ASC").
+		Find(&turns).Error; err != nil {
+		return nil, fmt.Errorf("failed to get pending turns: %w", err)
+	}
+	return turns, nil
+}
+
+// DeletePendingTurn 删除排队中的轮次（仅 state=pending 时允许）
+func (m *HeadlessHistoryManager) DeletePendingTurn(turnID uint) error {
+	result := m.db.Where("id = ? AND state = ?", turnID, models.HeadlessTurnStatePending).
+		Delete(&models.HeadlessTurn{})
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete pending turn: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("turn %d not found or not in pending state", turnID)
+	}
+	return nil
+}
+
+// UpdatePendingTurnPrompt 修改排队中的轮次的 prompt（仅 state=pending 时允许）
+func (m *HeadlessHistoryManager) UpdatePendingTurnPrompt(turnID uint, newPrompt string) error {
+	result := m.db.Model(&models.HeadlessTurn{}).
+		Where("id = ? AND state = ?", turnID, models.HeadlessTurnStatePending).
+		Update("user_prompt", newPrompt)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update pending turn: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("turn %d not found or not in pending state", turnID)
+	}
+	return nil
+}
+
+// PopNextPendingTurn 取出下一个排队中的轮次并将其状态改为 running
+func (m *HeadlessHistoryManager) PopNextPendingTurn(conversationID uint) (*models.HeadlessTurn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var turn models.HeadlessTurn
+	err := m.db.Transaction(func(tx *gorm.DB) error {
+		// 获取第一个 pending turn
+		if err := tx.Where("conversation_id = ? AND state = ?", conversationID, models.HeadlessTurnStatePending).
+			Order("turn_index ASC").
+			First(&turn).Error; err != nil {
+			return err
+		}
+		// 更新为 running
+		if err := tx.Model(&turn).Updates(map[string]interface{}{
+			"state": models.HeadlessTurnStateRunning,
+		}).Error; err != nil {
+			return fmt.Errorf("failed to update turn state: %w", err)
+		}
+		// 更新对话状态
+		if err := tx.Model(&models.HeadlessConversation{}).
+			Where("id = ?", conversationID).
+			Update("state", models.HeadlessConversationStateRunning).Error; err != nil {
+			return fmt.Errorf("failed to update conversation state: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil // 没有排队中的轮次
+		}
+		return nil, fmt.Errorf("failed to pop next pending turn: %w", err)
+	}
+	return &turn, nil
 }
 
 // GetRecentTurns 获取最近 N 轮对话（用于初始加载）

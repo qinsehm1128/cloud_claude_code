@@ -197,6 +197,11 @@ func (c *headlessClient) sendHistory(session *headless.HeadlessSession) {
 		return
 	}
 
+	// 如果 session 不在运行状态，修正残留的 running/pending turns
+	if !session.IsRunning() {
+		historyManager.FixStaleTurns(session.ConversationID)
+	}
+
 	// 获取最近轮次对话
 	turns, hasMore, err := historyManager.GetRecentTurns(session.ConversationID, defaultHistoryLimitOld)
 	if err != nil {
@@ -264,14 +269,18 @@ func (c *headlessClient) subscribeToSession(session *headless.HeadlessSession) {
 				if !ok {
 					return
 				}
-				// 检查是否为轮次完成事件
+				// 检查是否为特殊元事件
 				if evt.Type == "turn_complete" {
-					// 发送轮次完成消息
 					var payload headless.TurnCompletePayload
 					if evt.Result != "" && json.Unmarshal([]byte(evt.Result), &payload) == nil {
 						c.sendResponse(headless.HeadlessResponseTypeTurnComplete, &payload)
 					} else {
 						c.sendResponse(headless.HeadlessResponseTypeTurnComplete, evt.Result)
+					}
+				} else if evt.Type == "queue_update" {
+					var payload headless.QueueUpdatePayload
+					if evt.Result != "" && json.Unmarshal([]byte(evt.Result), &payload) == nil {
+						c.sendResponse(headless.HeadlessResponseTypeQueueUpdate, &payload)
 					}
 				} else {
 					c.sendResponse(headless.HeadlessResponseTypeEvent, evt)
@@ -373,8 +382,11 @@ func (c *headlessClient) handleMessage(req *headless.HeadlessRequest) {
 		c.handleLoadMore(req)
 	case headless.HeadlessRequestTypeModeSwitch:
 		c.handleModeSwitch(req)
+	case headless.HeadlessRequestTypeDeleteQueued:
+		c.handleDeleteQueued(req)
+	case headless.HeadlessRequestTypeEditQueued:
+		c.handleEditQueued(req)
 	case headless.HeadlessRequestTypePing:
-		// respond to keep proxy read timeout alive
 		c.sendResponse(headless.HeadlessResponseTypePong, nil)
 		return
 	default:
@@ -384,10 +396,10 @@ func (c *headlessClient) handleMessage(req *headless.HeadlessRequest) {
 
 // handleStart 处理创建会话请求
 func (c *headlessClient) handleStart(req *headless.HeadlessRequest) {
-	// 检查是否已有会话
+	// 如果当前 client 已绑定 session，仅取消订阅（不关闭 session，让它继续在后台运行）
 	if c.session != nil && !c.session.IsClosed() {
-		c.sendError(headless.ErrorCodeSessionBusy, "Session already exists")
-		return
+		c.unsubscribeFromSession()
+		c.session = nil
 	}
 
 	// 切换到 Headless 模式
@@ -403,8 +415,6 @@ func (c *headlessClient) handleStart(req *headless.HeadlessRequest) {
 			ClosedSessions: closedCount,
 		})
 	}
-
-	c.killClaudeProcesses()
 
 	// 创建会话
 	workDir := c.workDir
@@ -557,6 +567,49 @@ func (c *headlessClient) handleModeSwitch(req *headless.HeadlessRequest) {
 		Mode:           targetMode,
 		ClosedSessions: closedCount,
 	})
+}
+
+// handleDeleteQueued 处理删除排队消息请求
+func (c *headlessClient) handleDeleteQueued(req *headless.HeadlessRequest) {
+	if c.session == nil {
+		c.sendError(headless.ErrorCodeSessionNotFound, "No active session")
+		return
+	}
+	turnID, ok := req.Payload["turn_id"].(float64)
+	if !ok || turnID <= 0 {
+		c.sendError(headless.ErrorCodeInvalidRequest, "Missing or invalid turn_id")
+		return
+	}
+	hm := c.handler.headlessManager.GetHistoryManager()
+	if err := hm.DeletePendingTurn(uint(turnID)); err != nil {
+		c.sendError(headless.ErrorCodeInternalError, err.Error())
+		return
+	}
+	c.session.BroadcastQueueUpdate(hm)
+}
+
+// handleEditQueued 处理编辑排队消息请求
+func (c *headlessClient) handleEditQueued(req *headless.HeadlessRequest) {
+	if c.session == nil {
+		c.sendError(headless.ErrorCodeSessionNotFound, "No active session")
+		return
+	}
+	turnID, ok := req.Payload["turn_id"].(float64)
+	if !ok || turnID <= 0 {
+		c.sendError(headless.ErrorCodeInvalidRequest, "Missing or invalid turn_id")
+		return
+	}
+	newPrompt, ok := req.Payload["new_prompt"].(string)
+	if !ok || newPrompt == "" {
+		c.sendError(headless.ErrorCodeInvalidRequest, "Missing or empty new_prompt")
+		return
+	}
+	hm := c.handler.headlessManager.GetHistoryManager()
+	if err := hm.UpdatePendingTurnPrompt(uint(turnID), newPrompt); err != nil {
+		c.sendError(headless.ErrorCodeInternalError, err.Error())
+		return
+	}
+	c.session.BroadcastQueueUpdate(hm)
 }
 
 // sendResponse 发送响应
@@ -872,6 +925,9 @@ func (c *conversationClient) sendHistoryByConversationID() {
 		return
 	}
 
+	// 无活跃 session，修正残留的 running/pending turns
+	historyManager.FixStaleTurns(c.conversationID)
+
 	// 获取最近轮次对话
 	turns, hasMore, err := historyManager.GetRecentTurns(c.conversationID, defaultHistoryLimit)
 	if err != nil {
@@ -896,6 +952,11 @@ func (c *conversationClient) sendHistory(session *headless.HeadlessSession) {
 	historyManager := c.handler.headlessManager.GetHistoryManager()
 	if historyManager == nil {
 		return
+	}
+
+	// 如果 session 不在运行状态，修正残留的 running/pending turns
+	if !session.IsRunning() {
+		historyManager.FixStaleTurns(session.ConversationID)
 	}
 
 	// 获取最近轮次对话
@@ -965,14 +1026,18 @@ func (c *conversationClient) subscribeToSession(session *headless.HeadlessSessio
 				if !ok {
 					return
 				}
-				// 检查是否为轮次完成事件
+				// 检查是否为特殊元事件
 				if evt.Type == "turn_complete" {
-					// 发送轮次完成消息
 					var payload headless.TurnCompletePayload
 					if evt.Result != "" && json.Unmarshal([]byte(evt.Result), &payload) == nil {
 						c.sendResponse(headless.HeadlessResponseTypeTurnComplete, &payload)
 					} else {
 						c.sendResponse(headless.HeadlessResponseTypeTurnComplete, evt.Result)
+					}
+				} else if evt.Type == "queue_update" {
+					var payload headless.QueueUpdatePayload
+					if evt.Result != "" && json.Unmarshal([]byte(evt.Result), &payload) == nil {
+						c.sendResponse(headless.HeadlessResponseTypeQueueUpdate, &payload)
 					}
 				} else {
 					c.sendResponse(headless.HeadlessResponseTypeEvent, evt)
@@ -1072,6 +1137,10 @@ func (c *conversationClient) handleMessage(req *headless.HeadlessRequest) {
 		c.handleCancel(req)
 	case headless.HeadlessRequestTypeLoadMore:
 		c.handleLoadMore(req)
+	case headless.HeadlessRequestTypeDeleteQueued:
+		c.handleDeleteQueued(req)
+	case headless.HeadlessRequestTypeEditQueued:
+		c.handleEditQueued(req)
 	case headless.HeadlessRequestTypePing:
 		c.sendResponse(headless.HeadlessResponseTypePong, nil)
 		return
@@ -1220,6 +1289,49 @@ func (c *conversationClient) handleLoadMore(req *headless.HeadlessRequest) {
 	})
 }
 
+// handleDeleteQueued 处理删除排队消息请求
+func (c *conversationClient) handleDeleteQueued(req *headless.HeadlessRequest) {
+	if c.session == nil {
+		c.sendError(headless.ErrorCodeSessionNotFound, "No active session")
+		return
+	}
+	turnID, ok := req.Payload["turn_id"].(float64)
+	if !ok || turnID <= 0 {
+		c.sendError(headless.ErrorCodeInvalidRequest, "Missing or invalid turn_id")
+		return
+	}
+	hm := c.handler.headlessManager.GetHistoryManager()
+	if err := hm.DeletePendingTurn(uint(turnID)); err != nil {
+		c.sendError(headless.ErrorCodeInternalError, err.Error())
+		return
+	}
+	c.session.BroadcastQueueUpdate(hm)
+}
+
+// handleEditQueued 处理编辑排队消息请求
+func (c *conversationClient) handleEditQueued(req *headless.HeadlessRequest) {
+	if c.session == nil {
+		c.sendError(headless.ErrorCodeSessionNotFound, "No active session")
+		return
+	}
+	turnID, ok := req.Payload["turn_id"].(float64)
+	if !ok || turnID <= 0 {
+		c.sendError(headless.ErrorCodeInvalidRequest, "Missing or invalid turn_id")
+		return
+	}
+	newPrompt, ok := req.Payload["new_prompt"].(string)
+	if !ok || newPrompt == "" {
+		c.sendError(headless.ErrorCodeInvalidRequest, "Missing or empty new_prompt")
+		return
+	}
+	hm := c.handler.headlessManager.GetHistoryManager()
+	if err := hm.UpdatePendingTurnPrompt(uint(turnID), newPrompt); err != nil {
+		c.sendError(headless.ErrorCodeInternalError, err.Error())
+		return
+	}
+	c.session.BroadcastQueueUpdate(hm)
+}
+
 // sendResponse 发送响应
 func (c *conversationClient) sendResponse(respType string, payload interface{}) {
 	select {
@@ -1358,6 +1470,11 @@ func (h *HeadlessHandler) GetConversationTurns(c *gin.Context) {
 	if historyManager == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "History manager not available"})
 		return
+	}
+
+	// 如果对话没有活跃的 session，修正残留的 running/pending turns
+	if !h.headlessManager.IsConversationRunning(uint(conversationID)) {
+		historyManager.FixStaleTurns(uint(conversationID))
 	}
 
 	var turns []models.HeadlessTurn

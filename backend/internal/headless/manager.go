@@ -301,18 +301,19 @@ func (m *HeadlessManager) SendPrompt(sessionID, prompt string, source string) er
 }
 
 // SendPromptWithModel 发送 prompt 到会话（带模型参数）
+// 如果 session 正在运行，消息会被加入队列等待执行
 func (m *HeadlessManager) SendPromptWithModel(sessionID, prompt string, source string, model string) error {
 	session, ok := m.GetSession(sessionID)
 	if !ok {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
-	// 检查状态
-	if session.GetState() == HeadlessStateRunning {
-		return fmt.Errorf("session is busy")
-	}
 	if session.GetState() == HeadlessStateClosed {
 		return fmt.Errorf("session is closed")
+	}
+
+	if source == "" {
+		source = models.HeadlessPromptSourceUser
 	}
 
 	// 设置模型（如果提供）
@@ -320,10 +321,19 @@ func (m *HeadlessManager) SendPromptWithModel(sessionID, prompt string, source s
 		session.Model = model
 	}
 
-	// 创建新轮次
-	if source == "" {
-		source = models.HeadlessPromptSourceUser
+	// 如果 session 正在运行，将消息加入队列
+	if session.GetState() == HeadlessStateRunning {
+		_, err := m.historyManager.CreatePendingTurn(session.ConversationID, prompt, source)
+		if err != nil {
+			return fmt.Errorf("failed to queue prompt: %w", err)
+		}
+		// 广播队列更新给所有客户端
+		session.BroadcastQueueUpdate(m.historyManager)
+		log.Printf("[HeadlessManager] Queued prompt for session %s (session busy)", sessionID)
+		return nil
 	}
+
+	// Session 空闲，直接执行
 	turn, err := m.historyManager.StartTurn(session.ConversationID, prompt, source)
 	if err != nil {
 		return fmt.Errorf("failed to start turn: %w", err)

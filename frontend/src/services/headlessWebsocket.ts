@@ -8,6 +8,7 @@ import type {
   TurnCompletePayload,
   ErrorPayload,
   ModeSwitchedPayload,
+  QueueUpdatePayload,
 } from '../types/headless';
 
 type MessageHandler = (type: HeadlessResponseType, payload: unknown) => void;
@@ -180,10 +181,13 @@ export class HeadlessWebSocketService {
   }
 
   // 创建会话
-  startSession(workDir?: string): void {
+  startSession(workDir?: string, forceNew?: boolean): void {
+    const payload: Record<string, unknown> = {};
+    if (workDir) payload.work_dir = workDir;
+    if (forceNew) payload.force_new = true;
     this.send({
       type: 'headless_start',
-      payload: workDir ? { work_dir: workDir } : {},
+      payload,
     });
   }
 
@@ -223,6 +227,22 @@ export class HeadlessWebSocketService {
     });
   }
 
+  // 删除排队中的消息
+  deleteQueuedTurn(turnId: number): void {
+    this.send({
+      type: 'delete_queued',
+      payload: { turn_id: turnId },
+    });
+  }
+
+  // 编辑排队中的消息
+  editQueuedTurn(turnId: number, newPrompt: string): void {
+    this.send({
+      type: 'edit_queued',
+      payload: { turn_id: turnId, new_prompt: newPrompt },
+    });
+  }
+
   // 检查连接状态
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
@@ -242,7 +262,7 @@ export class HeadlessWebSocketService {
         // 发送 ping 消息保持连接活跃
         this.send({ type: 'ping', payload: {} });
       }
-    }, 30000);
+    }, 15000); // 15 秒心跳，保持连接活跃
   }
 
   // 停止心跳
@@ -326,5 +346,13 @@ export function isModeSwitchedPayload(payload: unknown): payload is ModeSwitched
     payload !== null &&
     'mode' in payload &&
     'closed_sessions' in payload
+  );
+}
+
+export function isQueueUpdatePayload(payload: unknown): payload is QueueUpdatePayload {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'queued_turns' in payload
   );
 }

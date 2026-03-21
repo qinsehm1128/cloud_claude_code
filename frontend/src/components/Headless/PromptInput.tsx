@@ -27,23 +27,20 @@ export function PromptInput({
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if (trimmed && !isRunning && !disabled) {
+    if (trimmed && !disabled) {
       onSend(trimmed);
       setValue('');
-      // 重置 textarea 高度
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
     }
-  }, [value, isRunning, disabled, onSend]);
+  }, [value, disabled, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // 忽略 IME 输入过程中的 Enter
       if (isComposingRef.current) {
         return;
       }
-      // Ctrl/Cmd + Enter 发送
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         handleSend();
@@ -60,15 +57,12 @@ export function PromptInput({
     isComposingRef.current = false;
   }, []);
 
-  // 自动调整高度
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value);
-    // 自动调整高度
     const textarea = e.target;
     textarea.style.height = 'auto';
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
   }, []);
-
 
   return (
     <div className={cn('flex items-end gap-2 p-4 border-t bg-background', className)}>
@@ -79,27 +73,20 @@ export function PromptInput({
         onKeyDown={handleKeyDown}
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
-        placeholder={placeholder}
+        placeholder={isRunning ? 'Type to queue a message...' : placeholder}
         disabled={disabled}
         className="min-h-[40px] max-h-[200px] resize-none"
         rows={1}
       />
-      
-      {isRunning ? (
-        <Button
-          variant="destructive"
-          size="icon"
-          onClick={onCancel}
-          className="shrink-0"
-        >
-          <Square className="h-4 w-4" />
-        </Button>
-      ) : (
+
+      <div className="flex gap-1 shrink-0">
+        {/* 发送按钮 - 始终可用（运行中发送的消息会进入队列） */}
         <Button
           size="icon"
           onClick={handleSend}
           disabled={!value.trim() || disabled}
-          className="shrink-0"
+          variant={isRunning ? 'secondary' : 'default'}
+          title={isRunning ? 'Queue message' : 'Send message'}
         >
           {disabled ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -107,7 +94,18 @@ export function PromptInput({
             <Send className="h-4 w-4" />
           )}
         </Button>
-      )}
+        {/* 取消按钮 - 仅在运行中显示 */}
+        {isRunning && (
+          <Button
+            variant="destructive"
+            size="icon"
+            onClick={onCancel}
+            title="Cancel current execution"
+          >
+            <Square className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
