@@ -14,6 +14,8 @@ import {
   FileText,
   Eye,
   EyeOff,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -28,6 +30,8 @@ interface TurnCardProps {
   events?: StreamEvent[];
   isLive?: boolean;
   className?: string;
+  onDelete?: (turnId: number) => void;
+  onEdit?: (turnId: number, newPrompt: string) => void;
 }
 
 const stateIcons = {
@@ -215,10 +219,13 @@ function renderAssistantItem(
   }
 }
 
-export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
+export function TurnCard({ turn, events, isLive, className, onDelete, onEdit }: TurnCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [showToolCalls, setShowToolCalls] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
 
+  const isPending = turn.state === 'pending';
   const StateIcon = stateIcons[turn.state];
   const renderItems = useMemo(
     () => buildAssistantRenderItems(turn, events),
@@ -231,14 +238,31 @@ export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
   const shouldExpandToolCards = Boolean(isLive && turn.state === 'running');
   const hasAssistantContent = renderItems.length > 0;
 
+  const handleStartEdit = () => {
+    setEditValue(turn.user_prompt);
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = () => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== turn.user_prompt && onEdit) {
+      onEdit(turn.turn_id ?? turn.id, trimmed);
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+  };
+
   return (
-    <Card className={cn('transition-all overflow-hidden', className)}>
+    <Card className={cn('transition-all overflow-hidden', isPending && 'opacity-70 border-dashed', className)}>
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between">
           {/* 用户输入 */}
           <div className="flex items-start gap-2 flex-1">
-            <div className="p-1.5 rounded-full bg-primary/10">
-              <User className="h-4 w-4 text-primary" />
+            <div className={cn('p-1.5 rounded-full', isPending ? 'bg-muted' : 'bg-primary/10')}>
+              <User className={cn('h-4 w-4', isPending ? 'text-muted-foreground' : 'text-primary')} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
@@ -246,13 +270,59 @@ export function TurnCard({ turn, events, isLive, className }: TurnCardProps) {
                 <Badge variant="outline" className="text-xs">
                   {turn.prompt_source}
                 </Badge>
+                {isPending && (
+                  <Badge variant="secondary" className="text-xs">
+                    Queued
+                  </Badge>
+                )}
               </div>
-              <p className="text-sm font-medium">{turn.user_prompt}</p>
+              {isEditing ? (
+                <div className="flex flex-col gap-2">
+                  <textarea
+                    className="w-full text-sm p-2 border rounded-md bg-background resize-none min-h-[60px]"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    autoFocus
+                  />
+                  <div className="flex gap-1">
+                    <Button size="sm" className="h-6 text-xs" onClick={handleSaveEdit}>
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={handleCancelEdit}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm font-medium">{turn.user_prompt}</p>
+              )}
             </div>
           </div>
 
           {/* 状态和操作按钮 */}
           <div className="flex items-center gap-1">
+            {isPending && onEdit && !isEditing && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={handleStartEdit}
+                title="Edit queued message"
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+            )}
+            {isPending && onDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                onClick={() => onDelete(turn.turn_id ?? turn.id)}
+                title="Delete queued message"
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
             <StateIcon className={cn('h-4 w-4', stateColors[turn.state], turn.state === 'running' && 'animate-spin')} />
             {toolCallCount > 0 && (
               <Button

@@ -7,6 +7,7 @@ import {
   isTurnCompletePayload,
   isErrorPayload,
   isModeSwitchedPayload,
+  isQueueUpdatePayload,
 } from '../services/headlessWebsocket';
 import {
   extractAssistantMessageContentFromStreamEvents,
@@ -33,6 +34,7 @@ const initialState: HeadlessSessionState = {
   hasMoreHistory: false,
   loadingHistory: false,
   currentTurnEvents: [],
+  queuedTurns: [],
   connected: false,
   connecting: false,
   error: null,
@@ -57,6 +59,10 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
   const connectingRef = useRef(false);
   const lastPromptRef = useRef<{ text: string; source: string } | null>(null);
   const pendingPromptRef = useRef<{ text: string; source: string } | null>(null);
+  // 当正在创建新会话时，忽略 auto-recovery 的 session_info
+  const ignoreAutoRecoveryRef = useRef(false);
+  // 断连 grace period timer，防止短暂断连导致 UI 闪烁
+  const disconnectGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 安全的状态更新
   const safeSetState = useCallback((updater: (prev: HeadlessSessionState) => HeadlessSessionState) => {
@@ -67,6 +73,34 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
 
   // 处理 session_info 消息
   const handleSessionInfo = useCallback((payload: SessionInfo) => {
+    // 如果正在创建新会话，忽略自动恢复的旧 session_info（等待 force_new 后端返回的新 session_info）
+    if (ignoreAutoRecoveryRef.current) {
+      // 这是 force_new startSession 发送前，handleConnection 自动恢复的旧 session
+      // 跳过，不触发 onSessionCreated
+      ignoreAutoRecoveryRef.current = false;
+      // 仍然更新内部状态但不通知父组件
+      safeSetState(prev => ({
+        ...prev,
+        sessionId: payload.session_id,
+        claudeSessionId: payload.claude_session_id || null,
+        state: payload.state,
+        conversationId: payload.conversation_id,
+        currentTurnId: payload.current_turn_id || null,
+      }));
+
+      // 如果有 pending prompt，现在发送
+      if (pendingPromptRef.current && payload.state === 'idle') {
+        const { text, source } = pendingPromptRef.current;
+        pendingPromptRef.current = null;
+        setTimeout(() => {
+          if (wsRef.current?.isConnected()) {
+            wsRef.current.sendPrompt(text, source);
+          }
+        }, 50);
+      }
+      return;
+    }
+
     safeSetState(prev => {
       // 如果是新会话（之前没有 conversationId 或 conversationId 变了），通知父组件
       if (payload.conversation_id && prev.conversationId !== payload.conversation_id) {
@@ -214,6 +248,8 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
         }
         break;
       case 'no_session':
+        // 清除 ignoreAutoRecovery 标志（没有旧会话需要忽略）
+        ignoreAutoRecoveryRef.current = false;
         safeSetState(prev => ({
           ...prev,
           sessionId: null,
@@ -250,6 +286,14 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
           handleModeSwitched(payload);
         }
         break;
+      case 'queue_update':
+        if (isQueueUpdatePayload(payload)) {
+          safeSetState(prev => ({
+            ...prev,
+            queuedTurns: payload.queued_turns,
+          }));
+        }
+        break;
       case 'pty_closed':
         break;
       case 'pong':
@@ -257,17 +301,59 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
     }
   }, [handleSessionInfo, handleHistory, handleEvent, handleTurnComplete, handleError, handleModeSwitched, safeSetState]);
 
+  // 标记下次 session_info 为自动恢复，不触发 onSessionCreated
+  const prepareForNewSession = useCallback(() => {
+    ignoreAutoRecoveryRef.current = true;
+  }, []);
+
+  // 连接状态处理器（带 grace period 防止断连闪烁）
+  const handleWsConnect = useCallback(() => {
+    // 连接成功时，取消 grace period
+    if (disconnectGraceTimerRef.current) {
+      clearTimeout(disconnectGraceTimerRef.current);
+      disconnectGraceTimerRef.current = null;
+    }
+    safeSetState(prev => ({
+      ...prev,
+      connected: true,
+      connecting: false,
+      error: null,
+    }));
+  }, [safeSetState]);
+
+  const handleWsDisconnect = useCallback(() => {
+    // 使用 grace period 延迟设置断连状态，防止短暂断连导致 UI 闪烁
+    if (disconnectGraceTimerRef.current) {
+      clearTimeout(disconnectGraceTimerRef.current);
+    }
+    disconnectGraceTimerRef.current = setTimeout(() => {
+      disconnectGraceTimerRef.current = null;
+      safeSetState(prev => ({
+        ...prev,
+        connected: false,
+        connecting: false,
+      }));
+    }, 1500); // 1.5 秒 grace period
+  }, [safeSetState]);
+
+  const handleWsError = useCallback(() => {
+    safeSetState(prev => ({
+      ...prev,
+      connecting: false,
+    }));
+  }, [safeSetState]);
+
   // 连接到指定的 conversationId
   const connectToConversation = useCallback(async (targetConversationId: number) => {
     if (connectingRef.current) {
       return;
     }
-    
+
     // 如果已经连接到这个对话，不需要重连
     if (wsRef.current?.isConnected() && connectedConversationId === targetConversationId) {
       return;
     }
-    
+
     // 断开现有连接
     if (wsRef.current) {
       wsRef.current.disconnect();
@@ -276,11 +362,11 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
 
     connectingRef.current = true;
     setConnectedConversationId(targetConversationId);
-    
+
     // 重置状态
-    safeSetState(prev => ({ 
-      ...prev, 
-      connecting: true, 
+    safeSetState(prev => ({
+      ...prev,
+      connecting: true,
       error: null,
       turns: [],
       currentTurnEvents: [],
@@ -292,36 +378,14 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
       const ws = new HeadlessWebSocketService({ conversationId: targetConversationId });
       ws.setMessageHandler(handleMessage);
       ws.setConnectionHandlers({
-        onConnect: () => {
-          safeSetState(prev => ({
-            ...prev,
-            connected: true,
-            connecting: false,
-            error: null,
-          }));
-        },
-        onDisconnect: () => {
-          safeSetState(prev => ({
-            ...prev,
-            connected: false,
-            connecting: false,
-          }));
-        },
-        onError: () => {
-          safeSetState(prev => ({
-            ...prev,
-            connecting: false,
-          }));
-        },
+        onConnect: handleWsConnect,
+        onDisconnect: handleWsDisconnect,
+        onError: handleWsError,
       });
       wsRef.current = ws;
       await ws.connect();
-      
-      safeSetState(prev => ({
-        ...prev,
-        connected: true,
-        connecting: false,
-      }));
+
+      handleWsConnect();
     } catch (error) {
       wsRef.current?.disconnect();
       wsRef.current = null;
@@ -335,7 +399,7 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
     } finally {
       connectingRef.current = false;
     }
-  }, [handleMessage, safeSetState, connectedConversationId]);
+  }, [handleMessage, handleWsConnect, handleWsDisconnect, handleWsError, safeSetState, connectedConversationId]);
 
   // 连接到容器（旧模式，用于创建新会话）
   const connectToContainer = useCallback(async (targetContainerId: number) => {
@@ -364,36 +428,14 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
       const ws = new HeadlessWebSocketService({ containerId: targetContainerId });
       ws.setMessageHandler(handleMessage);
       ws.setConnectionHandlers({
-        onConnect: () => {
-          safeSetState(prev => ({
-            ...prev,
-            connected: true,
-            connecting: false,
-            error: null,
-          }));
-        },
-        onDisconnect: () => {
-          safeSetState(prev => ({
-            ...prev,
-            connected: false,
-            connecting: false,
-          }));
-        },
-        onError: () => {
-          safeSetState(prev => ({
-            ...prev,
-            connecting: false,
-          }));
-        },
+        onConnect: handleWsConnect,
+        onDisconnect: handleWsDisconnect,
+        onError: handleWsError,
       });
       wsRef.current = ws;
       await ws.connect();
-      
-      safeSetState(prev => ({
-        ...prev,
-        connected: true,
-        connecting: false,
-      }));
+
+      handleWsConnect();
     } catch (error) {
       wsRef.current?.disconnect();
       wsRef.current = null;
@@ -406,10 +448,15 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
     } finally {
       connectingRef.current = false;
     }
-  }, [handleMessage, safeSetState]);
+  }, [handleMessage, handleWsConnect, handleWsDisconnect, handleWsError, safeSetState]);
 
-  // 断开连接
+  // 断开连接（主动断开，无需 grace period）
   const disconnect = useCallback(() => {
+    // 取消 grace period timer
+    if (disconnectGraceTimerRef.current) {
+      clearTimeout(disconnectGraceTimerRef.current);
+      disconnectGraceTimerRef.current = null;
+    }
     wsRef.current?.disconnect();
     wsRef.current = null;
     setConnectedConversationId(null);
@@ -421,50 +468,61 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
   }, [safeSetState]);
 
   // 创建会话
-  const startSession = useCallback((workDir?: string) => {
+  const startSession = useCallback((workDir?: string, forceNew?: boolean) => {
     if (!wsRef.current?.isConnected()) {
       console.error('[useHeadlessSession] WebSocket not connected');
       return;
     }
-    wsRef.current.startSession(workDir);
-  }, []);
+    // 重置状态以准备新会话
+    if (forceNew) {
+      safeSetState(prev => ({
+        ...prev,
+        sessionId: null,
+        conversationId: null,
+        currentTurnId: null,
+        turns: [],
+        currentTurnEvents: [],
+        hasMoreHistory: false,
+      }));
+    }
+    wsRef.current.startSession(workDir, forceNew);
+  }, [safeSetState]);
 
-  // 发送 prompt
+  // 发送 prompt（支持队列：运行中发送的消息会被后端加入队列）
   const sendPrompt = useCallback((prompt: string, source: string = 'user', model?: string) => {
     if (!wsRef.current?.isConnected()) {
       console.error('[useHeadlessSession] WebSocket not connected');
       return;
     }
 
-    if (state.state === 'running') {
-      console.warn('[useHeadlessSession] Session is busy, cannot send prompt');
-      return;
-    }
-
-    const syntheticUserEvent: StreamEvent = {
-      type: 'user',
-      message: {
-        content: [
-          { type: 'text', text: prompt },
-        ],
-      },
-    };
-
     lastPromptRef.current = { text: prompt, source };
 
-    safeSetState(prev => ({
-      ...prev,
-      currentTurnEvents: [syntheticUserEvent],
-      state: 'running',
-      error: null,
-    }));
+    // 如果 session 空闲，显示即时反馈
+    if (state.state !== 'running') {
+      const syntheticUserEvent: StreamEvent = {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'text', text: prompt },
+          ],
+        },
+      };
+
+      safeSetState(prev => ({
+        ...prev,
+        currentTurnEvents: [syntheticUserEvent],
+        state: 'running',
+        error: null,
+      }));
+    }
+    // 如果正在运行，消息会被后端入队，不需要前端做特殊处理
 
     if (!state.sessionId) {
       console.log('[useHeadlessSession] No session, setting pending prompt');
       pendingPromptRef.current = { text: prompt, source };
       return;
     }
-    
+
     wsRef.current.sendPrompt(prompt, source, model);
   }, [safeSetState, state.sessionId, state.state]);
 
@@ -499,6 +557,18 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
     wsRef.current.switchMode(mode);
   }, []);
 
+  // 删除排队中的消息
+  const deleteQueuedTurn = useCallback((turnId: number) => {
+    if (!wsRef.current?.isConnected()) return;
+    wsRef.current.deleteQueuedTurn(turnId);
+  }, []);
+
+  // 编辑排队中的消息
+  const editQueuedTurn = useCallback((turnId: number, newPrompt: string) => {
+    if (!wsRef.current?.isConnected()) return;
+    wsRef.current.editQueuedTurn(turnId, newPrompt);
+  }, []);
+
   // 清除错误
   const clearError = useCallback(() => {
     safeSetState(prev => ({ ...prev, error: null }));
@@ -515,6 +585,10 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
 
     return () => {
       mountedRef.current = false;
+      if (disconnectGraceTimerRef.current) {
+        clearTimeout(disconnectGraceTimerRef.current);
+        disconnectGraceTimerRef.current = null;
+      }
       wsRef.current?.disconnect();
       wsRef.current = null;
     };
@@ -551,8 +625,11 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
     connectToContainer,
     disconnect,
     startSession,
+    prepareForNewSession,
     sendPrompt,
     cancelExecution,
+    deleteQueuedTurn,
+    editQueuedTurn,
     loadMoreHistory,
     switchMode,
     clearError,

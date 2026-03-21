@@ -53,6 +53,7 @@ export interface UsageInfo {
 // 轮次信息
 export interface TurnInfo {
   id: number;
+  turn_id?: number;
   turn_index: number;
   user_prompt: string;
   prompt_source: 'user' | 'strategy' | 'monitoring';
@@ -238,6 +239,20 @@ export interface ModeSwitchedPayload {
   closed_sessions: number;
 }
 
+// 队列中的轮次信息
+export interface QueuedTurnInfo {
+  turn_id: number;
+  turn_index: number;
+  prompt: string;
+  source: string;
+  state: 'pending' | 'running';
+}
+
+// 队列变更负载
+export interface QueueUpdatePayload {
+  queued_turns: QueuedTurnInfo[];
+}
+
 // WebSocket 请求类型
 export type HeadlessRequestType =
   | 'headless_start'
@@ -245,6 +260,8 @@ export type HeadlessRequestType =
   | 'headless_cancel'
   | 'load_more'
   | 'mode_switch'
+  | 'delete_queued'
+  | 'edit_queued'
   | 'ping';
 
 // WebSocket 响应类型
@@ -258,7 +275,8 @@ export type HeadlessResponseType =
   | 'error'
   | 'mode_switched'
   | 'pty_closed'
-  | 'pong';
+  | 'pong'
+  | 'queue_update';
 
 // WebSocket 请求
 export interface HeadlessRequest {
@@ -287,7 +305,10 @@ export interface HeadlessSessionState {
   
   // 当前轮次的实时输出
   currentTurnEvents: StreamEvent[];
-  
+
+  // 消息队列
+  queuedTurns: QueuedTurnInfo[];
+
   // WebSocket 连接状态
   connected: boolean;
   connecting: boolean;

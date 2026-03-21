@@ -102,6 +102,10 @@ const (
 	HeadlessRequestTypeModeSwitch = "mode_switch"
 	// HeadlessRequestTypePing 心跳
 	HeadlessRequestTypePing = "ping"
+	// HeadlessRequestTypeDeleteQueued 删除排队中的消息
+	HeadlessRequestTypeDeleteQueued = "delete_queued"
+	// HeadlessRequestTypeEditQueued 编辑排队中的消息
+	HeadlessRequestTypeEditQueued = "edit_queued"
 )
 
 // 服务器响应类型常量
@@ -126,6 +130,8 @@ const (
 	HeadlessResponseTypePTYClosed = "pty_closed"
 	// HeadlessResponseTypePong 心跳响应
 	HeadlessResponseTypePong = "pong"
+	// HeadlessResponseTypeQueueUpdate 队列变更通知
+	HeadlessResponseTypeQueueUpdate = "queue_update"
 )
 
 // SessionInfoPayload 会话信息负载
@@ -232,6 +238,20 @@ type PromptPayload struct {
 // StartPayload 创建会话请求负载
 type StartPayload struct {
 	WorkDir string `json:"work_dir,omitempty"`
+}
+
+// QueuedTurnInfo 队列中的轮次信息
+type QueuedTurnInfo struct {
+	TurnID    uint   `json:"turn_id"`
+	TurnIndex int    `json:"turn_index"`
+	Prompt    string `json:"prompt"`
+	Source    string `json:"source"`
+	State     string `json:"state"` // pending | running
+}
+
+// QueueUpdatePayload 队列变更通知负载
+type QueueUpdatePayload struct {
+	QueuedTurns []QueuedTurnInfo `json:"queued_turns"`
 }
 
 // 错误代码常量

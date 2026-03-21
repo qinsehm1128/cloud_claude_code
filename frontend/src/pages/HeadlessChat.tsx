@@ -300,10 +300,13 @@ export default function HeadlessChat() {
     setSearchParams({ container: selectedContainerId.toString() });
     setSidebarOpen(false);
 
+    // 标记：忽略 connectToContainer 自动恢复的 session_info
+    headless.prepareForNewSession();
+
     // 连接到容器（创建新会话模式）
     await headless.connectToContainer(selectedContainerId);
 
-    // 创建新会话 - 后端返回 session_info 后，onSessionCreated 会自动更新 URL 和刷新列表
+    // 创建新会话（后端只做 unsubscribe 旧 session + 创建新 session，不关闭已有 session）
     headless.startSession(selectedContainer.work_dir);
   }, [selectedContainerId, selectedContainer, headless, setSearchParams]);
 
@@ -741,6 +744,9 @@ export default function HeadlessChat() {
               hasMore={displayHasMore}
               loading={displayLoading}
               onLoadMore={handleLoadMoreHistory}
+              queuedTurns={headless.connectedConversationId === selectedConversationId ? headless.queuedTurns : []}
+              onDeleteQueued={headless.deleteQueuedTurn}
+              onEditQueued={headless.editQueuedTurn}
             />
           ) : !selectedConversationId && !headless.connected ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -792,20 +798,27 @@ export default function HeadlessChat() {
               hasMore={headless.hasMoreHistory}
               loading={headless.loadingHistory}
               onLoadMore={() => headless.loadMoreHistory()}
+              queuedTurns={headless.queuedTurns}
+              onDeleteQueued={headless.deleteQueuedTurn}
+              onEditQueued={headless.editQueuedTurn}
             />
           )}
         </div>
 
-        {/* Prompt input */}
-        {selectedContainerId && headless.connected && (
-          headless.connectedConversationId === selectedConversationId || !selectedConversationId
-        ) && (
+        {/* Prompt input - 始终渲染避免闪烁，通过 disabled 控制交互 */}
+        {selectedContainerId && (
           <PromptInput
             onSend={handleSendPrompt}
             onCancel={() => headless.cancelExecution()}
             isRunning={headless.isRunning}
-            disabled={!headless.connected}
-            placeholder={headless.hasSession ? 'Enter your message...' : 'Type a message to start...'}
+            disabled={!headless.connected || !(headless.connectedConversationId === selectedConversationId || !selectedConversationId)}
+            placeholder={
+              !headless.connected
+                ? 'Connecting...'
+                : headless.hasSession
+                  ? 'Enter your message...'
+                  : 'Type a message to start...'
+            }
           />
         )}
       </main>
