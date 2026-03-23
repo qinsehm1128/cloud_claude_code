@@ -595,7 +595,8 @@ func (s *HeadlessSession) ProcessNextQueuedTurn() {
 
 	s.SetCurrentTurnID(nextTurn.ID)
 	s.responseBuilder.Reset()
-	s.SetState(HeadlessStateRunning)
+	// 注意：不要在这里 SetState(Running)，因为 StartClaudeProcess 开头会检查 Running 并报错
+	// StartClaudeProcess 内部会将状态设为 Running
 
 	// 广播队列更新（移除了刚出队的 turn）
 	s.BroadcastQueueUpdate(s.historyManager)
