@@ -363,13 +363,14 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
     connectingRef.current = true;
     setConnectedConversationId(targetConversationId);
 
-    // 重置状态
+    // 重置状态（包括清空队列，防止旧对话队列泄漏到新对话）
     safeSetState(prev => ({
       ...prev,
       connecting: true,
       error: null,
       turns: [],
       currentTurnEvents: [],
+      queuedTurns: [],
       sessionId: null,
       conversationId: targetConversationId,
     }));
@@ -464,6 +465,7 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
       ...prev,
       connected: false,
       connecting: false,
+      queuedTurns: [],
     }));
   }, [safeSetState]);
 
