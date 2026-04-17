@@ -24,6 +24,8 @@ const (
 	MessageTypeHistoryEnd   = "history_end"
 	MessageTypeSession = "session"
 	MessageTypeClose   = "close" // Client requests to close session permanently
+	MessageTypeKeyboardCommand = "keyboard_command" // Client sends preset keyboard command
+	MessageTypeScroll = "scroll" // Client sends scroll control
 
 	// WebSocket message types - Monitoring
 	MessageTypeMonitoringStatus      = "monitoring_status"
@@ -341,6 +343,29 @@ func (s *TerminalService) readFromWebSocket(ctx context.Context, conn *websocket
 				fmt.Printf("Session %s closed by client request\n", msg.SessionID)
 			}
 			return nil
+
+		case MessageTypeKeyboardCommand:
+			// Handle keyboard command from auxiliary keyboard
+			if msg.Data == "" {
+				continue
+			}
+			if _, err := session.Write([]byte(msg.Data)); err != nil {
+				return err
+			}
+			fmt.Printf("[WebSocket] Keyboard command executed for session %s\n", session.ID)
+
+		case MessageTypeScroll:
+			// Handle scroll control from auxiliary keyboard
+			if msg.Data == "" {
+				continue
+			}
+			scrollSeq := generateScrollSequence(msg.Data)
+			if len(scrollSeq) > 0 {
+				if _, err := session.Write(scrollSeq); err != nil {
+					return err
+				}
+				fmt.Printf("[WebSocket] Scroll command executed: %s\n", msg.Data)
+			}
 
 		case MessageTypePong:
 			continue

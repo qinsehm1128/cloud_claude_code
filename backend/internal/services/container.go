@@ -26,6 +26,14 @@ var (
 	ErrInvalidContainerName    = errors.New("invalid container name")
 	ErrInvalidCPULimit         = errors.New("invalid CPU limit")
 	ErrInvalidMemoryLimit      = errors.New("invalid memory limit")
+	ErrInvalidCPUPeriod        = errors.New("invalid CPU period")
+)
+
+// Docker CPU period constraints (Docker API limits)
+const (
+	MinCPUPeriod     = 1000    // Minimum CPU period in microseconds (1ms)
+	MaxCPUPeriod     = 1000000 // Maximum CPU period in microseconds (1s)
+	CPUPeriodDefault = 100000  // Default CPU period (100ms)
 )
 
 // Container name validation - allows Unicode characters including Chinese
@@ -43,14 +51,31 @@ func validateContainerName(name string) error {
 	return nil
 }
 
-// validateResourceLimits validates CPU and memory limits
-func validateResourceLimits(cpuLimit float64, memoryLimit int64) error {
-	if cpuLimit < 0 || cpuLimit > 64 {
-		return fmt.Errorf("%w: must be between 0 and 64 cores", ErrInvalidCPULimit)
-	}
+// validateResourceLimits validates CPU and memory limits with CPUPeriod constraints
+func validateResourceLimits(cpuLimit float64, memoryLimit int64, cpuPeriod int64) error {
+	// Validate memory limit
 	if memoryLimit < 0 || memoryLimit > 128*1024 { // Max 128GB
 		return fmt.Errorf("%w: must be between 0 and 131072 MB", ErrInvalidMemoryLimit)
 	}
+
+	// Validate CPU limit
+	if cpuLimit < 0 || cpuLimit > 64 {
+		return fmt.Errorf("%w: must be between 0 and 64 cores", ErrInvalidCPULimit)
+	}
+
+	// Validate CPUPeriod range (Docker API constraint: 1000-1000000 microseconds)
+	if cpuPeriod != 0 && (cpuPeriod < MinCPUPeriod || cpuPeriod > MaxCPUPeriod) {
+		return fmt.Errorf("%w: must be between %d and %d microseconds", ErrInvalidCPUPeriod, MinCPUPeriod, MaxCPUPeriod)
+	}
+
+	// Validate CPUQuota calculation (ensure minimum quantum if specified)
+	if cpuLimit > 0 && cpuPeriod > 0 {
+		quota := int64(cpuLimit * float64(cpuPeriod))
+		if quota < 1000 {
+			return fmt.Errorf("%w: resulting CPUQuota (%d) is below minimum quantum (1000 microseconds)", ErrInvalidCPULimit, quota)
+		}
+	}
+
 	return nil
 }
 
@@ -173,9 +198,9 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		return nil, err
 	}
 
-	// Validate resource limits
-	if err := validateResourceLimits(input.CPULimit, input.MemoryLimit); err != nil {
-		return nil, err
+	// Validate resource limits with CPUPeriod constraints
+	if err := validateResourceLimits(input.CPULimit, input.MemoryLimit, CPUPeriodDefault); err != nil {
+		return nil, fmt.Errorf("resource validation failed: %w", err)
 	}
 
 	// Validate GitRepoURL is required when SkipGitRepo is false
@@ -257,6 +282,9 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		// CPUQuota is in microseconds per CPUPeriod (100000)
 		// So 1 CPU = 100000, 0.5 CPU = 50000, 2 CPU = 200000
 		securityConfig.Resources.CPUQuota = int64(input.CPULimit * 100000)
+		securityConfig.Resources.CPUPeriod = CPUPeriodDefault
+		log.Printf("Applying resource limits: Memory=%dMB, CPUCores=%.2f, CPUQuota=%d, CPUPeriod=%d",
+			input.MemoryLimit, input.CPULimit, securityConfig.Resources.CPUQuota, securityConfig.Resources.CPUPeriod)
 	}
 
 	// Build port bindings (legacy direct port mapping)

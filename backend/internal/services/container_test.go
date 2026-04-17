@@ -581,3 +581,329 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
+
+// ==================== Resource Limit Validation Tests ====================
+
+// TestCPUQuotaCalculation verifies CPU core to microseconds conversion
+func TestCPUQuotaCalculation(t *testing.T) {
+	tests := []struct {
+		name          string
+		cpuCores      float64
+		cpuPeriod     int64
+		expectedQuota int64
+		shouldPass    bool
+	}{
+		{
+			name:          "0.5 cores",
+			cpuCores:      0.5,
+			cpuPeriod:     CPUPeriodDefault,
+			expectedQuota: 50000,
+			shouldPass:    true,
+		},
+		{
+			name:          "1.0 cores",
+			cpuCores:      1.0,
+			cpuPeriod:     CPUPeriodDefault,
+			expectedQuota: 100000,
+			shouldPass:    true,
+		},
+		{
+			name:          "2.5 cores",
+			cpuCores:      2.5,
+			cpuPeriod:     CPUPeriodDefault,
+			expectedQuota: 250000,
+			shouldPass:    true,
+		},
+		{
+			name:          "4.0 cores",
+			cpuCores:      4.0,
+			cpuPeriod:     CPUPeriodDefault,
+			expectedQuota: 400000,
+			shouldPass:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateResourceLimits(tt.cpuCores, 2048, tt.cpuPeriod)
+			if tt.shouldPass && err != nil {
+				t.Errorf("Expected validation to pass for %s, got error: %v", tt.name, err)
+			}
+			if !tt.shouldPass && err == nil {
+				t.Errorf("Expected validation to fail for %s, but it passed", tt.name)
+			}
+			if tt.shouldPass {
+				// Verify the quota calculation
+				actualQuota := int64(tt.cpuCores * float64(tt.cpuPeriod))
+				if actualQuota != tt.expectedQuota {
+					t.Errorf("CPUQuota mismatch for %s: expected %d, got %d", tt.name, tt.expectedQuota, actualQuota)
+				}
+			}
+		})
+	}
+}
+
+// TestCPUPeriodValidation tests CPUPeriod range validation (1000-1000000 microseconds)
+func TestCPUPeriodValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		cpuCores   float64
+		memoryMB   int64
+		cpuPeriod  int64
+		shouldPass bool
+	}{
+		{
+			name:       "valid default period (100000)",
+			cpuCores:   1.0,
+			memoryMB:   2048,
+			cpuPeriod:  100000,
+			shouldPass: true,
+		},
+		{
+			name:       "below minimum (500)",
+			cpuCores:   1.0,
+			memoryMB:   2048,
+			cpuPeriod:  500,
+			shouldPass: false,
+		},
+		{
+			name:       "above maximum (2000000)",
+			cpuCores:   1.0,
+			memoryMB:   2048,
+			cpuPeriod:  2000000,
+			shouldPass: false,
+		},
+		{
+			name:       "edge case minimum (1000)",
+			cpuCores:   1.0,
+			memoryMB:   2048,
+			cpuPeriod:  1000,
+			shouldPass: true,
+		},
+		{
+			name:       "edge case maximum (1000000)",
+			cpuCores:   1.0,
+			memoryMB:   2048,
+			cpuPeriod:  1000000,
+			shouldPass: true,
+		},
+		{
+			name:       "zero period (no validation)",
+			cpuCores:   1.0,
+			memoryMB:   2048,
+			cpuPeriod:  0,
+			shouldPass: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateResourceLimits(tt.cpuCores, tt.memoryMB, tt.cpuPeriod)
+			if tt.shouldPass && err != nil {
+				t.Errorf("Expected validation to pass for %s, got error: %v", tt.name, err)
+			}
+			if !tt.shouldPass && err == nil {
+				t.Errorf("Expected validation to fail for %s, but it passed", tt.name)
+			}
+		})
+	}
+}
+
+// TestMemoryValidation tests memory limit validation
+func TestMemoryValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		cpuCores   float64
+		memoryMB   int64
+		cpuPeriod  int64
+		shouldPass bool
+	}{
+		{
+			name:       "valid 1024MB",
+			cpuCores:   1.0,
+			memoryMB:   1024,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: true,
+		},
+		{
+			name:       "zero memory (default will be used)",
+			cpuCores:   1.0,
+			memoryMB:   0,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: true,
+		},
+		{
+			name:       "negative memory",
+			cpuCores:   1.0,
+			memoryMB:   -1,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: false,
+		},
+		{
+			name:       "maximum 131072MB (128GB)",
+			cpuCores:   1.0,
+			memoryMB:   131072,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: true,
+		},
+		{
+			name:       "above maximum (200000MB)",
+			cpuCores:   1.0,
+			memoryMB:   200000,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateResourceLimits(tt.cpuCores, tt.memoryMB, tt.cpuPeriod)
+			if tt.shouldPass && err != nil {
+				t.Errorf("Expected validation to pass for %s, got error: %v", tt.name, err)
+			}
+			if !tt.shouldPass && err == nil {
+				t.Errorf("Expected validation to fail for %s, but it passed", tt.name)
+			}
+		})
+	}
+}
+
+// TestResourceValidationEdgeCases tests edge cases and boundary conditions
+func TestResourceValidationEdgeCases(t *testing.T) {
+	tests := []struct {
+		name       string
+		cpuCores   float64
+		memoryMB   int64
+		cpuPeriod  int64
+		shouldPass bool
+	}{
+		{
+			name:       "all zeros",
+			cpuCores:   0,
+			memoryMB:   0,
+			cpuPeriod:  0,
+			shouldPass: true,
+		},
+		{
+			name:       "maximum values",
+			cpuCores:   64,
+			memoryMB:   131072,
+			cpuPeriod:  MaxCPUPeriod,
+			shouldPass: true,
+		},
+		{
+			name:       "negative CPU cores",
+			cpuCores:   -1.0,
+			memoryMB:   2048,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: false,
+		},
+		{
+			name:       "CPU cores above maximum (65)",
+			cpuCores:   65,
+			memoryMB:   2048,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: false,
+		},
+		{
+			name:       "minimum quantum check (below 1000)",
+			cpuCores:   0.001,
+			memoryMB:   2048,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: false,
+		},
+		{
+			name:       "valid small quota (exactly 1000)",
+			cpuCores:   0.01,
+			memoryMB:   2048,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateResourceLimits(tt.cpuCores, tt.memoryMB, tt.cpuPeriod)
+			if tt.shouldPass && err != nil {
+				t.Errorf("Expected validation to pass for %s, got error: %v", tt.name, err)
+			}
+			if !tt.shouldPass && err == nil {
+				t.Errorf("Expected validation to fail for %s, but it passed", tt.name)
+			}
+		})
+	}
+}
+
+// TestValidateResourceLimits is an integration test combining all validation scenarios
+func TestValidateResourceLimitsIntegration(t *testing.T) {
+	tests := []struct {
+		name       string
+		cpuCores   float64
+		memoryMB   int64
+		cpuPeriod  int64
+		shouldPass bool
+		errorType  string
+	}{
+		{
+			name:       "valid configuration",
+			cpuCores:   2.0,
+			memoryMB:   4096,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: true,
+		},
+		{
+			name:       "invalid memory",
+			cpuCores:   1.0,
+			memoryMB:   -1,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: false,
+			errorType:  "memory",
+		},
+		{
+			name:       "invalid CPU cores",
+			cpuCores:   -1.0,
+			memoryMB:   2048,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: false,
+			errorType:  "cpu",
+		},
+		{
+			name:       "invalid CPU period (too low)",
+			cpuCores:   1.0,
+			memoryMB:   2048,
+			cpuPeriod:  500,
+			shouldPass: false,
+			errorType:  "period",
+		},
+		{
+			name:       "invalid CPU period (too high)",
+			cpuCores:   1.0,
+			memoryMB:   2048,
+			cpuPeriod:  2000000,
+			shouldPass: false,
+			errorType:  "period",
+		},
+		{
+			name:       "valid fractional CPU",
+			cpuCores:   0.25,
+			memoryMB:   512,
+			cpuPeriod:  CPUPeriodDefault,
+			shouldPass: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateResourceLimits(tt.cpuCores, tt.memoryMB, tt.cpuPeriod)
+			if tt.shouldPass {
+				if err != nil {
+					t.Errorf("Expected validation to pass, got error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Expected validation to fail with %s error, but it passed", tt.errorType)
+				}
+			}
+		})
+	}
+}
