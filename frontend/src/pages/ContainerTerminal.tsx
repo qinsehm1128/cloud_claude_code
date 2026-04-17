@@ -724,9 +724,15 @@ export default function ContainerTerminal() {
               </button>
             ))}
           </div>
-          <Button variant="ghost" size="sm" onClick={() => addNewTab()}>
-            <Plus className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setConfigDialogOpen(true)}>
+              <Download className="h-4 w-4 mr-2" />
+              Inject Config
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => addNewTab()}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         {/* Terminal Content */}
