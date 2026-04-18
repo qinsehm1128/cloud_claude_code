@@ -2,19 +2,19 @@ package services
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"path/filepath"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"time"
 
 	"cc-platform/internal/models"
-	"cc-platform/pkg/pathutil"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
@@ -22,16 +22,17 @@ import (
 )
 
 const (
-	MaxUploadSize = 100 * 1024 * 1024 // 100MB
-	WorkspaceDir  = "/workspace"
+	MaxUploadSize           = 100 * 1024 * 1024 // 100MB
+	WorkspaceDir            = "/workspace"
+	DefaultContainerRootDir = "/app"
 )
 
 var (
-	ErrFileTooLarge      = errors.New("file exceeds maximum size limit (100MB)")
-	ErrPathTraversal     = errors.New("path traversal detected")
-	ErrFileNotFound      = errors.New("file not found")
-	ErrNotAFile          = errors.New("path is not a file")
-	ErrNotADirectory     = errors.New("path is not a directory")
+	ErrFileTooLarge        = errors.New("file exceeds maximum size limit (100MB)")
+	ErrPathTraversal       = errors.New("path traversal detected")
+	ErrFileNotFound        = errors.New("file not found")
+	ErrNotAFile            = errors.New("path is not a file")
+	ErrNotADirectory       = errors.New("path is not a directory")
 	ErrContainerNotRunning = errors.New("container is not running")
 )
 
@@ -78,7 +79,7 @@ func (s *FileService) ListDirectory(ctx context.Context, containerID uint, path 
 	}
 
 	// Validate and sanitize path
-	safePath, err := s.validatePath(path)
+	safePath, err := s.validatePath(cont, path)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +91,7 @@ func (s *FileService) ListDirectory(ctx context.Context, containerID uint, path 
 	if err != nil {
 		return nil, fmt.Errorf("failed to check path: %w", err)
 	}
-	
+
 	checkOutput = strings.TrimSpace(stripControlChars(checkOutput))
 	if checkOutput != "DIR" {
 		return nil, fmt.Errorf("path is not a directory: %s", safePath)
@@ -170,7 +171,7 @@ func (s *FileService) parseFindOutput(output, basePath string) ([]FileInfo, erro
 
 		files = append(files, FileInfo{
 			Name:         name,
-			Path:         filepath.Join(basePath, name),
+			Path:         pathpkg.Join(basePath, name),
 			Size:         size,
 			IsDirectory:  isDir,
 			ModifiedTime: modTime,
@@ -195,7 +196,7 @@ func (s *FileService) UploadFile(ctx context.Context, containerID uint, path str
 	}
 
 	// Validate and sanitize path
-	safePath, err := s.validatePath(path)
+	safePath, err := s.validatePath(cont, path)
 	if err != nil {
 		return err
 	}
@@ -213,7 +214,7 @@ func (s *FileService) UploadFile(ctx context.Context, containerID uint, path str
 	tarBuf := new(bytes.Buffer)
 	tw := tar.NewWriter(tarBuf)
 
-	filename := filepath.Base(safePath)
+	filename := pathpkg.Base(safePath)
 	header := &tar.Header{
 		Name: filename,
 		Mode: 0644,
@@ -233,7 +234,10 @@ func (s *FileService) UploadFile(ctx context.Context, containerID uint, path str
 	}
 
 	// Copy to container
-	destDir := filepath.Dir(safePath)
+	destDir := pathpkg.Dir(safePath)
+	if _, err := s.execInContainer(ctx, cont.DockerID, []string{"mkdir", "-p", destDir}); err != nil {
+		return fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
+	}
 	err = s.dockerClient.CopyToContainer(ctx, cont.DockerID, destDir, tarBuf, types.CopyToContainerOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to copy to container: %w", err)
@@ -251,7 +255,7 @@ func (s *FileService) DownloadFile(ctx context.Context, containerID uint, path s
 	}
 
 	// Validate and sanitize path
-	safePath, err := s.validatePath(path)
+	safePath, err := s.validatePath(cont, path)
 	if err != nil {
 		return nil, "", err
 	}
@@ -264,8 +268,8 @@ func (s *FileService) DownloadFile(ctx context.Context, containerID uint, path s
 
 	// Check if it's a directory
 	if stat.Mode.IsDir() {
-		reader.Close()
-		return nil, "", ErrNotAFile
+		filename := s.resolveDownloadName(safePath, s.resolveContainerRoot(cont)) + ".zip"
+		return newTarZipReader(reader), filename, nil
 	}
 
 	// Extract file from tar
@@ -276,7 +280,7 @@ func (s *FileService) DownloadFile(ctx context.Context, containerID uint, path s
 		return nil, "", fmt.Errorf("failed to read tar: %w", err)
 	}
 
-	filename := filepath.Base(safePath)
+	filename := s.resolveDownloadName(safePath, s.resolveContainerRoot(cont))
 	return &tarFileReader{reader: reader, tarReader: tr}, filename, nil
 }
 
@@ -294,6 +298,89 @@ func (r *tarFileReader) Close() error {
 	return r.reader.Close()
 }
 
+type tarZipReadCloser struct {
+	reader io.ReadCloser
+	pipe   *io.PipeReader
+}
+
+func (r *tarZipReadCloser) Read(p []byte) (int, error) {
+	return r.pipe.Read(p)
+}
+
+func (r *tarZipReadCloser) Close() error {
+	if r.reader != nil {
+		_ = r.reader.Close()
+	}
+	return r.pipe.Close()
+}
+
+func newTarZipReader(reader io.ReadCloser) io.ReadCloser {
+	pipeReader, pipeWriter := io.Pipe()
+
+	go func() {
+		defer reader.Close()
+
+		tarReader := tar.NewReader(reader)
+		zipWriter := zip.NewWriter(pipeWriter)
+
+		for {
+			header, err := tarReader.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				_ = zipWriter.Close()
+				_ = pipeWriter.CloseWithError(fmt.Errorf("failed to read tar archive: %w", err))
+				return
+			}
+
+			name := normalizeArchiveEntryName(header.Name)
+			if name == "" {
+				continue
+			}
+
+			if header.FileInfo().IsDir() {
+				if !strings.HasSuffix(name, "/") {
+					name += "/"
+				}
+				if _, err := zipWriter.Create(name); err != nil {
+					_ = zipWriter.Close()
+					_ = pipeWriter.CloseWithError(fmt.Errorf("failed to create zip directory %s: %w", name, err))
+					return
+				}
+				continue
+			}
+
+			switch header.Typeflag {
+			case tar.TypeReg, tar.TypeRegA:
+				fileWriter, err := zipWriter.Create(name)
+				if err != nil {
+					_ = zipWriter.Close()
+					_ = pipeWriter.CloseWithError(fmt.Errorf("failed to create zip file %s: %w", name, err))
+					return
+				}
+				if _, err := io.Copy(fileWriter, tarReader); err != nil {
+					_ = zipWriter.Close()
+					_ = pipeWriter.CloseWithError(fmt.Errorf("failed to copy %s into zip: %w", name, err))
+					return
+				}
+			}
+		}
+
+		if err := zipWriter.Close(); err != nil {
+			_ = pipeWriter.CloseWithError(fmt.Errorf("failed to finalize zip archive: %w", err))
+			return
+		}
+
+		_ = pipeWriter.Close()
+	}()
+
+	return &tarZipReadCloser{
+		reader: reader,
+		pipe:   pipeReader,
+	}
+}
+
 // DeleteFile deletes a file or directory in a container
 func (s *FileService) DeleteFile(ctx context.Context, containerID uint, path string) error {
 	// Get container
@@ -303,7 +390,7 @@ func (s *FileService) DeleteFile(ctx context.Context, containerID uint, path str
 	}
 
 	// Validate and sanitize path
-	safePath, err := s.validatePath(path)
+	safePath, err := s.validatePath(cont, path)
 	if err != nil {
 		return err
 	}
@@ -327,7 +414,7 @@ func (s *FileService) CreateDirectory(ctx context.Context, containerID uint, pat
 	}
 
 	// Validate and sanitize path
-	safePath, err := s.validatePath(path)
+	safePath, err := s.validatePath(cont, path)
 	if err != nil {
 		return err
 	}
@@ -360,38 +447,32 @@ func (s *FileService) getRunningContainer(containerID uint) (*models.Container, 
 }
 
 // validatePath validates and sanitizes a path
-func (s *FileService) validatePath(path string) (string, error) {
-	// If empty or root, use workspace root
-	if path == "" || path == "/" || path == "." {
-		return WorkspaceDir, nil
+func (s *FileService) validatePath(cont *models.Container, requestedPath string) (string, error) {
+	rootDir := s.resolveContainerRoot(cont)
+	requestedPath = strings.TrimSpace(strings.ReplaceAll(requestedPath, "\\", "/"))
+
+	if requestedPath == "" || requestedPath == "/" || requestedPath == "." {
+		return rootDir, nil
 	}
 
-	// Clean the path
-	path = filepath.Clean(path)
-	
-	// If path already starts with /workspace, use it directly
-	if strings.HasPrefix(path, WorkspaceDir) {
-		// Ensure it doesn't escape workspace
-		if !strings.HasPrefix(filepath.Clean(path), WorkspaceDir) {
-			return "", ErrPathTraversal
+	if strings.HasPrefix(requestedPath, "/") {
+		fullPath := normalizeContainerPath(requestedPath)
+		if fullPath == rootDir || strings.HasPrefix(fullPath, rootDir+"/") {
+			return fullPath, nil
 		}
-		return path, nil
-	}
-	
-	// Remove leading slash if present
-	path = strings.TrimPrefix(path, "/")
-	
-	// Sanitize the path
-	path = pathutil.SanitizePath(path)
-	
-	// If empty after sanitization, use workspace root
-	if path == "" || path == "." {
-		return WorkspaceDir, nil
+		return "", ErrPathTraversal
 	}
 
-	// Validate path doesn't escape workspace
-	fullPath, err := pathutil.ValidatePath(WorkspaceDir, path)
-	if err != nil {
+	cleanedPath := pathpkg.Clean(requestedPath)
+	if cleanedPath == "." || cleanedPath == "" {
+		return rootDir, nil
+	}
+	if cleanedPath == ".." || strings.HasPrefix(cleanedPath, "../") || strings.Contains(cleanedPath, "/../") {
+		return "", ErrPathTraversal
+	}
+
+	fullPath := normalizeContainerPath(pathpkg.Join(rootDir, cleanedPath))
+	if fullPath != rootDir && !strings.HasPrefix(fullPath, rootDir+"/") {
 		return "", ErrPathTraversal
 	}
 
@@ -446,7 +527,7 @@ func (s *FileService) parseLsOutput(output, basePath string) ([]FileInfo, error)
 		}
 
 		permissions := parts[0]
-		
+
 		// Find the filename - it's everything after the date/time
 		// Try to find where the filename starts
 		var name string
@@ -487,7 +568,7 @@ func (s *FileService) parseLsOutput(output, basePath string) ([]FileInfo, error)
 
 		files = append(files, FileInfo{
 			Name:         name,
-			Path:         filepath.Join(basePath, name),
+			Path:         pathpkg.Join(basePath, name),
 			Size:         size,
 			IsDirectory:  isDir,
 			ModifiedTime: modTime,
@@ -496,6 +577,53 @@ func (s *FileService) parseLsOutput(output, basePath string) ([]FileInfo, error)
 	}
 
 	return files, nil
+}
+
+func (s *FileService) resolveContainerRoot(cont *models.Container) string {
+	if cont == nil {
+		return DefaultContainerRootDir
+	}
+
+	rootDir := normalizeContainerPath(cont.WorkDir)
+	if rootDir == "" || rootDir == "/" {
+		return DefaultContainerRootDir
+	}
+
+	return rootDir
+}
+
+func (s *FileService) resolveDownloadName(downloadPath, rootDir string) string {
+	filename := pathpkg.Base(downloadPath)
+	if filename == "." || filename == "/" || filename == "" {
+		filename = pathpkg.Base(rootDir)
+	}
+	if filename == "." || filename == "/" || filename == "" {
+		return "download"
+	}
+	return filename
+}
+
+func normalizeContainerPath(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if value == "" {
+		return ""
+	}
+
+	cleaned := pathpkg.Clean(value)
+	if !strings.HasPrefix(cleaned, "/") {
+		cleaned = "/" + strings.TrimPrefix(cleaned, "./")
+	}
+	return cleaned
+}
+
+func normalizeArchiveEntryName(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = strings.TrimPrefix(value, "./")
+	value = pathpkg.Clean(value)
+	if value == "." || value == "/" || value == "" {
+		return ""
+	}
+	return strings.TrimPrefix(value, "/")
 }
 
 // stripControlChars removes ANSI control characters and Docker mux header bytes
@@ -513,7 +641,7 @@ func stripControlChars(s string) string {
 				continue
 			}
 		}
-		
+
 		// Skip ANSI escape sequences
 		if i+1 < len(s) && s[i] == 0x1b && s[i+1] == '[' {
 			// Find end of escape sequence
@@ -526,13 +654,13 @@ func stripControlChars(s string) string {
 				continue
 			}
 		}
-		
+
 		// Skip other control characters except newline and tab
 		if s[i] < 32 && s[i] != '\n' && s[i] != '\t' {
 			i++
 			continue
 		}
-		
+
 		result.WriteByte(s[i])
 		i++
 	}

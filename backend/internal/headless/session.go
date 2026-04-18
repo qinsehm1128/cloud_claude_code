@@ -34,14 +34,14 @@ type HeadlessSession struct {
 	stderr io.ReadCloser  // 进程 stderr
 
 	// Docker API 方式
-	dockerClient  *client.Client
-	execID        string
-	hijackedResp  *types.HijackedResponse
-	cancelRead    context.CancelFunc
+	dockerClient *client.Client
+	execID       string
+	hijackedResp *types.HijackedResponse
+	cancelRead   context.CancelFunc
 
 	// 状态
-	State     HeadlessState // running | idle | error | closed
-	stateMu   sync.RWMutex  // 状态锁
+	State   HeadlessState // running | idle | error | closed
+	stateMu sync.RWMutex  // 状态锁
 
 	// 当前轮次
 	CurrentTurnID uint // 当前轮次 ID
@@ -259,12 +259,12 @@ func (s *HeadlessSession) broadcastToClients(event *StreamEvent) {
 	defer s.clientsMu.RUnlock()
 
 	for clientID, ch := range s.clients {
+		timer := time.NewTimer(100 * time.Millisecond)
 		select {
 		case ch <- event:
-			// 发送成功
-		default:
-			// channel 已满，跳过（避免阻塞）
-			log.Printf("[HeadlessSession %s] Client %s channel full, skipping event", s.ID, clientID)
+			timer.Stop()
+		case <-timer.C:
+			log.Printf("[HeadlessSession %s] Client %s channel blocked, dropping event", s.ID, clientID)
 		}
 	}
 }
@@ -307,6 +307,9 @@ func (s *HeadlessSession) Close() error {
 	if s.cancelRead != nil {
 		s.cancelRead()
 	}
+
+	// Docker exec 需要显式发信号，否则仅关闭 attach 连接时 Claude 可能继续在容器内运行。
+	s.terminateDockerExecProcess("closing session")
 
 	// 关闭 Docker API 资源
 	if s.hijackedResp != nil {
@@ -439,7 +442,7 @@ func (s *HeadlessSession) OnStreamEvent(evt *StreamEvent) {
 func (s *HeadlessSession) OnTurnComplete(success bool, errorMsg string) {
 	turnID := s.GetCurrentTurnID()
 	log.Printf("[HeadlessSession %s] OnTurnComplete called: success=%v, errorMsg=%s, turnID=%d", s.ID, success, errorMsg, turnID)
-	
+
 	if turnID == 0 {
 		log.Printf("[HeadlessSession %s] OnTurnComplete: turnID is 0, skipping", s.ID)
 		return
@@ -486,7 +489,7 @@ func (s *HeadlessSession) OnTurnComplete(success bool, errorMsg string) {
 	if !success {
 		state = "failed"
 	}
-	
+
 	completePayload := &TurnCompletePayload{
 		TurnID:       turnID,
 		TurnIndex:    0, // 默认值，下面会尝试从数据库获取
@@ -519,7 +522,7 @@ func (s *HeadlessSession) OnTurnComplete(success bool, errorMsg string) {
 	} else {
 		completeEvent.Result = fmt.Sprintf("%+v", completePayload)
 	}
-	
+
 	log.Printf("[HeadlessSession %s] Broadcasting turn_complete event: turnID=%d, state=%s", s.ID, turnID, completePayload.State)
 	s.broadcastToClients(completeEvent)
 

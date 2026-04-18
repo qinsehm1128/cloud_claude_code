@@ -3,8 +3,10 @@ package handlers
 import (
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
-	"path/filepath"
+	pathpkg "path"
+	"strings"
 
 	"cc-platform/internal/services"
 
@@ -88,7 +90,11 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 
 	// Set headers for file download
 	c.Header("Content-Disposition", "attachment; filename="+filename)
-	c.Header("Content-Type", "application/octet-stream")
+	if strings.HasSuffix(strings.ToLower(filename), ".zip") {
+		c.Header("Content-Type", "application/zip")
+	} else {
+		c.Header("Content-Type", "application/octet-stream")
+	}
 
 	// Stream the file
 	if _, err := io.Copy(c.Writer, reader); err != nil {
@@ -111,39 +117,61 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 		destPath = "/"
 	}
 
-	// Get uploaded file
-	file, header, err := c.Request.FormFile("file")
-	if err != nil {
+	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid multipart form"})
+		return
+	}
+
+	form := c.Request.MultipartForm
+	files := append([]*multipart.FileHeader{}, form.File["file"]...)
+	files = append(files, form.File["files"]...)
+	if len(files) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
 		return
 	}
-	defer file.Close()
 
-	// Build full destination path
-	fullPath := filepath.Join(destPath, header.Filename)
+	relativePaths := form.Value["relative_paths"]
+	uploadedPaths := make([]string, 0, len(files))
 
-	// Upload file
-	err = h.fileService.UploadFile(c.Request.Context(), containerID, fullPath, file, header.Size)
-	if err != nil {
-		switch err {
-		case services.ErrContainerNotFound:
-			c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
-		case services.ErrContainerNotRunning:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Container is not running"})
-		case services.ErrPathTraversal:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-		case services.ErrFileTooLarge:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "File exceeds maximum size limit (100MB)"})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	for index, header := range files {
+		file, err := header.Open()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to open uploaded file"})
+			return
 		}
-		return
+
+		relativePath := header.Filename
+		if index < len(relativePaths) && strings.TrimSpace(relativePaths[index]) != "" {
+			relativePath = relativePaths[index]
+		}
+		fullPath := pathpkg.Join(destPath, strings.ReplaceAll(relativePath, "\\", "/"))
+
+		err = h.fileService.UploadFile(c.Request.Context(), containerID, fullPath, file, header.Size)
+		file.Close()
+		if err != nil {
+			switch err {
+			case services.ErrContainerNotFound:
+				c.JSON(http.StatusNotFound, gin.H{"error": "Container not found"})
+			case services.ErrContainerNotRunning:
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Container is not running"})
+			case services.ErrPathTraversal:
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			case services.ErrFileTooLarge:
+				c.JSON(http.StatusBadRequest, gin.H{"error": "File exceeds maximum size limit (100MB)"})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
+			return
+		}
+
+		uploadedPaths = append(uploadedPaths, fullPath)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "File uploaded successfully",
-		"filename": header.Filename,
-		"path":     fullPath,
+		"message": "Files uploaded successfully",
+		"count":   len(uploadedPaths),
+		"paths":   uploadedPaths,
+		"path":    destPath,
 	})
 }
 

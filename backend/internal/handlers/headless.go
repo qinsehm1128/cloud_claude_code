@@ -21,12 +21,13 @@ import (
 )
 
 const (
-	headlessWriteWait      = 10 * time.Second
-	headlessPongWait       = 60 * time.Second
-	headlessPingPeriod     = (headlessPongWait * 9) / 10
-	headlessMaxMessage     = 16 * 1024
-	defaultHistoryLimit    = 10 // 默认加载历史轮次数量
-	defaultHistoryLimitOld = 3  // 旧版 container 模式默认加载数量
+	headlessWriteWait       = 10 * time.Second
+	headlessPongWait        = 60 * time.Second
+	headlessPingPeriod      = (headlessPongWait * 9) / 10
+	headlessMaxMessage      = 16 * 1024
+	headlessSendEnqueueWait = 250 * time.Millisecond
+	defaultHistoryLimit     = 10 // 默认加载历史轮次数量
+	defaultHistoryLimitOld  = 3  // 旧版 container 模式默认加载数量
 )
 
 // HeadlessHandler 处理 Headless WebSocket 端点
@@ -244,6 +245,40 @@ func (c *headlessClient) sendHistory(session *headless.HeadlessSession) {
 	}
 }
 
+func (c *headlessClient) sendHistoryByConversationID(conversationID uint) {
+	historyManager := c.handler.headlessManager.GetHistoryManager()
+	if historyManager == nil || conversationID == 0 {
+		return
+	}
+
+	historyManager.FixStaleTurns(conversationID)
+
+	turns, hasMore, err := historyManager.GetRecentTurns(conversationID, defaultHistoryLimitOld)
+	if err != nil {
+		log.Printf("[HeadlessHandler] Failed to get recent turns: %v", err)
+		return
+	}
+
+	turnInfos := make([]headless.TurnInfo, len(turns))
+	for i, turn := range turns {
+		turnInfos[i] = convertTurnToInfo(&turn)
+	}
+
+	c.sendResponse(headless.HeadlessResponseTypeHistory, &headless.HistoryPayload{
+		Turns:   turnInfos,
+		HasMore: hasMore,
+	})
+}
+
+func requestedSessionID(req *headless.HeadlessRequest) string {
+	if req == nil || req.Payload == nil {
+		return ""
+	}
+
+	sessionID, _ := req.Payload["session_id"].(string)
+	return sessionID
+}
+
 // subscribeToSession 订阅会话输出
 func (c *headlessClient) subscribeToSession(session *headless.HeadlessSession) {
 	c.mu.Lock()
@@ -378,6 +413,8 @@ func (c *headlessClient) handleMessage(req *headless.HeadlessRequest) {
 		c.handlePrompt(req)
 	case headless.HeadlessRequestTypeCancel:
 		c.handleCancel(req)
+	case headless.HeadlessRequestTypeStopSession:
+		c.handleStopSession(req)
 	case headless.HeadlessRequestTypeLoadMore:
 		c.handleLoadMore(req)
 	case headless.HeadlessRequestTypeModeSwitch:
@@ -396,8 +433,20 @@ func (c *headlessClient) handleMessage(req *headless.HeadlessRequest) {
 
 // handleStart 处理创建会话请求
 func (c *headlessClient) handleStart(req *headless.HeadlessRequest) {
-	// 如果当前 client 已绑定 session，仅取消订阅（不关闭 session，让它继续在后台运行）
-	if c.session != nil && !c.session.IsClosed() {
+	forceNew, _ := req.Payload["force_new"].(bool)
+
+	// force_new 明确要求关闭旧 session，避免前端重新连接后混入旧会话事件。
+	if forceNew {
+		c.unsubscribeFromSession()
+		c.session = nil
+		c.handler.headlessManager.CloseSessionsForContainer(c.containerID)
+		c.killClaudeProcesses()
+	} else if c.session != nil && !c.session.IsClosed() {
+		// 非 force_new 时复用当前 session，避免重复创建并导致多会话混乱。
+		c.sendResponse(headless.HeadlessResponseTypeSessionInfo, c.session.GetSessionInfo())
+		c.subscribeToSession(c.session)
+		return
+	} else {
 		c.unsubscribeFromSession()
 		c.session = nil
 	}
@@ -491,6 +540,44 @@ func (c *headlessClient) handleCancel(req *headless.HeadlessRequest) {
 		c.sendError(headless.ErrorCodeInternalError, err.Error())
 		return
 	}
+}
+
+// handleStopSession 处理停止整个会话请求
+func (c *headlessClient) handleStopSession(req *headless.HeadlessRequest) {
+	requestedID := requestedSessionID(req)
+	session := c.session
+	if requestedID != "" {
+		if requestedSession, ok := c.handler.headlessManager.GetSession(requestedID); ok &&
+			!requestedSession.IsClosed() &&
+			requestedSession.ContainerID == c.containerID {
+			session = requestedSession
+		} else {
+			session = nil
+		}
+	}
+
+	if requestedID == "" && (session == nil || session.IsClosed()) {
+		session = c.handler.headlessManager.GetSessionForContainer(c.containerID)
+	}
+
+	if session == nil || session.IsClosed() {
+		c.sendResponse(headless.HeadlessResponseTypeNoSession, nil)
+		return
+	}
+
+	conversationID := session.ConversationID
+	c.unsubscribeFromSession()
+
+	if err := c.handler.headlessManager.CloseSession(session.ID); err != nil {
+		c.sendError(headless.ErrorCodeInternalError, err.Error())
+		return
+	}
+
+	c.session = nil
+	c.sendResponse(headless.HeadlessResponseTypeNoSession, gin.H{
+		"conversation_id": conversationID,
+	})
+	c.sendHistoryByConversationID(conversationID)
 }
 
 // handleLoadMore 处理加载更多历史请求
@@ -614,13 +701,24 @@ func (c *headlessClient) handleEditQueued(req *headless.HeadlessRequest) {
 
 // sendResponse 发送响应
 func (c *headlessClient) sendResponse(respType string, payload interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[HeadlessHandler] Client %s send channel closed while sending %s: %v", c.clientID, respType, r)
+		}
+	}()
+
+	timer := time.NewTimer(headlessSendEnqueueWait)
+	defer timer.Stop()
+
 	select {
 	case c.sendChan <- &headless.HeadlessResponse{
 		Type:    respType,
 		Payload: payload,
 	}:
-	default:
-		log.Printf("[HeadlessHandler] Client %s send channel full", c.clientID)
+	case <-c.done:
+		log.Printf("[HeadlessHandler] Client %s closed before sending %s", c.clientID, respType)
+	case <-timer.C:
+		log.Printf("[HeadlessHandler] Client %s send channel blocked for %s", c.clientID, respType)
 	}
 }
 
@@ -1135,6 +1233,8 @@ func (c *conversationClient) handleMessage(req *headless.HeadlessRequest) {
 		c.handlePrompt(req)
 	case headless.HeadlessRequestTypeCancel:
 		c.handleCancel(req)
+	case headless.HeadlessRequestTypeStopSession:
+		c.handleStopSession(req)
 	case headless.HeadlessRequestTypeLoadMore:
 		c.handleLoadMore(req)
 	case headless.HeadlessRequestTypeDeleteQueued:
@@ -1151,20 +1251,33 @@ func (c *conversationClient) handleMessage(req *headless.HeadlessRequest) {
 
 // handleStart 处理恢复/创建会话请求
 func (c *conversationClient) handleStart(req *headless.HeadlessRequest) {
+	forceNew, _ := req.Payload["force_new"].(bool)
+
 	// 检查是否已有会话
 	if c.session != nil && !c.session.IsClosed() {
-		c.sendError(headless.ErrorCodeSessionBusy, "Session already exists")
-		return
+		if !forceNew {
+			c.sendResponse(headless.HeadlessResponseTypeSessionInfo, c.session.GetSessionInfo())
+			c.subscribeToSession(c.session)
+			return
+		}
+		c.unsubscribeFromSession()
+		c.session = nil
 	}
 
 	// 检查是否有正在运行的会话
 	existingSession := c.handler.headlessManager.GetSessionByConversationID(c.conversationID)
 	if existingSession != nil && !existingSession.IsClosed() {
-		// 恢复到已有会话
-		c.session = existingSession
-		c.subscribeToSession(existingSession)
-		c.sendResponse(headless.HeadlessResponseTypeSessionInfo, existingSession.GetSessionInfo())
-		return
+		if !forceNew {
+			// 恢复到已有会话
+			c.session = existingSession
+			c.subscribeToSession(existingSession)
+			c.sendResponse(headless.HeadlessResponseTypeSessionInfo, existingSession.GetSessionInfo())
+			return
+		}
+		if err := c.handler.headlessManager.CloseSessionByConversationID(c.conversationID); err != nil {
+			c.sendError(headless.ErrorCodeInternalError, err.Error())
+			return
+		}
 	}
 
 	// 切换到 Headless 模式
@@ -1180,8 +1293,6 @@ func (c *conversationClient) handleStart(req *headless.HeadlessRequest) {
 			ClosedSessions: closedCount,
 		})
 	}
-
-	c.killClaudeProcesses()
 
 	// 创建会话（复用已有的 conversationID）
 	workDir := c.workDir
@@ -1255,6 +1366,46 @@ func (c *conversationClient) handleCancel(req *headless.HeadlessRequest) {
 		c.sendError(headless.ErrorCodeInternalError, err.Error())
 		return
 	}
+}
+
+// handleStopSession 处理停止整个会话请求
+func (c *conversationClient) handleStopSession(req *headless.HeadlessRequest) {
+	requestedID := requestedSessionID(req)
+	session := c.session
+	if requestedID != "" {
+		if requestedSession, ok := c.handler.headlessManager.GetSession(requestedID); ok &&
+			!requestedSession.IsClosed() &&
+			requestedSession.ConversationID == c.conversationID {
+			session = requestedSession
+		} else {
+			session = nil
+		}
+	}
+
+	if requestedID == "" && (session == nil || session.IsClosed()) {
+		session = c.handler.headlessManager.GetSessionByConversationID(c.conversationID)
+	}
+
+	if session == nil || session.IsClosed() {
+		c.sendResponse(headless.HeadlessResponseTypeNoSession, gin.H{
+			"conversation_id": c.conversationID,
+		})
+		c.sendHistoryByConversationID()
+		return
+	}
+
+	c.unsubscribeFromSession()
+
+	if err := c.handler.headlessManager.CloseSessionByConversationID(c.conversationID); err != nil {
+		c.sendError(headless.ErrorCodeInternalError, err.Error())
+		return
+	}
+
+	c.session = nil
+	c.sendResponse(headless.HeadlessResponseTypeNoSession, gin.H{
+		"conversation_id": c.conversationID,
+	})
+	c.sendHistoryByConversationID()
 }
 
 // handleLoadMore 处理加载更多历史请求
@@ -1334,13 +1485,24 @@ func (c *conversationClient) handleEditQueued(req *headless.HeadlessRequest) {
 
 // sendResponse 发送响应
 func (c *conversationClient) sendResponse(respType string, payload interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[HeadlessHandler] Client %s send channel closed while sending %s: %v", c.clientID, respType, r)
+		}
+	}()
+
+	timer := time.NewTimer(headlessSendEnqueueWait)
+	defer timer.Stop()
+
 	select {
 	case c.sendChan <- &headless.HeadlessResponse{
 		Type:    respType,
 		Payload: payload,
 	}:
-	default:
-		log.Printf("[HeadlessHandler] Client %s send channel full", c.clientID)
+	case <-c.done:
+		log.Printf("[HeadlessHandler] Client %s closed before sending %s", c.clientID, respType)
+	case <-timer.C:
+		log.Printf("[HeadlessHandler] Client %s send channel blocked for %s", c.clientID, respType)
 	}
 }
 

@@ -258,6 +258,7 @@ export type HeadlessRequestType =
   | 'headless_start'
   | 'headless_prompt'
   | 'headless_cancel'
+  | 'headless_stop_session'
   | 'load_more'
   | 'mode_switch'
   | 'delete_queued'

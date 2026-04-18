@@ -149,6 +149,13 @@ func (s *configInjectionServiceImpl) injectSingleConfig(ctx context.Context, con
 		return s.InjectClaudeMD(ctx, containerID, template.Content)
 
 	case models.ConfigTypeSkill:
+		metadata, err := s.templateService.ParseSkillMetadata(template.Content)
+		if err != nil {
+			return fmt.Errorf("failed to parse skill metadata: %w", err)
+		}
+		if metadata != nil && metadata.InstallSource != "" {
+			return s.installSkillPackage(ctx, containerID, template.Name, metadata)
+		}
 		// Check if this is an archive-based skill
 		if template.IsArchive && template.ArchiveData != "" {
 			return s.InjectSkillArchive(ctx, containerID, template.Name, template.ArchiveData)
@@ -194,18 +201,18 @@ func (s *configInjectionServiceImpl) parseMCPConfig(name string, content string)
 // InjectClaudeMD injects CLAUDE.MD content to ~/.claude/CLAUDE.md
 func (s *configInjectionServiceImpl) InjectClaudeMD(ctx context.Context, containerID string, content string) error {
 	// Create parent directory ~/.claude/ if it doesn't exist
-	if err := s.ensureDirectory(ctx, containerID, "$HOME/.claude"); err != nil {
+	if err := s.ensureDirectory(ctx, containerID, s.configHomePath(".claude")); err != nil {
 		return fmt.Errorf("failed to create ~/.claude directory: %w", err)
 	}
 
 	// Write content to ~/.claude/CLAUDE.md
-	return s.writeFile(ctx, containerID, "$HOME/.claude/CLAUDE.md", content)
+	return s.writeFile(ctx, containerID, s.configHomePath(".claude/CLAUDE.md"), content)
 }
 
 // InjectSkill injects a skill to ~/.claude/skills/{name}/SKILL.md
 func (s *configInjectionServiceImpl) InjectSkill(ctx context.Context, containerID string, name string, content string) error {
 	// Create parent directory ~/.claude/skills/{name}/ if it doesn't exist
-	skillDir := fmt.Sprintf("$HOME/.claude/skills/%s", name)
+	skillDir := s.configHomePath(fmt.Sprintf(".claude/skills/%s", name))
 	if err := s.ensureDirectory(ctx, containerID, skillDir); err != nil {
 		return fmt.Errorf("failed to create skill directory %s: %w", skillDir, err)
 	}
@@ -225,7 +232,7 @@ func (s *configInjectionServiceImpl) InjectSkillArchive(ctx context.Context, con
 	}
 
 	// Create the skills directory
-	skillsDir := "$HOME/.claude/skills"
+	skillsDir := s.configHomePath(".claude/skills")
 	if err := s.ensureDirectory(ctx, containerID, skillsDir); err != nil {
 		return fmt.Errorf("failed to create skills directory: %w", err)
 	}
@@ -292,19 +299,67 @@ func (s *configInjectionServiceImpl) InjectMCP(ctx context.Context, containerID 
 	}
 
 	// Write to ~/.claude.json
-	return s.writeFile(ctx, containerID, "$HOME/.claude.json", string(jsonContent))
+	return s.writeFile(ctx, containerID, s.configHomePath(".claude.json"), string(jsonContent))
 }
 
 // InjectCommand injects a command to ~/.claude/commands/{name}.md
 func (s *configInjectionServiceImpl) InjectCommand(ctx context.Context, containerID string, name string, content string) error {
 	// Create parent directory ~/.claude/commands/ if it doesn't exist
-	if err := s.ensureDirectory(ctx, containerID, "$HOME/.claude/commands"); err != nil {
+	if err := s.ensureDirectory(ctx, containerID, s.configHomePath(".claude/commands")); err != nil {
 		return fmt.Errorf("failed to create ~/.claude/commands directory: %w", err)
 	}
 
 	// Write content to ~/.claude/commands/{name}.md
-	commandPath := fmt.Sprintf("$HOME/.claude/commands/%s.md", name)
+	commandPath := s.configHomePath(fmt.Sprintf(".claude/commands/%s.md", name))
 	return s.writeFile(ctx, containerID, commandPath, content)
+}
+
+func (s *configInjectionServiceImpl) installSkillPackage(ctx context.Context, containerID string, templateName string, metadata *models.SkillMetadata) error {
+	if metadata == nil || metadata.InstallSource == "" {
+		return fmt.Errorf("skill package metadata is incomplete")
+	}
+
+	args := []string{"skills", "add", metadata.InstallSource, "--yes"}
+	if metadata.InstallGlobal {
+		args = append(args, "--global")
+	}
+
+	agents := metadata.InstallAgents
+	if len(agents) == 0 {
+		agents = []string{"claude-code", "codex"}
+	}
+	for _, agent := range agents {
+		if agent == "" {
+			continue
+		}
+		args = append(args, "--agent", agent)
+	}
+
+	if metadata.InstallAll {
+		// skills@1.5.0 中，带 agent 过滤时使用 --skill '*' 比 --all 更稳妥，
+		// 否则会退回“所有技能 + 所有 agent”的语义。
+		args = append(args, "--skill", "*")
+	} else {
+		for _, skill := range metadata.InstallSkills {
+			if skill == "" {
+				continue
+			}
+			args = append(args, "--skill", skill)
+		}
+	}
+
+	command := fmt.Sprintf("HOME=${CC_CONFIG_HOME:-$HOME} npx -y %s", shellJoin(args))
+	if metadata.InstallTargetDir != "" && !metadata.InstallGlobal {
+		targetDir := shellQuote(metadata.InstallTargetDir)
+		command = fmt.Sprintf("mkdir -p %s && cd %s && %s", targetDir, targetDir, command)
+	}
+
+	if _, err := s.dockerClient.ExecInContainer(ctx, containerID, []string{"sh", "-lc", command}); err != nil {
+		return fmt.Errorf("failed to install skill package '%s': %w", templateName, err)
+	}
+
+	log.Infof("Successfully installed skill package '%s' from %s", templateName, metadata.InstallSource)
+	return nil
 }
 
 // ensureDirectory creates a directory if it doesn't exist
@@ -373,23 +428,23 @@ func (s *configInjectionServiceImpl) writeBinaryFile(ctx context.Context, contai
 // InjectCodexConfig injects Codex config.toml to ~/.codex/config.toml
 func (s *configInjectionServiceImpl) InjectCodexConfig(ctx context.Context, containerID string, content string) error {
 	// Create ~/.codex directory if it doesn't exist
-	if err := s.ensureDirectory(ctx, containerID, "$HOME/.codex"); err != nil {
+	if err := s.ensureDirectory(ctx, containerID, s.configHomePath(".codex")); err != nil {
 		return fmt.Errorf("failed to create ~/.codex directory: %w", err)
 	}
 
 	// Write content to ~/.codex/config.toml
-	return s.writeFile(ctx, containerID, "$HOME/.codex/config.toml", content)
+	return s.writeFile(ctx, containerID, s.configHomePath(".codex/config.toml"), content)
 }
 
 // InjectCodexAuth injects Codex auth.json to ~/.codex/auth.json
 func (s *configInjectionServiceImpl) InjectCodexAuth(ctx context.Context, containerID string, content string) error {
 	// Create ~/.codex directory if it doesn't exist
-	if err := s.ensureDirectory(ctx, containerID, "$HOME/.codex"); err != nil {
+	if err := s.ensureDirectory(ctx, containerID, s.configHomePath(".codex")); err != nil {
 		return fmt.Errorf("failed to create ~/.codex directory: %w", err)
 	}
 
 	// Write content to ~/.codex/auth.json
-	return s.writeFile(ctx, containerID, "$HOME/.codex/auth.json", content)
+	return s.writeFile(ctx, containerID, s.configHomePath(".codex/auth.json"), content)
 }
 
 // InjectGeminiEnv injects Gemini environment variables into the container's shell profile
@@ -417,14 +472,17 @@ func (s *configInjectionServiceImpl) InjectGeminiEnv(ctx context.Context, contai
 
 	envContent := strings.Join(exports, "\n") + "\n"
 
+	geminiEnvPath := s.configHomePath(".gemini_env")
+	bashrcPath := s.configHomePath(".bashrc")
+
 	// Write to ~/.gemini_env
-	if err := s.writeFile(ctx, containerID, "$HOME/.gemini_env", envContent); err != nil {
+	if err := s.writeFile(ctx, containerID, geminiEnvPath, envContent); err != nil {
 		return fmt.Errorf("failed to write ~/.gemini_env: %w", err)
 	}
 
 	// Add source line to ~/.bashrc if not already present
-	sourceCmd := []string{"sh", "-c", `grep -q 'source.*\.gemini_env' $HOME/.bashrc 2>/dev/null || echo '# Gemini CLI environment variables
-[ -f "$HOME/.gemini_env" ] && source "$HOME/.gemini_env"' >> $HOME/.bashrc`}
+	sourceCmd := []string{"sh", "-c", fmt.Sprintf(`grep -q 'source.*\.gemini_env' %s 2>/dev/null || echo '# Gemini CLI environment variables
+[ -f "%s" ] && source "%s"' >> %s`, bashrcPath, geminiEnvPath, geminiEnvPath, bashrcPath)}
 	_, err := s.dockerClient.ExecInContainer(ctx, containerID, sourceCmd)
 	if err != nil {
 		return fmt.Errorf("failed to update ~/.bashrc for Gemini env: %w", err)
@@ -442,4 +500,24 @@ func (s *configInjectionServiceImpl) InjectSerenaMCP(ctx context.Context, contai
 		Args:    []string{"-y", "@anthropic/serena-mcp"},
 	}
 	return s.InjectMCP(ctx, containerID, []MCPServerConfig{serenaCfg})
+}
+
+func (s *configInjectionServiceImpl) configHomePath(relativePath string) string {
+	base := "${CC_CONFIG_HOME:-$HOME}"
+	if relativePath == "" {
+		return base
+	}
+	return fmt.Sprintf("%s/%s", base, strings.TrimPrefix(relativePath, "/"))
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func shellJoin(parts []string) string {
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		quoted = append(quoted, shellQuote(part))
+	}
+	return strings.Join(quoted, " ")
 }

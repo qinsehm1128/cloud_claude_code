@@ -73,7 +73,6 @@
 | 🔄 **Session Management** | Terminal session persistence with compression and reconnection |
 | 🏭 **Orphaned Container Management** | List and manage Docker containers not tracked in database |
 | 🔐 **Flexible Auth** | Multiple auth methods: header, cookie, query parameter |
-| 🧩 **VS Code Extension** | PTY Automation Monitor extension for VS Code integration |
 | ⚙️ **Environment Profiles** | Configurable API URL and Token variable names per profile |
 
 ---
@@ -141,14 +140,6 @@
 </td>
 </tr>
 <tr>
-<td width="50%">
-
-### 🧩 VS Code Extension
-- **TypeScript** - Extension language
-- **WebSocket** - Real-time communication
-- **VS Code API** - IDE integration
-
-</td>
 <td width="50%">
 
 ### 🐳 Infrastructure
@@ -530,17 +521,6 @@ All automation actions are logged with comprehensive details:
 }
 ```
 
-### Installation
-
-```bash
-cd vscode-extension
-npm install
-npm run compile
-# Then install the .vsix file in VS Code
-```
-
----
-
 ## 📚 API Reference
 
 <details>
@@ -773,18 +753,8 @@ npm run compile
 │       └── types/           # TypeScript types
 │           └── claudeConfig.ts           # Config types
 │
-├── 🧩 vscode-extension/     # VS Code extension
-│   └── src/
-│       ├── extension.ts     # Extension entry
-│       ├── statusBar.ts     # Status bar integration
-│       ├── commands/        # VS Code commands
-│       ├── services/        # WebSocket client
-│       ├── webview/         # Webview panels
-│       └── utils/           # Utilities
-│
 ├── 🐳 docker/               # Docker configs (dev containers)
 │   ├── Dockerfile.base      # Base image
-│   ├── extensions/          # VS Code extensions
 │   └── traefik/             # Traefik proxy config
 │
 ├── 🐳 deploy-docker/        # Docker deployment

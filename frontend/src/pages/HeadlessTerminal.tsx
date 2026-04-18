@@ -6,9 +6,12 @@ import {
   AlertCircle,
   RefreshCw,
   Settings,
+  PanelLeft,
+  PanelLeftClose,
   PanelRightClose,
   PanelRight,
   ListTodo,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -21,6 +24,7 @@ import { MonitoringStatusBar, MonitoringStatus } from '@/components/Automation/M
 import { MonitoringConfigPanel, MonitoringConfig } from '@/components/Automation/MonitoringConfigPanel';
 import { TaskPanel, Task } from '@/components/Automation/TaskPanel';
 import { TaskEditor } from '@/components/Automation/TaskEditor';
+import FileBrowser from '@/components/FileManager/FileBrowser';
 
 interface Container {
   id: number;
@@ -35,8 +39,10 @@ export default function HeadlessTerminal() {
   const navigate = useNavigate();
   
   const [container, setContainer] = useState<Container | null>(null);
+  const [conversationWsId, setConversationWsId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filePanelOpen, setFilePanelOpen] = useState(false);
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus>({
     enabled: false,
@@ -58,6 +64,7 @@ export default function HeadlessTerminal() {
   // Headless session hook - 使用稳定的 containerReady 状态而不是 container 对象
   const headless = useHeadlessSession({
     containerId: parseInt(containerId || '0'),
+    conversationId: conversationWsId ?? undefined,
     autoConnect: containerReady,
     onModeSwitch: (mode, closedSessions) => {
       console.log(`Mode switched to ${mode}, closed ${closedSessions} sessions`);
@@ -68,7 +75,14 @@ export default function HeadlessTerminal() {
     onError: (code, message) => {
       console.error(`Headless error [${code}]: ${message}`);
     },
+    onSessionCreated: (conversationId) => {
+      setConversationWsId(conversationId);
+    },
   });
+
+  useEffect(() => {
+    setConversationWsId(null);
+  }, [containerId]);
 
   // Load container info
   useEffect(() => {
@@ -155,6 +169,16 @@ export default function HeadlessTerminal() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [headless.connected]);
+
+  useEffect(() => {
+    if (!conversationWsId) {
+      return;
+    }
+    if (headless.connectedConversationId === conversationWsId) {
+      return;
+    }
+    void headless.connectToConversation(conversationWsId);
+  }, [conversationWsId, headless]);
 
 
   // Monitoring handlers
@@ -282,7 +306,8 @@ export default function HeadlessTerminal() {
     if (!headless.hasSession) {
       // Start session first, then send prompt
       // The hook will handle sending the prompt after session is ready via pendingPromptRef
-      headless.startSession(container?.work_dir);
+      const shouldForceNew = headless.connectedConversationId == null;
+      headless.startSession(container?.work_dir, shouldForceNew);
     }
     // Always call sendPrompt - the hook will handle the pending logic
     headless.sendPrompt(prompt);
@@ -292,6 +317,14 @@ export default function HeadlessTerminal() {
   const handleSwitchToTUI = useCallback(() => {
     headless.switchMode('tui');
   }, [headless]);
+
+  const closeFilePanel = useCallback(() => {
+    setFilePanelOpen(false);
+  }, []);
+
+  const toggleFilePanel = useCallback(() => {
+    setFilePanelOpen((prev) => !prev);
+  }, []);
 
   if (loading) {
     return (
@@ -318,6 +351,32 @@ export default function HeadlessTerminal() {
 
   return (
     <div className="flex h-[calc(100vh-1px)]">
+      <div
+        className={`h-full bg-card border-r flex flex-col transition-all duration-300 ${
+          filePanelOpen ? 'w-80' : 'w-0'
+        } overflow-hidden`}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
+          <h3 className="font-medium text-sm">File Browser</h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={closeFilePanel}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex-1 overflow-auto p-3">
+          {filePanelOpen && (
+            <FileBrowser
+              containerId={parseInt(containerId || '0')}
+              rootPath={container?.work_dir}
+            />
+          )}
+        </div>
+      </div>
+
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
@@ -341,6 +400,18 @@ export default function HeadlessTerminal() {
               onClick={handleSwitchToTUI}
             >
               Switch to TUI
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleFilePanel}
+            >
+              {filePanelOpen ? (
+                <PanelLeftClose className="h-4 w-4 mr-2" />
+              ) : (
+                <PanelLeft className="h-4 w-4 mr-2" />
+              )}
+              Files
             </Button>
             <Button
               variant="outline"
@@ -390,7 +461,14 @@ export default function HeadlessTerminal() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => headless.connectToContainer(parseInt(containerId || '0'))}
+              onClick={() => {
+                const targetConversationId = conversationWsId ?? headless.conversationId;
+                if (targetConversationId) {
+                  void headless.connectToConversation(targetConversationId);
+                  return;
+                }
+                void headless.connectToContainer(parseInt(containerId || '0'));
+              }}
               disabled={headless.connecting}
             >
               <RefreshCw className={`h-4 w-4 mr-1 ${headless.connecting ? 'animate-spin' : ''}`} />
@@ -440,7 +518,9 @@ export default function HeadlessTerminal() {
         <PromptInput
           onSend={handleSendPrompt}
           onCancel={() => headless.cancelExecution()}
+          onStopSession={() => headless.stopSession()}
           isRunning={headless.isRunning}
+          canStopSession={headless.hasSession}
           disabled={!headless.connected}
           placeholder={headless.hasSession ? 'Enter your prompt...' : 'Enter prompt to start a new session...'}
         />

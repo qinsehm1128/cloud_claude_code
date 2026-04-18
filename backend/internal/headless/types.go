@@ -96,6 +96,8 @@ const (
 	HeadlessRequestTypePrompt = "headless_prompt"
 	// HeadlessRequestTypeCancel 取消执行
 	HeadlessRequestTypeCancel = "headless_cancel"
+	// HeadlessRequestTypeStopSession 停止当前会话
+	HeadlessRequestTypeStopSession = "headless_stop_session"
 	// HeadlessRequestTypeLoadMore 加载更多历史
 	HeadlessRequestTypeLoadMore = "load_more"
 	// HeadlessRequestTypeModeSwitch 模式切换
@@ -222,7 +224,7 @@ type ConversationInfo struct {
 	ClaudeSessionID string `json:"claude_session_id,omitempty"`
 	Title           string `json:"title,omitempty"`
 	State           string `json:"state"`
-	IsRunning       bool   `json:"is_running"`       // 后端会话是否正在运行
+	IsRunning       bool   `json:"is_running"` // 后端会话是否正在运行
 	TotalTurns      int    `json:"total_turns"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`

@@ -35,7 +35,7 @@ func (s *HeadlessSession) StartClaudeProcess(ctx context.Context, prompt string)
 
 	// 构建命令参数
 	args := s.buildClaudeArgs(prompt)
-	
+
 	// 完整命令：claude + args
 	cmd := append([]string{"claude"}, args...)
 
@@ -165,13 +165,13 @@ func (s *HeadlessSession) buildClaudeArgs(prompt string) []string {
 
 	// 参考 claude-code-client 的参数顺序
 	// --output-format stream-json --verbose --dangerously-skip-permissions -p <prompt>
-	
+
 	// 输出格式
 	args = append(args, "--output-format", "stream-json")
-	
+
 	// 详细输出模式（重要！确保输出完整信息）
 	args = append(args, "--verbose")
-	
+
 	// 跳过权限检查
 	args = append(args, "--dangerously-skip-permissions")
 
@@ -295,7 +295,7 @@ func (s *HeadlessSession) readDockerOutput(ctx context.Context, resp *types.Hija
 	// 使用 stdcopy 解析 multiplexed stream
 	// 当 Tty=false 时，Docker 使用 multiplexed stream 格式
 	var stdoutBuf, stderrBuf bytes.Buffer
-	
+
 	// 在后台持续读取
 	go func() {
 		_, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, resp.Reader)
@@ -322,7 +322,7 @@ func (s *HeadlessSession) readDockerOutput(ctx context.Context, resp *types.Hija
 			if stdoutBuf.Len() > lastStdoutLen {
 				newData := stdoutBuf.Bytes()[lastStdoutLen:]
 				lastStdoutLen = stdoutBuf.Len()
-				
+
 				// 按行处理
 				lines := strings.Split(string(newData), "\n")
 				for _, line := range lines {
@@ -362,7 +362,7 @@ func (s *HeadlessSession) readDockerOutput(ctx context.Context, resp *types.Hija
 			if stderrBuf.Len() > lastStderrLen {
 				newData := stderrBuf.Bytes()[lastStderrLen:]
 				lastStderrLen = stderrBuf.Len()
-				
+
 				lines := strings.Split(string(newData), "\n")
 				for _, line := range lines {
 					line = strings.TrimSpace(line)
@@ -404,7 +404,7 @@ func (s *HeadlessSession) waitDockerExec(ctx context.Context, cli *client.Client
 
 			if !inspect.Running {
 				log.Printf("[HeadlessSession %s] Exec finished with exit code: %d", s.ID, inspect.ExitCode)
-				
+
 				// 如果还在 running 状态，说明没有收到 result 事件，手动完成
 				if s.GetState() == HeadlessStateRunning {
 					if inspect.ExitCode != 0 {
@@ -449,11 +449,11 @@ func (s *HeadlessSession) readStdout(ctx context.Context) {
 	}
 
 	log.Printf("[HeadlessSession %s] Starting stdout reader...", s.ID)
-	
+
 	scanner := bufio.NewScanner(s.stdout)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
-	
+
 	lineCount := 0
 
 	for scanner.Scan() {
@@ -466,13 +466,13 @@ func (s *HeadlessSession) readStdout(ctx context.Context) {
 
 		line := scanner.Text()
 		line = strings.TrimSpace(line)
-		
+
 		if line == "" {
 			continue
 		}
 
 		lineCount++
-		
+
 		logLine := line
 		if len(logLine) > 200 {
 			logLine = logLine[:200] + "..."
@@ -514,11 +514,11 @@ func (s *HeadlessSession) readStderr(ctx context.Context) {
 	}
 
 	log.Printf("[HeadlessSession %s] Starting stderr reader...", s.ID)
-	
+
 	scanner := bufio.NewScanner(s.stderr)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
-	
+
 	lineCount := 0
 
 	for scanner.Scan() {
@@ -530,7 +530,7 @@ func (s *HeadlessSession) readStderr(ctx context.Context) {
 
 		line := scanner.Text()
 		line = strings.TrimSpace(line)
-		
+
 		if line == "" {
 			continue
 		}
@@ -603,6 +603,51 @@ func (s *HeadlessSession) cleanupPipes() {
 	}
 }
 
+func (s *HeadlessSession) terminateDockerExecProcess(reason string) {
+	if s.dockerClient == nil || s.execID == "" {
+		return
+	}
+
+	inspectResp, err := s.dockerClient.ContainerExecInspect(context.Background(), s.execID)
+	if err != nil {
+		log.Printf("[HeadlessSession %s] Failed to inspect exec %s while %s: %v", s.ID, s.execID, reason, err)
+		return
+	}
+
+	if !inspectResp.Running && inspectResp.Pid == 0 {
+		return
+	}
+
+	pid := inspectResp.Pid
+	killCmd := fmt.Sprintf(
+		"pid=%d; if [ \"$pid\" -gt 0 ]; then kill -TERM \"$pid\" 2>/dev/null || true; sleep 1; kill -KILL \"$pid\" 2>/dev/null || true; else pkill -TERM -f 'claude' 2>/dev/null || true; sleep 1; pkill -KILL -f 'claude' 2>/dev/null || true; fi",
+		pid,
+	)
+	killExecConfig := types.ExecConfig{
+		Cmd:          []string{"sh", "-c", killCmd},
+		AttachStdout: true,
+		AttachStderr: true,
+		User:         "root",
+	}
+
+	killExecResp, err := s.dockerClient.ContainerExecCreate(context.Background(), s.DockerID, killExecConfig)
+	if err != nil {
+		log.Printf("[HeadlessSession %s] Failed to create kill exec while %s: %v", s.ID, reason, err)
+		return
+	}
+
+	killAttachResp, err := s.dockerClient.ContainerExecAttach(context.Background(), killExecResp.ID, types.ExecStartCheck{})
+	if err != nil {
+		log.Printf("[HeadlessSession %s] Failed to attach kill exec while %s: %v", s.ID, reason, err)
+		return
+	}
+	defer killAttachResp.Close()
+
+	if _, err := io.ReadAll(killAttachResp.Reader); err != nil {
+		log.Printf("[HeadlessSession %s] Failed to read kill exec output while %s: %v", s.ID, reason, err)
+	}
+}
+
 // CancelExecution 取消当前执行
 func (s *HeadlessSession) CancelExecution() error {
 	if s.GetState() != HeadlessStateRunning {
@@ -615,6 +660,9 @@ func (s *HeadlessSession) CancelExecution() error {
 	if s.cancelRead != nil {
 		s.cancelRead()
 	}
+
+	// 优先终止容器内正在运行的 Claude exec，避免只断开 websocket 导致后台继续执行。
+	s.terminateDockerExecProcess("cancelling execution")
 
 	// 关闭 hijacked 连接
 	if s.hijackedResp != nil {
@@ -638,7 +686,7 @@ func (s *HeadlessSession) SendInput(input string) error {
 		_, err := s.hijackedResp.Conn.Write([]byte(input + "\n"))
 		return err
 	}
-	
+
 	if s.stdin == nil {
 		return fmt.Errorf("stdin is not available")
 	}

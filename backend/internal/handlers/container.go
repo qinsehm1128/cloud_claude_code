@@ -48,11 +48,15 @@ type ProxyConfigRequest struct {
 // CreateContainerRequest represents the request to create a container
 type CreateContainerRequest struct {
 	Name             string               `json:"name" binding:"required"`
-	GitRepoURL       string               `json:"git_repo_url,omitempty"`       // GitHub repo URL (optional when SkipGitRepo=true)
+	GitRepoURL       string               `json:"git_repo_url,omitempty"` // GitHub repo URL (optional when SkipGitRepo=true)
 	GitRepoName      string               `json:"git_repo_name,omitempty"`
 	SkipClaudeInit   bool                 `json:"skip_claude_init,omitempty"`   // Skip Claude Code initialization
 	MemoryLimit      int64                `json:"memory_limit,omitempty"`       // Memory limit in MB (0 = default 2048MB)
 	CPULimit         float64              `json:"cpu_limit,omitempty"`          // CPU limit in cores (0 = default 1)
+	MemoryUnlimited  bool                 `json:"memory_unlimited,omitempty"`   // Disable Docker memory limit
+	CPUUnlimited     bool                 `json:"cpu_unlimited,omitempty"`      // Disable Docker CPU quota
+	GPUEnabled       bool                 `json:"gpu_enabled,omitempty"`        // Enable GPU passthrough
+	GPUCount         int                  `json:"gpu_count,omitempty"`          // -1 means all GPUs
 	PortMappings     []PortMappingRequest `json:"port_mappings,omitempty"`      // Legacy port mappings
 	Proxy            ProxyConfigRequest   `json:"proxy,omitempty"`              // Traefik proxy configuration
 	EnableCodeServer bool                 `json:"enable_code_server,omitempty"` // Enable code-server (Web VS Code)
@@ -61,13 +65,14 @@ type CreateContainerRequest struct {
 	EnvVarsProfileID        *uint `json:"env_vars_profile_id,omitempty"`
 	StartupCommandProfileID *uint `json:"startup_command_profile_id,omitempty"`
 	// Claude Config Template selections
-	SelectedClaudeMD *uint  `json:"selected_claude_md,omitempty"` // Single CLAUDE.MD template ID (optional)
-	SelectedSkills   []uint `json:"selected_skills,omitempty"`    // Multiple Skill template IDs (optional)
-	SelectedMCPs     []uint `json:"selected_mcps,omitempty"`      // Multiple MCP template IDs (optional)
-	SelectedCommands []uint `json:"selected_commands,omitempty"`  // Multiple Command template IDs (optional)
+	SelectedClaudeMD     *uint  `json:"selected_claude_md,omitempty"`     // Single CLAUDE.MD template ID (optional)
+	SelectedSkills       []uint `json:"selected_skills,omitempty"`        // Multiple Skill template IDs (optional)
+	SelectedMCPs         []uint `json:"selected_mcps,omitempty"`          // Multiple MCP template IDs (optional)
+	SelectedCommands     []uint `json:"selected_commands,omitempty"`      // Multiple Command template IDs (optional)
 	SelectedCodexConfigs []uint `json:"selected_codex_configs,omitempty"` // Multiple Codex Config template IDs (optional)
 	SelectedCodexAuths   []uint `json:"selected_codex_auths,omitempty"`   // Multiple Codex Auth template IDs (optional)
 	SelectedGeminiEnvs   []uint `json:"selected_gemini_envs,omitempty"`   // Multiple Gemini Env template IDs (optional)
+	AutoInjectAllSkills  bool   `json:"auto_inject_all_skills,omitempty"` // Automatically inject all SKILL templates
 	// Container creation options
 	SkipGitRepo    bool `json:"skip_git_repo,omitempty"`    // Allow creating container without GitHub repository
 	EnableYoloMode bool `json:"enable_yolo_mode,omitempty"` // Enable YOLO mode (--dangerously-skip-permissions)
@@ -115,6 +120,10 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 		SkipClaudeInit:          req.SkipClaudeInit,
 		MemoryLimit:             req.MemoryLimit,
 		CPULimit:                req.CPULimit,
+		MemoryUnlimited:         req.MemoryUnlimited,
+		CPUUnlimited:            req.CPUUnlimited,
+		GPUEnabled:              req.GPUEnabled,
+		GPUCount:                req.GPUCount,
 		PortMappings:            portMappings,
 		EnableCodeServer:        req.EnableCodeServer,
 		GitHubTokenID:           req.GitHubTokenID,
@@ -134,6 +143,7 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 		SelectedCodexConfigs: req.SelectedCodexConfigs,
 		SelectedCodexAuths:   req.SelectedCodexAuths,
 		SelectedGeminiEnvs:   req.SelectedGeminiEnvs,
+		AutoInjectAllSkills:  req.AutoInjectAllSkills,
 		// Container creation options
 		SkipGitRepo:    req.SkipGitRepo,
 		EnableYoloMode: req.EnableYoloMode,

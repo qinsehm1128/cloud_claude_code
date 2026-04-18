@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -20,6 +21,10 @@ const (
 	BaseImageName           = "cc-base"
 	BaseImageTag            = "latest"
 	BaseImageWithCodeServer = "with-code-server"
+	defaultExecPath         = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	developerHomeDir        = "/home/developer"
+	developerNpmPrefix      = "/home/developer/.npm-global"
+	developerExtraPath      = "/home/developer/.npm-global/bin:/home/developer/.local/bin"
 )
 
 // Client wraps the Docker SDK client
@@ -59,7 +64,7 @@ func (c *Client) BaseImageExists(ctx context.Context) bool {
 func (c *Client) BuildBaseImage(ctx context.Context, dockerfilePath string) error {
 	// Read Dockerfile directory
 	dockerfileDir := filepath.Dir(dockerfilePath)
-	
+
 	// Create tar archive of the build context
 	tarPath, err := createBuildContext(dockerfileDir)
 	if err != nil {
@@ -122,7 +127,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 	// Build exposed ports and port bindings
 	exposedPorts := nat.PortSet{}
 	portBindings := nat.PortMap{}
-	
+
 	for containerPort, hostPort := range config.PortBindings {
 		port := nat.Port(containerPort)
 		exposedPorts[port] = struct{}{}
@@ -140,6 +145,10 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 	if config.RunAsRoot {
 		user = "root"
 	}
+	workingDir := config.WorkingDir
+	if workingDir == "" {
+		workingDir = "/workspace"
+	}
 
 	// Build container config
 	containerConfig := &container.Config{
@@ -151,7 +160,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
-		WorkingDir:   "/workspace",
+		WorkingDir:   workingDir,
 		ExposedPorts: exposedPorts,
 		Labels:       config.Labels,
 	}
@@ -208,6 +217,22 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 	})
 }
 
+// RemoveVolumes removes managed named volumes. Missing volumes are ignored.
+func (c *Client) RemoveVolumes(ctx context.Context, volumeNames ...string) error {
+	for _, volumeName := range volumeNames {
+		if volumeName == "" {
+			continue
+		}
+		if err := c.cli.VolumeRemove(ctx, volumeName, true); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "no such volume") {
+				continue
+			}
+			return fmt.Errorf("failed to remove volume %s: %w", volumeName, err)
+		}
+	}
+	return nil
+}
+
 // GetContainerStatus gets the status of a container
 func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (string, error) {
 	info, err := c.cli.ContainerInspect(ctx, containerID)
@@ -223,24 +248,24 @@ func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Try traefik-net first
 	if network, ok := info.NetworkSettings.Networks["traefik-net"]; ok && network.IPAddress != "" {
 		return network.IPAddress, nil
 	}
-	
+
 	// Fall back to bridge network
 	if network, ok := info.NetworkSettings.Networks["bridge"]; ok && network.IPAddress != "" {
 		return network.IPAddress, nil
 	}
-	
+
 	// Try any available network
 	for _, network := range info.NetworkSettings.Networks {
 		if network.IPAddress != "" {
 			return network.IPAddress, nil
 		}
 	}
-	
+
 	return "", fmt.Errorf("no IP address found for container")
 }
 
@@ -286,7 +311,7 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, cmd []
 		AttachStdout: true,
 		AttachStderr: true,
 		User:         user,
-		Env:          []string{fmt.Sprintf("HOME=%s", homeDir)},
+		Env:          buildExecEnv(containerInfo.Config.Env, homeDir),
 	}
 
 	execID, err := c.cli.ContainerExecCreate(ctx, containerID, execConfig)
@@ -310,12 +335,17 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, cmd []
 
 // ExecAsRoot executes a command in a container as root user
 func (c *Client) ExecAsRoot(ctx context.Context, containerID string, cmd []string) (string, error) {
+	containerInfo, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container: %w", err)
+	}
+
 	execConfig := types.ExecConfig{
 		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
 		User:         "root",
-		Env:          []string{"HOME=/root"},
+		Env:          buildExecEnv(containerInfo.Config.Env, "/root"),
 	}
 
 	execID, err := c.cli.ContainerExecCreate(ctx, containerID, execConfig)
@@ -337,21 +367,49 @@ func (c *Client) ExecAsRoot(ctx context.Context, containerID string, cmd []strin
 	return string(output), nil
 }
 
+func buildExecEnv(baseEnv []string, homeDir string) []string {
+	envMap := make(map[string]string, len(baseEnv)+4)
+	for _, entry := range baseEnv {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		envMap[parts[0]] = parts[1]
+	}
+
+	currentPath := envMap["PATH"]
+	if currentPath == "" {
+		currentPath = defaultExecPath
+	}
+
+	envMap["HOME"] = homeDir
+	envMap["CC_CONFIG_HOME"] = developerHomeDir
+	envMap["NPM_CONFIG_PREFIX"] = developerNpmPrefix
+	envMap["PATH"] = developerExtraPath + ":" + currentPath
+
+	env := make([]string, 0, len(envMap))
+	for key, value := range envMap {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
+	return env
+}
+
 // ContainerConfig holds configuration for creating a container
 type ContainerConfig struct {
-	Name            string
-	EnvVars         []string
-	Binds           []string
-	SecurityOpt     []string
-	CapDrop         []string
-	CapAdd          []string
-	Resources       container.Resources
-	NetworkMode     string
-	PortBindings    map[string]string // containerPort -> hostPort, e.g., "3000/tcp" -> "13000"
-	Labels          map[string]string // Container labels (for Traefik routing)
-	UseTraefikNet   bool              // Connect to traefik-net network
-	UseCodeServer   bool              // Use image with code-server
-	RunAsRoot       bool              // Run as root user (default: false, runs as dev user)
+	Name          string
+	EnvVars       []string
+	Binds         []string
+	WorkingDir    string
+	SecurityOpt   []string
+	CapDrop       []string
+	CapAdd        []string
+	Resources     container.Resources
+	NetworkMode   string
+	PortBindings  map[string]string // containerPort -> hostPort, e.g., "3000/tcp" -> "13000"
+	Labels        map[string]string // Container labels (for Traefik routing)
+	UseTraefikNet bool              // Connect to traefik-net network
+	UseCodeServer bool              // Use image with code-server
+	RunAsRoot     bool              // Run as root user (default: false, runs as dev user)
 }
 
 // createBuildContext creates a tar archive of the build context
@@ -359,7 +417,7 @@ func createBuildContext(dir string) (string, error) {
 	// For simplicity, we'll use a temporary approach
 	// In production, use archive/tar to create proper tar
 	tarPath := filepath.Join(os.TempDir(), fmt.Sprintf("docker-build-%d.tar", time.Now().UnixNano()))
-	
+
 	// This is a simplified version - in production use proper tar creation
 	// For now, we'll rely on the Docker daemon to handle the context
 	return tarPath, nil

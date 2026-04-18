@@ -40,6 +40,29 @@ const initialState: HeadlessSessionState = {
   error: null,
 };
 
+function getStreamEventFingerprint(event: StreamEvent): string {
+  return JSON.stringify({
+    type: event.type,
+    subtype: event.subtype ?? '',
+    tools: event.tools ?? [],
+    result: event.result ?? '',
+    error: event.error ?? '',
+    is_error: Boolean(event.is_error),
+    is_meta: Boolean(event.is_meta),
+    message: event.message?.content?.map((content) => ({
+      type: content.type,
+      text: content.text ?? '',
+      thinking: content.thinking ?? '',
+      id: content.id ?? '',
+      name: content.name ?? '',
+      input: content.input ?? null,
+      tool_use_id: content.tool_use_id ?? '',
+      content: content.content ?? null,
+      is_error: Boolean(content.is_error),
+    })) ?? [],
+  });
+}
+
 export interface UseHeadlessSessionOptions {
   containerId?: number;
   conversationId?: number;
@@ -151,11 +174,19 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
 
   // 处理 event 消息
   const handleEvent = useCallback((payload: StreamEvent) => {
-    safeSetState(prev => ({
-      ...prev,
-      currentTurnEvents: [...prev.currentTurnEvents, payload],
-      state: 'running',
-    }));
+    const fingerprint = getStreamEventFingerprint(payload);
+
+    safeSetState(prev => {
+      if (prev.currentTurnEvents.some((event) => getStreamEventFingerprint(event) === fingerprint)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        currentTurnEvents: [...prev.currentTurnEvents, payload],
+        state: 'running',
+      };
+    });
   }, [safeSetState]);
 
   // 处理 turn_complete 消息
@@ -253,7 +284,12 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
         safeSetState(prev => ({
           ...prev,
           sessionId: null,
+          claudeSessionId: null,
           state: 'idle',
+          currentTurnId: null,
+          currentTurnEvents: [],
+          queuedTurns: [],
+          error: null,
         }));
         break;
       case 'history':
@@ -536,6 +572,14 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
     wsRef.current.cancelExecution();
   }, []);
 
+  // 停止整个会话
+  const stopSession = useCallback(() => {
+    if (!wsRef.current?.isConnected()) {
+      return;
+    }
+    wsRef.current.stopSession(state.sessionId ?? undefined);
+  }, [state.sessionId]);
+
   // 加载更多历史
   const loadMoreHistory = useCallback((limit: number = 10) => {
     if (!wsRef.current?.isConnected() || state.loadingHistory || !state.hasMoreHistory) {
@@ -630,6 +674,7 @@ export function useHeadlessSession(options: UseHeadlessSessionOptions) {
     prepareForNewSession,
     sendPrompt,
     cancelExecution,
+    stopSession,
     deleteQueuedTurn,
     editQueuedTurn,
     loadMoreHistory,

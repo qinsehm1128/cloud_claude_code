@@ -292,6 +292,12 @@ func (s *configTemplateServiceImpl) ParseSkillMetadata(content string) (*models.
 	type frontmatter struct {
 		AllowedTools           []string `yaml:"allowed_tools"`
 		DisableModelInvocation bool     `yaml:"disable_model_invocation"`
+		InstallSource          string   `yaml:"install_source"`
+		InstallGlobal          bool     `yaml:"install_global"`
+		InstallAgents          []string `yaml:"install_agents"`
+		InstallSkills          []string `yaml:"install_skills"`
+		InstallAll             bool     `yaml:"install_all"`
+		InstallTargetDir       string   `yaml:"install_target_dir"`
 	}
 
 	var fm frontmatter
@@ -301,6 +307,12 @@ func (s *configTemplateServiceImpl) ParseSkillMetadata(content string) (*models.
 
 	metadata.AllowedTools = fm.AllowedTools
 	metadata.DisableModelInvocation = fm.DisableModelInvocation
+	metadata.InstallSource = fm.InstallSource
+	metadata.InstallGlobal = fm.InstallGlobal
+	metadata.InstallAgents = fm.InstallAgents
+	metadata.InstallSkills = fm.InstallSkills
+	metadata.InstallAll = fm.InstallAll
+	metadata.InstallTargetDir = fm.InstallTargetDir
 
 	return metadata, nil
 }

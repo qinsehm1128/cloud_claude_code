@@ -235,6 +235,10 @@ describe('Dashboard - Container Create Dialog', () => {
           false,
           2048,
           1,
+          false,
+          false,
+          false,
+          -1,
           [],
           undefined,
           false,
@@ -248,7 +252,12 @@ describe('Dashboard - Container Create Dialog', () => {
             selected_skills: [],
             selected_mcps: [],
             selected_commands: [],
-          }
+            selected_codex_configs: [],
+            selected_codex_auths: [],
+            selected_gemini_envs: [],
+          },
+          true,
+          false,
         )
       })
     })

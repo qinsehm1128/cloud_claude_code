@@ -382,6 +382,10 @@ export const containerApi = {
     skipClaudeInit?: boolean,
     memoryLimit?: number,
     cpuLimit?: number,
+    memoryUnlimited?: boolean,
+    cpuUnlimited?: boolean,
+    gpuEnabled?: boolean,
+    gpuCount?: number,
     portMappings?: PortMapping[],
     proxy?: ProxyConfig,
     enableCodeServer?: boolean,
@@ -392,6 +396,7 @@ export const containerApi = {
     skipGitRepo?: boolean,
     enableYoloMode?: boolean,
     claudeConfigSelection?: ClaudeConfigSelection,
+    autoInjectAllSkills?: boolean,
     // Permission option
     runAsRoot?: boolean
   ) =>
@@ -402,6 +407,10 @@ export const containerApi = {
       skip_claude_init: skipClaudeInit,
       memory_limit: memoryLimit || 0,
       cpu_limit: cpuLimit || 0,
+      memory_unlimited: memoryUnlimited || false,
+      cpu_unlimited: cpuUnlimited || false,
+      gpu_enabled: gpuEnabled || false,
+      gpu_count: gpuEnabled ? (gpuCount ?? -1) : 0,
       port_mappings: portMappings || [],
       proxy: proxy || { enabled: false },
       enable_code_server: enableCodeServer || false,
@@ -418,6 +427,7 @@ export const containerApi = {
       selected_codex_configs: claudeConfigSelection?.selected_codex_configs || [],
       selected_codex_auths: claudeConfigSelection?.selected_codex_auths || [],
       selected_gemini_envs: claudeConfigSelection?.selected_gemini_envs || [],
+      auto_inject_all_skills: autoInjectAllSkills ?? true,
       // Permission option
       run_as_root: runAsRoot || false,
     }),
@@ -451,10 +461,14 @@ export const fileApi = {
     api.get(`/files/${containerId}/list`, { params: { path } }),
   download: (containerId: number, path: string) =>
     api.get(`/files/${containerId}/download`, { params: { path }, responseType: 'blob' }),
-  upload: (containerId: number, path: string, file: File) => {
+  upload: (containerId: number, path: string, files: File | File[]) => {
+    const normalizedFiles = Array.isArray(files) ? files : [files]
     const formData = new FormData()
-    formData.append('file', file)
     formData.append('path', path)
+    normalizedFiles.forEach((file) => {
+      formData.append('files', file)
+      formData.append('relative_paths', file.webkitRelativePath || file.name)
+    })
     return api.post(`/files/${containerId}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })

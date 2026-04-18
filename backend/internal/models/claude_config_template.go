@@ -13,13 +13,13 @@ import (
 type ConfigType string
 
 const (
-	ConfigTypeClaudeMD   ConfigType = "CLAUDE_MD"
-	ConfigTypeSkill      ConfigType = "SKILL"
-	ConfigTypeMCP        ConfigType = "MCP"
-	ConfigTypeCommand    ConfigType = "COMMAND"
-	ConfigTypeCodexConf  ConfigType = "CODEX_CONFIG"
-	ConfigTypeCodexAuth  ConfigType = "CODEX_AUTH"
-	ConfigTypeGeminiEnv  ConfigType = "GEMINI_ENV"
+	ConfigTypeClaudeMD  ConfigType = "CLAUDE_MD"
+	ConfigTypeSkill     ConfigType = "SKILL"
+	ConfigTypeMCP       ConfigType = "MCP"
+	ConfigTypeCommand   ConfigType = "COMMAND"
+	ConfigTypeCodexConf ConfigType = "CODEX_CONFIG"
+	ConfigTypeCodexAuth ConfigType = "CODEX_AUTH"
+	ConfigTypeGeminiEnv ConfigType = "GEMINI_ENV"
 )
 
 // ValidConfigTypes returns all valid ConfigType values
@@ -74,15 +74,21 @@ func (ClaudeConfigTemplate) TableName() string {
 type SkillMetadata struct {
 	AllowedTools           []string `json:"allowed_tools,omitempty"`
 	DisableModelInvocation bool     `json:"disable_model_invocation,omitempty"`
+	InstallSource          string   `json:"install_source,omitempty"`
+	InstallGlobal          bool     `json:"install_global,omitempty"`
+	InstallAgents          []string `json:"install_agents,omitempty"`
+	InstallSkills          []string `json:"install_skills,omitempty"`
+	InstallAll             bool     `json:"install_all,omitempty"`
+	InstallTargetDir       string   `json:"install_target_dir,omitempty"`
 }
 
 // InjectionStatus represents the result of configuration injection into a container
 // This is stored as JSON in the Container's InjectionStatus field
 type InjectionStatus struct {
 	ContainerID string           `json:"container_id"`
-	Successful  []string         `json:"successful"`  // Template names that were successfully injected
-	Failed      []FailedTemplate `json:"failed"`      // Templates that failed and why
-	Warnings    []string         `json:"warnings"`    // General warnings during injection
+	Successful  []string         `json:"successful"` // Template names that were successfully injected
+	Failed      []FailedTemplate `json:"failed"`     // Templates that failed and why
+	Warnings    []string         `json:"warnings"`   // General warnings during injection
 	InjectedAt  time.Time        `json:"injected_at"`
 }
 

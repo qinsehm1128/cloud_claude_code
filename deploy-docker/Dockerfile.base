@@ -52,32 +52,24 @@ RUN useradd -m -s /bin/bash -G sudo developer \
     && echo "developer:123456" | chpasswd \
     && echo "developer ALL=(ALL:ALL) ALL" >> /etc/sudoers
 
-# Create workspace directory
-RUN mkdir -p /workspace && chown developer:developer /workspace
+# Create workspace, app, and shared config directories
+RUN mkdir -p /workspace /app \
+    /home/developer/.claude /home/developer/.codex /home/developer/.agents \
+    /home/developer/.npm /home/developer/.cache /home/developer/.npm-global /home/developer/.local/share/pnpm/store \
+    /root/.local/share/pnpm \
+    && chown -R developer:developer /workspace /app /home/developer/.claude /home/developer/.codex /home/developer/.agents /home/developer/.npm /home/developer/.cache /home/developer/.npm-global /home/developer/.local \
+    && ln -sfn /home/developer/.claude /root/.claude \
+    && ln -sfn /home/developer/.codex /root/.codex \
+    && ln -sfn /home/developer/.agents /root/.agents \
+    && ln -sfn /home/developer/.npm /root/.npm \
+    && ln -sfn /home/developer/.cache /root/.cache \
+    && ln -sfn /home/developer/.npm-global /root/.npm-global \
+    && ln -sfn /home/developer/.local/share/pnpm/store /root/.local/share/pnpm/store
 
 # Set Git configuration for developer user
 RUN su - developer -c "git config --global init.defaultBranch main" \
     && su - developer -c "git config --global user.email 'developer@container.local'" \
     && su - developer -c "git config --global user.name 'Developer'"
-
-# Copy and install PTY Automation extension (only if code-server is installed)
-# Use code-server CLI to install extension properly
-COPY extensions/ /tmp/extensions/
-RUN if [ "$INSTALL_CODE_SERVER" = "true" ] && [ -f /tmp/extensions/pty-automation-monitor.vsix ]; then \
-        echo "Installing PTY Automation extension..." && \
-        # Install as root first, then fix permissions
-        code-server --install-extension /tmp/extensions/pty-automation-monitor.vsix --force && \
-        # Move extension to developer user's directory
-        mkdir -p /home/developer/.local/share/code-server/extensions && \
-        if [ -d /root/.local/share/code-server/extensions ]; then \
-            cp -r /root/.local/share/code-server/extensions/* /home/developer/.local/share/code-server/extensions/ 2>/dev/null || true; \
-        fi && \
-        chown -R developer:developer /home/developer/.local && \
-        echo "Extension installed successfully"; \
-    else \
-        echo "Skipping extension installation (code-server=$INSTALL_CODE_SERVER, vsix exists=$(test -f /tmp/extensions/pty-automation-monitor.vsix && echo yes || echo no))"; \
-    fi && \
-    rm -rf /tmp/extensions
 
 # Set working directory
 WORKDIR /workspace
@@ -92,6 +84,7 @@ RUN mkdir -p /home/developer/.npm-global \
 
 # Set environment variables
 ENV HOME=/home/developer
+ENV CC_CONFIG_HOME=/home/developer
 ENV NPM_CONFIG_PREFIX=/home/developer/.npm-global
 ENV PATH="/home/developer/.npm-global/bin:/home/developer/.local/bin:${PATH}"
 

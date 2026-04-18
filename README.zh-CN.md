@@ -73,7 +73,6 @@
 | 🔄 **会话管理** | 终端会话持久化，支持压缩存储和重连 |
 | 🏭 **孤立容器管理** | 列出和管理数据库外的 Docker 容器 |
 | 🔐 **灵活认证** | 多种认证方式：header、cookie、query 参数 |
-| 🧩 **VS Code 扩展** | PTY 自动化监控扩展，支持 VS Code 集成 |
 | ⚙️ **环境配置文件** | 可配置的 API URL 和 Token 变量名 |
 
 ---
@@ -141,14 +140,6 @@
 </td>
 </tr>
 <tr>
-<td width="50%">
-
-### 🧩 VS Code 扩展
-- **TypeScript** - 扩展开发语言
-- **WebSocket** - 实时通信
-- **VS Code API** - IDE 集成
-
-</td>
 <td width="50%">
 
 ### 🐳 基础设施
@@ -530,17 +521,6 @@ echo "检测到静默 {silence_duration}秒，时间 {timestamp}"
 }
 ```
 
-### 安装
-
-```bash
-cd vscode-extension
-npm install
-npm run compile
-# 然后在 VS Code 中安装 .vsix 文件
-```
-
----
-
 ## 📚 API 参考
 
 <details>
@@ -773,18 +753,8 @@ npm run compile
 │       └── types/           # TypeScript 类型
 │           └── claudeConfig.ts           # 配置类型
 │
-├── 🧩 vscode-extension/     # VS Code 扩展
-│   └── src/
-│       ├── extension.ts     # 扩展入口
-│       ├── statusBar.ts     # 状态栏集成
-│       ├── commands/        # VS Code 命令
-│       ├── services/        # WebSocket 客户端
-│       ├── webview/         # Webview 面板
-│       └── utils/           # 工具函数
-│
 ├── 🐳 docker/               # Docker 配置（开发容器）
 │   ├── Dockerfile.base      # 基础镜像
-│   ├── extensions/          # VS Code 扩展
 │   └── traefik/             # Traefik 代理配置
 │
 ├── 🐳 deploy-docker/        # Docker 部署

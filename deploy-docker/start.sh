@@ -326,18 +326,6 @@ if ! docker compose version &> /dev/null; then
 fi
 print_msg "  Docker Compose is available" "$GREEN"
 
-# Check and install Node.js/npm (optional, for VS Code extension)
-if ! command -v npm &> /dev/null; then
-    if [ "$NO_INSTALL" = true ]; then
-        print_msg "  npm not found (VS Code extension build will be skipped)" "$YELLOW"
-    else
-        print_msg "  npm not found, installing Node.js..." "$YELLOW"
-        install_nodejs || print_msg "  npm installation skipped (extension is optional)" "$YELLOW"
-    fi
-else
-    print_msg "  npm is available ($(npm --version 2>/dev/null))" "$GREEN"
-fi
-
 # Check OpenSSL (for key generation)
 if ! command -v openssl &> /dev/null; then
     if [ "$NO_INSTALL" = true ]; then

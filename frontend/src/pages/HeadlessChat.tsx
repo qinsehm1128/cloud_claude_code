@@ -17,6 +17,8 @@ import {
   Settings,
   Plug,
   Home,
+  PanelRight,
+  PanelRightClose,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -25,6 +27,7 @@ import { headlessApi, Conversation, TurnInfo } from '@/services/headlessApi';
 import { useHeadlessSession } from '@/hooks/useHeadlessSession';
 import { ConversationList, PromptInput } from '@/components/Headless';
 import { BackendStatusIndicator, WebSocketStatusIndicator } from '@/components/Headless/StatusIndicators';
+import FileBrowser from '@/components/FileManager/FileBrowser';
 import {
   Select,
   SelectContent,
@@ -62,6 +65,7 @@ export default function HeadlessChat() {
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [filePanelOpen, setFilePanelOpen] = useState(false);
 
   // 历史对话内容（从 HTTP API 加载）
   const [historyTurns, setHistoryTurns] = useState<TurnInfo[]>([]);
@@ -100,7 +104,9 @@ export default function HeadlessChat() {
           conversation: conversationId.toString()
         });
         // 刷新对话列表
-        fetchConversations();
+        void fetchConversations();
+        // 从 container 级握手切换到 conversation 级长连，避免同容器多会话串线。
+        void headless.connectToConversation(conversationId);
       }
     },
   });
@@ -306,8 +312,8 @@ export default function HeadlessChat() {
     // 连接到容器（创建新会话模式）
     await headless.connectToContainer(selectedContainerId);
 
-    // 创建新会话（后端只做 unsubscribe 旧 session + 创建新 session，不关闭已有 session）
-    headless.startSession(selectedContainer.work_dir);
+    // force_new 需要显式关闭旧 session，避免新会话混入旧连接/旧事件。
+    headless.startSession(selectedContainer.work_dir, true);
   }, [selectedContainerId, selectedContainer, headless, setSearchParams]);
 
   const handleDeleteConversation = useCallback(async (conversationId: number, e: React.MouseEvent) => {
@@ -703,6 +709,21 @@ export default function HeadlessChat() {
                 <span className="hidden sm:inline">Connect</span>
               </Button>
             )}
+            {selectedContainerId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1"
+                onClick={() => setFilePanelOpen((prev) => !prev)}
+              >
+                {filePanelOpen ? (
+                  <PanelRightClose className="h-4 w-4" />
+                ) : (
+                  <PanelRight className="h-4 w-4" />
+                )}
+                <span className="hidden sm:inline">Files</span>
+              </Button>
+            )}
           </div>
         </header>
 
@@ -810,7 +831,9 @@ export default function HeadlessChat() {
           <PromptInput
             onSend={handleSendPrompt}
             onCancel={() => headless.cancelExecution()}
+            onStopSession={() => headless.stopSession()}
             isRunning={headless.isRunning}
+            canStopSession={headless.hasSession}
             disabled={!headless.connected || !(headless.connectedConversationId === selectedConversationId || !selectedConversationId)}
             placeholder={
               !headless.connected
@@ -822,6 +845,33 @@ export default function HeadlessChat() {
           />
         )}
       </main>
+
+      <aside
+        className={cn(
+          'h-full bg-card border-l flex flex-col transition-all duration-300 overflow-hidden',
+          filePanelOpen ? 'w-80' : 'w-0'
+        )}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
+          <h3 className="font-medium text-sm">File Browser</h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => setFilePanelOpen(false)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex-1 overflow-auto p-3">
+          {filePanelOpen && selectedContainerId && (
+            <FileBrowser
+              containerId={selectedContainerId}
+              rootPath={selectedContainer?.work_dir}
+            />
+          )}
+        </div>
+      </aside>
     </div>
   );
 }

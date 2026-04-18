@@ -986,7 +986,10 @@ export default function ContainerTerminal() {
                 </Button>
               </div>
               <div className="flex-1 overflow-auto p-3">
-                <FileBrowser containerId={parseInt(containerId || '0')} />
+                <FileBrowser
+                  containerId={parseInt(containerId || '0')}
+                  rootPath={container?.work_dir}
+                />
               </div>
             </div>
           )}
@@ -1050,7 +1053,10 @@ export default function ContainerTerminal() {
         </div>
         <div className="flex-1 overflow-auto p-3">
           {filePanelOpen && (
-            <FileBrowser containerId={parseInt(containerId || '0')} />
+            <FileBrowser
+              containerId={parseInt(containerId || '0')}
+              rootPath={container?.work_dir}
+            />
           )}
         </div>
       </div>

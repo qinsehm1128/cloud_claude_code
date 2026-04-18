@@ -211,6 +211,19 @@ export class HeadlessWebSocketService {
     });
   }
 
+  // 停止整个会话
+  stopSession(sessionId?: string): void {
+    const payload: Record<string, unknown> = {};
+    if (sessionId) {
+      payload.session_id = sessionId;
+    }
+
+    this.send({
+      type: 'headless_stop_session',
+      payload,
+    });
+  }
+
   // 加载更多历史
   loadMoreHistory(beforeTurnId: number, limit: number = 3): void {
     this.send({

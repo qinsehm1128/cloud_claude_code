@@ -779,7 +779,6 @@ func TestDelete_VerifyListAfterDelete(t *testing.T) {
 	}
 }
 
-
 // ============================================================================
 // ValidateContent Method Tests (Task 2.4)
 // ============================================================================
@@ -1091,6 +1090,48 @@ disable_model_invocation: true
 	}
 }
 
+func TestParseSkillMetadata_InstallMetadata(t *testing.T) {
+	impl := &configTemplateServiceImpl{db: nil}
+
+	content := `---
+install_source: "@company/skills"
+install_global: true
+install_agents:
+  - claude-code
+  - codex
+install_skills:
+  - repo-analyzer
+  - deploy-helper
+install_all: false
+install_target_dir: /workspace/custom-skills
+---
+# Skill Content`
+
+	metadata, err := impl.ParseSkillMetadata(content)
+	if err != nil {
+		t.Fatalf("ParseSkillMetadata failed: %v", err)
+	}
+
+	if metadata.InstallSource != "@company/skills" {
+		t.Fatalf("expected install_source to be parsed, got %q", metadata.InstallSource)
+	}
+	if !metadata.InstallGlobal {
+		t.Fatal("expected install_global to be true")
+	}
+	if len(metadata.InstallAgents) != 2 || metadata.InstallAgents[0] != "claude-code" || metadata.InstallAgents[1] != "codex" {
+		t.Fatalf("unexpected install_agents: %#v", metadata.InstallAgents)
+	}
+	if len(metadata.InstallSkills) != 2 || metadata.InstallSkills[0] != "repo-analyzer" || metadata.InstallSkills[1] != "deploy-helper" {
+		t.Fatalf("unexpected install_skills: %#v", metadata.InstallSkills)
+	}
+	if metadata.InstallAll {
+		t.Fatal("expected install_all to be false")
+	}
+	if metadata.InstallTargetDir != "/workspace/custom-skills" {
+		t.Fatalf("unexpected install_target_dir: %q", metadata.InstallTargetDir)
+	}
+}
+
 // ============================================================================
 // ValidateMCPConfig Method Tests (Task 2.4)
 // ============================================================================
@@ -1122,11 +1163,11 @@ func TestValidateMCPConfig_InvalidJSONSyntaxReturnsError(t *testing.T) {
 	impl := &configTemplateServiceImpl{db: nil}
 
 	testCases := []string{
-		`{command: "node", args: []}`,                    // Missing quotes around keys
-		`{"command": "node", "args": [}`,                 // Malformed array
-		`{"command": "node" "args": []}`,                 // Missing comma
-		`not json at all`,                                // Plain text
-		`{"command": "node", "args": [],}`,               // Trailing comma
+		`{command: "node", args: []}`,                     // Missing quotes around keys
+		`{"command": "node", "args": [}`,                  // Malformed array
+		`{"command": "node" "args": []}`,                  // Missing comma
+		`not json at all`,                                 // Plain text
+		`{"command": "node", "args": [],}`,                // Trailing comma
 		`{"command": "node", "args": ["unclosed string]}`, // Unclosed string
 	}
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Folder,
   File,
@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Loader2,
   GripVertical,
+  FolderUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -41,25 +42,71 @@ interface FileInfo {
 
 interface FileBrowserProps {
   containerId: number
+  rootPath?: string
   onFileDrag?: (path: string) => void
 }
 
-export default function FileBrowser({ containerId }: FileBrowserProps) {
+const DEFAULT_ROOT_PATH = '/app'
+
+function normalizePath(value?: string): string {
+  const normalized = (value || DEFAULT_ROOT_PATH).replace(/\\/g, '/').trim()
+  if (!normalized) {
+    return DEFAULT_ROOT_PATH
+  }
+
+  const segments = normalized.split('/').filter(Boolean)
+  return '/' + segments.join('/')
+}
+
+function joinPath(basePath: string, childPath: string): string {
+  return normalizePath(`${basePath}/${childPath}`)
+}
+
+function extractFilename(contentDisposition?: string, fallback?: string): string {
+  if (!contentDisposition) {
+    return fallback || 'download'
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
+  }
+
+  const basicMatch = contentDisposition.match(/filename="?([^"]+)"?/i)
+  if (basicMatch?.[1]) {
+    return basicMatch[1]
+  }
+
+  return fallback || 'download'
+}
+
+export default function FileBrowser({ containerId, rootPath, onFileDrag }: FileBrowserProps) {
+  const normalizedRootPath = normalizePath(rootPath)
   const [files, setFiles] = useState<FileInfo[]>([])
-  const [currentPath, setCurrentPath] = useState('/')
+  const [currentPath, setCurrentPath] = useState(normalizedRootPath)
   const [loading, setLoading] = useState(false)
   const [mkdirVisible, setMkdirVisible] = useState(false)
   const [newDirName, setNewDirName] = useState('')
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [uploadingMode, setUploadingMode] = useState<'files' | 'folder' | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (folderInputRef.current) {
+      folderInputRef.current.setAttribute('webkitdirectory', '')
+      folderInputRef.current.setAttribute('directory', '')
+    }
+  }, [])
 
   const fetchFiles = async (path: string) => {
     setLoading(true)
     try {
-      const response = await fileApi.listDirectory(containerId, path)
+      const normalizedPath = normalizePath(path)
+      const response = await fileApi.listDirectory(containerId, normalizedPath)
       setFiles(response.data || [])
-      setCurrentPath(path)
+      setCurrentPath(normalizedPath)
     } catch {
       console.error('Failed to list directory')
     } finally {
@@ -68,8 +115,8 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
   }
 
   useEffect(() => {
-    fetchFiles('/')
-  }, [containerId])
+    fetchFiles(normalizedRootPath)
+  }, [containerId, normalizedRootPath])
 
   const handleNavigate = (path: string) => {
     fetchFiles(path)
@@ -78,10 +125,12 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
   const handleDownload = async (file: FileInfo) => {
     try {
       const response = await fileApi.download(containerId, file.path)
+      const fallbackName = file.is_directory ? `${file.name}.zip` : file.name
+      const filename = extractFilename(response.headers['content-disposition'], fallbackName)
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', file.name)
+      link.setAttribute('download', filename)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -107,7 +156,7 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
     if (!newDirName.trim()) return
     setCreating(true)
     try {
-      const path = currentPath === '/' ? `/${newDirName}` : `${currentPath}/${newDirName}`
+      const path = joinPath(currentPath, newDirName)
       await fileApi.createDirectory(containerId, path)
       setMkdirVisible(false)
       setNewDirName('')
@@ -119,17 +168,25 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
     }
   }
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const handleUploadSelection = async (
+    fileList: FileList | null,
+    mode: 'files' | 'folder',
+    inputRef: React.RefObject<HTMLInputElement | null>
+  ) => {
+    const selectedFiles = Array.from(fileList || [])
+    if (selectedFiles.length === 0) return
+
+    setUploadingMode(mode)
     try {
-      await fileApi.upload(containerId, currentPath, file)
+      await fileApi.upload(containerId, currentPath, selectedFiles)
       fetchFiles(currentPath)
     } catch {
-      console.error('Failed to upload file')
-    }
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
+      console.error('Failed to upload files')
+    } finally {
+      setUploadingMode(null)
+      if (inputRef.current) {
+        inputRef.current.value = ''
+      }
     }
   }
 
@@ -142,21 +199,31 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
   }
 
   const getBreadcrumbParts = () => {
-    const parts = currentPath.split('/').filter(Boolean)
-    const items: { name: string; path: string }[] = [{ name: 'workspace', path: '/' }]
-    
-    let path = ''
+    const items: { name: string; path: string }[] = [
+      { name: normalizedRootPath, path: normalizedRootPath },
+    ]
+
+    if (currentPath === normalizedRootPath) {
+      return items
+    }
+
+    const relativePath = currentPath.startsWith(`${normalizedRootPath}/`)
+      ? currentPath.slice(normalizedRootPath.length + 1)
+      : currentPath.replace(/^\//, '')
+
+    const parts = relativePath.split('/').filter(Boolean)
+    let nextPath = normalizedRootPath
+
     parts.forEach((part) => {
-      path += '/' + part
-      items.push({ name: part, path })
+      nextPath = joinPath(nextPath, part)
+      items.push({ name: part, path: nextPath })
     })
-    
+
     return items
   }
 
   return (
     <div className="space-y-4">
-      {/* Breadcrumb */}
       <div className="flex items-center gap-1 text-sm flex-wrap">
         {getBreadcrumbParts().map((item, index, arr) => (
           <div key={item.path} className="flex items-center gap-1">
@@ -166,7 +233,7 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
                 className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
               >
                 <Home className="h-4 w-4" />
-                {item.name}
+                <span className="font-mono text-xs sm:text-sm">{item.name}</span>
               </button>
             ) : (
               <>
@@ -185,21 +252,47 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
         ))}
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <input
           ref={fileInputRef}
           type="file"
           className="hidden"
-          onChange={handleUpload}
+          multiple
+          onChange={(event) => handleUploadSelection(event.target.files, 'files', fileInputRef)}
         />
+        <input
+          ref={folderInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          onChange={(event) => handleUploadSelection(event.target.files, 'folder', folderInputRef)}
+        />
+
         <Button
           variant="outline"
           size="sm"
+          disabled={uploadingMode !== null}
           onClick={() => fileInputRef.current?.click()}
         >
-          <Upload className="h-4 w-4 mr-2" />
-          Upload
+          {uploadingMode === 'files' ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Upload className="h-4 w-4 mr-2" />
+          )}
+          Upload Files
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={uploadingMode !== null}
+          onClick={() => folderInputRef.current?.click()}
+        >
+          {uploadingMode === 'folder' ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <FolderUp className="h-4 w-4 mr-2" />
+          )}
+          Upload Folder
         </Button>
         <Button
           variant="outline"
@@ -211,12 +304,10 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
         </Button>
       </div>
 
-      {/* Drag hint */}
       <p className="text-xs text-muted-foreground">
-        💡 Drag files to terminal to insert path
+        Drag files or folders into the terminal to insert their current container path.
       </p>
 
-      {/* File List */}
       {loading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -231,17 +322,18 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead className="w-[80px]">Size</TableHead>
-              <TableHead className="w-[100px]">Actions</TableHead>
+              <TableHead className="w-[120px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {files.map((file) => (
-              <TableRow 
+              <TableRow
                 key={file.path}
                 draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('text/plain', file.path)
-                  e.dataTransfer.effectAllowed = 'copy'
+                onDragStart={(event) => {
+                  event.dataTransfer.setData('text/plain', file.path)
+                  event.dataTransfer.effectAllowed = 'copy'
+                  onFileDrag?.(file.path)
                 }}
                 className="cursor-grab active:cursor-grabbing"
               >
@@ -270,16 +362,15 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
-                    {!file.is_directory && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0"
-                        onClick={() => handleDownload(file)}
-                      >
-                        <Download className="h-3 w-3" />
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => handleDownload(file)}
+                      title={file.is_directory ? 'Download folder as zip' : 'Download file'}
+                    >
+                      <Download className="h-3 w-3" />
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -301,7 +392,6 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
         </Table>
       )}
 
-      {/* Create Directory Dialog */}
       <Dialog open={mkdirVisible} onOpenChange={setMkdirVisible}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
@@ -311,8 +401,8 @@ export default function FileBrowser({ containerId }: FileBrowserProps) {
             <Input
               placeholder="Directory name"
               value={newDirName}
-              onChange={(e) => setNewDirName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateDir()}
+              onChange={(event) => setNewDirName(event.target.value)}
+              onKeyDown={(event) => event.key === 'Enter' && handleCreateDir()}
             />
           </div>
           <DialogFooter>

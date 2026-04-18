@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { Send, Square, Loader2 } from 'lucide-react';
+import { Send, Square, Loader2, Power } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
@@ -7,7 +7,9 @@ import { cn } from '@/lib/utils';
 interface PromptInputProps {
   onSend: (prompt: string) => void;
   onCancel: () => void;
+  onStopSession?: () => void;
   isRunning: boolean;
+  canStopSession?: boolean;
   disabled?: boolean;
   placeholder?: string;
   className?: string;
@@ -16,7 +18,9 @@ interface PromptInputProps {
 export function PromptInput({
   onSend,
   onCancel,
+  onStopSession,
   isRunning,
+  canStopSession = false,
   disabled,
   placeholder = 'Enter your prompt...',
   className,
@@ -80,6 +84,16 @@ export function PromptInput({
       />
 
       <div className="flex gap-1 shrink-0">
+        {canStopSession && onStopSession && (
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onStopSession}
+            title="Stop current session"
+          >
+            <Power className="h-4 w-4" />
+          </Button>
+        )}
         {/* 发送按钮 - 始终可用（运行中发送的消息会进入队列） */}
         <Button
           size="icon"
@@ -100,7 +114,7 @@ export function PromptInput({
             variant="destructive"
             size="icon"
             onClick={onCancel}
-            title="Cancel current execution"
+            title="Cancel current execution only"
           >
             <Square className="h-4 w-4" />
           </Button>

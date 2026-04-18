@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"cc-platform/internal/docker"
 	"cc-platform/internal/models"
 
+	"github.com/docker/docker/api/types/container"
 	"gorm.io/gorm"
 )
 
@@ -27,6 +30,7 @@ var (
 	ErrInvalidCPULimit         = errors.New("invalid CPU limit")
 	ErrInvalidMemoryLimit      = errors.New("invalid memory limit")
 	ErrInvalidCPUPeriod        = errors.New("invalid CPU period")
+	ErrInvalidGPUCount         = errors.New("invalid GPU count")
 )
 
 // Docker CPU period constraints (Docker API limits)
@@ -34,6 +38,11 @@ const (
 	MinCPUPeriod     = 1000    // Minimum CPU period in microseconds (1ms)
 	MaxCPUPeriod     = 1000000 // Maximum CPU period in microseconds (1s)
 	CPUPeriodDefault = 100000  // Default CPU period (100ms)
+
+	sharedNpmCacheVolume  = "cc-cache-npm"
+	sharedHomeCacheVolume = "cc-cache-home"
+	sharedNpmGlobalVolume = "cc-cache-npm-global"
+	sharedPnpmStoreVolume = "cc-cache-pnpm-store"
 )
 
 // Container name validation - allows Unicode characters including Chinese
@@ -77,6 +86,37 @@ func validateResourceLimits(cpuLimit float64, memoryLimit int64, cpuPeriod int64
 	}
 
 	return nil
+}
+
+func shortStableHash(input string) string {
+	sum := sha1.Sum([]byte(input))
+	return hex.EncodeToString(sum[:4])
+}
+
+func managedWorkspaceVolumeName(containerName string) string {
+	return fmt.Sprintf("cc-workspace-%s", shortStableHash(containerName))
+}
+
+func managedAppVolumeName(containerName string) string {
+	return fmt.Sprintf("cc-app-%s", shortStableHash(containerName))
+}
+
+func buildManagedContainerBinds(containerName string) []string {
+	return []string{
+		fmt.Sprintf("%s:/workspace", managedWorkspaceVolumeName(containerName)),
+		fmt.Sprintf("%s:/app", managedAppVolumeName(containerName)),
+		fmt.Sprintf("%s:/home/developer/.npm", sharedNpmCacheVolume),
+		fmt.Sprintf("%s:/home/developer/.cache", sharedHomeCacheVolume),
+		fmt.Sprintf("%s:/home/developer/.npm-global", sharedNpmGlobalVolume),
+		fmt.Sprintf("%s:/home/developer/.local/share/pnpm/store", sharedPnpmStoreVolume),
+	}
+}
+
+func managedPerContainerVolumes(containerName string) []string {
+	return []string{
+		managedWorkspaceVolumeName(containerName),
+		managedAppVolumeName(containerName),
+	}
 }
 
 // ContainerService handles container operations
@@ -174,6 +214,10 @@ type CreateContainerInput struct {
 	RunAsRoot        bool          `json:"run_as_root,omitempty"`        // Run container as root user (default: false)
 	MemoryLimit      int64         `json:"memory_limit,omitempty"`       // Memory limit in MB (0 = default 2048MB)
 	CPULimit         float64       `json:"cpu_limit,omitempty"`          // CPU limit in cores (0 = default 1)
+	MemoryUnlimited  bool          `json:"memory_unlimited,omitempty"`   // Disable Docker memory limit
+	CPUUnlimited     bool          `json:"cpu_unlimited,omitempty"`      // Disable Docker CPU quota
+	GPUEnabled       bool          `json:"gpu_enabled,omitempty"`        // Enable GPU passthrough
+	GPUCount         int           `json:"gpu_count,omitempty"`          // -1 means all GPUs
 	PortMappings     []PortMapping `json:"port_mappings,omitempty"`      // Legacy port mappings
 	EnableCodeServer bool          `json:"enable_code_server,omitempty"` // Enable code-server (Web VS Code)
 	Proxy            ProxyConfig   `json:"proxy,omitempty"`              // Traefik proxy configuration
@@ -182,13 +226,14 @@ type CreateContainerInput struct {
 	EnvVarsProfileID        *uint `json:"env_vars_profile_id,omitempty"`
 	StartupCommandProfileID *uint `json:"startup_command_profile_id,omitempty"`
 	// Claude Config Template selections
-	SelectedClaudeMD     *uint  `json:"selected_claude_md,omitempty"` // Single CLAUDE.MD template ID (optional)
-	SelectedSkills       []uint `json:"selected_skills,omitempty"`    // Multiple Skill template IDs (optional)
-	SelectedMCPs         []uint `json:"selected_mcps,omitempty"`      // Multiple MCP template IDs (optional)
-	SelectedCommands     []uint `json:"selected_commands,omitempty"`  // Multiple Command template IDs (optional)
+	SelectedClaudeMD     *uint  `json:"selected_claude_md,omitempty"`     // Single CLAUDE.MD template ID (optional)
+	SelectedSkills       []uint `json:"selected_skills,omitempty"`        // Multiple Skill template IDs (optional)
+	SelectedMCPs         []uint `json:"selected_mcps,omitempty"`          // Multiple MCP template IDs (optional)
+	SelectedCommands     []uint `json:"selected_commands,omitempty"`      // Multiple Command template IDs (optional)
 	SelectedCodexConfigs []uint `json:"selected_codex_configs,omitempty"` // Multiple Codex Config template IDs (optional)
 	SelectedCodexAuths   []uint `json:"selected_codex_auths,omitempty"`   // Multiple Codex Auth template IDs (optional)
 	SelectedGeminiEnvs   []uint `json:"selected_gemini_envs,omitempty"`   // Multiple Gemini Env template IDs (optional)
+	AutoInjectAllSkills  bool   `json:"auto_inject_all_skills,omitempty"` // Automatically inject all skill templates
 }
 
 // CreateContainer creates a new container and automatically starts initialization
@@ -198,8 +243,22 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		return nil, err
 	}
 
+	effectiveCPULimit := input.CPULimit
+	if input.CPUUnlimited {
+		effectiveCPULimit = 0
+	}
+
+	effectiveMemoryLimit := input.MemoryLimit
+	if input.MemoryUnlimited {
+		effectiveMemoryLimit = 0
+	}
+
+	if input.GPUEnabled && input.GPUCount < -1 {
+		return nil, fmt.Errorf("%w: must be -1, 0, or a positive integer", ErrInvalidGPUCount)
+	}
+
 	// Validate resource limits with CPUPeriod constraints
-	if err := validateResourceLimits(input.CPULimit, input.MemoryLimit, CPUPeriodDefault); err != nil {
+	if err := validateResourceLimits(effectiveCPULimit, effectiveMemoryLimit, CPUPeriodDefault); err != nil {
 		return nil, fmt.Errorf("resource validation failed: %w", err)
 	}
 
@@ -272,19 +331,51 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	// Get security config
 	securityConfig := docker.DefaultSecurityConfig()
 
+	workDir := "/app"
+	if !input.SkipGitRepo && repoName != "" {
+		workDir = fmt.Sprintf("/workspace/%s", repoName)
+	}
+
+	normalizedGPUCount := input.GPUCount
+	if input.GPUEnabled && normalizedGPUCount == 0 {
+		normalizedGPUCount = -1
+	}
+
 	// Apply custom resource limits if provided
-	if input.MemoryLimit > 0 {
+	if input.MemoryUnlimited {
+		securityConfig.Resources.Memory = 0
+		securityConfig.Resources.MemorySwap = -1
+		disableOOMKill := true
+		securityConfig.Resources.OomKillDisable = &disableOOMKill
+	} else if input.MemoryLimit > 0 {
 		memoryBytes := input.MemoryLimit * 1024 * 1024 // Convert MB to bytes
 		securityConfig.Resources.Memory = memoryBytes
 		securityConfig.Resources.MemorySwap = memoryBytes // No swap
+		securityConfig.Resources.OomKillDisable = nil
 	}
-	if input.CPULimit > 0 {
+	if input.CPUUnlimited {
+		securityConfig.Resources.CPUQuota = 0
+		securityConfig.Resources.CPUPeriod = 0
+	} else if input.CPULimit > 0 {
 		// CPUQuota is in microseconds per CPUPeriod (100000)
 		// So 1 CPU = 100000, 0.5 CPU = 50000, 2 CPU = 200000
 		securityConfig.Resources.CPUQuota = int64(input.CPULimit * 100000)
 		securityConfig.Resources.CPUPeriod = CPUPeriodDefault
 		log.Printf("Applying resource limits: Memory=%dMB, CPUCores=%.2f, CPUQuota=%d, CPUPeriod=%d",
 			input.MemoryLimit, input.CPULimit, securityConfig.Resources.CPUQuota, securityConfig.Resources.CPUPeriod)
+	}
+	if input.MemoryUnlimited || input.CPUUnlimited {
+		securityConfig.Resources.PidsLimit = nil
+	}
+	if input.GPUEnabled {
+		securityConfig.Resources.DeviceRequests = []container.DeviceRequest{
+			{
+				Driver:       "nvidia",
+				Count:        normalizedGPUCount,
+				Capabilities: [][]string{{"gpu"}},
+			},
+		}
+		securityConfig.Resources.PidsLimit = nil
 	}
 
 	// Build port bindings (legacy direct port mapping)
@@ -374,11 +465,13 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", serviceName)] = fmt.Sprintf("%d", input.Proxy.ServicePort)
 	}
 
-	// Create container config - no volume mounts, project will be cloned inside
+	// Create container config.
+	// 工作目录和依赖缓存都落到 managed volume，避免重复初始化把数据写爆到容器可写层。
 	containerConfig := &docker.ContainerConfig{
 		Name:          input.Name,
 		EnvVars:       envSlice,
-		Binds:         []string{}, // No external mounts
+		Binds:         buildManagedContainerBinds(input.Name),
+		WorkingDir:    workDir,
 		SecurityOpt:   securityConfig.SecurityOpt,
 		CapDrop:       securityConfig.CapDrop,
 		CapAdd:        securityConfig.CapAdd,
@@ -410,21 +503,15 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 
 	// Calculate actual memory and CPU values for storage
 	memoryLimit := input.MemoryLimit
-	if memoryLimit == 0 {
+	if memoryLimit == 0 && !input.MemoryUnlimited {
 		memoryLimit = 2048 // Default 2GB
 	}
 	cpuLimit := input.CPULimit
-	if cpuLimit == 0 {
+	if cpuLimit == 0 && !input.CPUUnlimited {
 		cpuLimit = 1.0 // Default 1 core
 	}
 
 	// Save to database
-	// Determine working directory: /app for empty containers, /workspace/{repoName} for git repos
-	workDir := "/app"
-	if !input.SkipGitRepo && repoName != "" {
-		workDir = fmt.Sprintf("/workspace/%s", repoName)
-	}
-
 	dbContainer := &models.Container{
 		DockerID:                dockerID,
 		Name:                    input.Name,
@@ -437,8 +524,13 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 		SkipGitRepo:             input.SkipGitRepo,
 		EnableYoloMode:          input.EnableYoloMode,
 		RunAsRoot:               input.RunAsRoot,
+		AutoInjectAllSkills:     input.AutoInjectAllSkills,
 		MemoryLimit:             memoryLimit * 1024 * 1024, // Store in bytes
+		MemoryUnlimited:         input.MemoryUnlimited,
 		CPULimit:                cpuLimit,
+		CPUUnlimited:            input.CPUUnlimited,
+		GPUEnabled:              input.GPUEnabled,
+		GPUCount:                normalizedGPUCount,
 		ExposedPorts:            portMappingsJSON,
 		ProxyEnabled:            input.Proxy.Enabled,
 		ProxyDomain:             input.Proxy.Domain,
@@ -455,6 +547,7 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	if err := s.db.Create(dbContainer).Error; err != nil {
 		// Cleanup Docker container on DB error
 		s.dockerClient.RemoveContainer(ctx, dockerID, true)
+		_ = s.dockerClient.RemoveVolumes(ctx, managedPerContainerVolumes(input.Name)...)
 		return nil, err
 	}
 
@@ -513,12 +606,21 @@ func (s *ContainerService) CreateContainer(ctx context.Context, input CreateCont
 	if input.SelectedClaudeMD != nil {
 		templateIDs = append(templateIDs, *input.SelectedClaudeMD)
 	}
+	if input.AutoInjectAllSkills {
+		autoSkillIDs, err := s.getTemplateIDsByType(models.ConfigTypeSkill)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load skill templates: %w", err)
+		}
+		templateIDs = append(templateIDs, autoSkillIDs...)
+	}
 	templateIDs = append(templateIDs, input.SelectedSkills...)
 	templateIDs = append(templateIDs, input.SelectedMCPs...)
 	templateIDs = append(templateIDs, input.SelectedCommands...)
 	templateIDs = append(templateIDs, input.SelectedCodexConfigs...)
 	templateIDs = append(templateIDs, input.SelectedCodexAuths...)
 	templateIDs = append(templateIDs, input.SelectedGeminiEnvs...)
+
+	templateIDs = dedupeUintSlice(templateIDs)
 
 	// Store template IDs for initialization (will be retrieved during runInitialization)
 	if len(templateIDs) > 0 {
@@ -998,6 +1100,9 @@ func (s *ContainerService) DeleteContainer(ctx context.Context, id uint) error {
 	if err := s.dockerClient.RemoveContainer(ctx, container.DockerID, true); err != nil {
 		log.Printf("Warning: failed to remove Docker container: %v", err)
 	}
+	if err := s.dockerClient.RemoveVolumes(ctx, managedPerContainerVolumes(container.Name)...); err != nil {
+		log.Printf("Warning: failed to remove managed volumes for container %d: %v", id, err)
+	}
 
 	// Clean up related resources
 	// Delete port records (use Unscoped for hard delete since we use raw table query)
@@ -1128,59 +1233,69 @@ func (s *ContainerService) GetStartupCommandForContainer(container *models.Conta
 
 // ContainerInfo represents container information for API response
 type ContainerInfo struct {
-	ID               uint                    `json:"id"`
-	DockerID         string                  `json:"docker_id"`
-	Name             string                  `json:"name"`
-	Status           string                  `json:"status"`
-	InitStatus       string                  `json:"init_status"`
-	InitMessage      string                  `json:"init_message,omitempty"`
-	GitRepoURL       string                  `json:"git_repo_url,omitempty"`
-	GitRepoName      string                  `json:"git_repo_name,omitempty"`
-	WorkDir          string                  `json:"work_dir,omitempty"`
-	MemoryLimit      int64                   `json:"memory_limit,omitempty"`
-	CPULimit         float64                 `json:"cpu_limit,omitempty"`
-	ExposedPorts     string                  `json:"exposed_ports,omitempty"`
-	ProxyEnabled     bool                    `json:"proxy_enabled"`
-	ProxyDomain      string                  `json:"proxy_domain,omitempty"`
-	ProxyPort        int                     `json:"proxy_port,omitempty"`
-	ServicePort      int                     `json:"service_port,omitempty"`
-	EnableCodeServer bool                    `json:"enable_code_server"`
-	CodeServerPort   int                     `json:"code_server_port,omitempty"`
-	CodeServerDomain string                  `json:"code_server_domain,omitempty"`
-	CreatedAt        time.Time               `json:"created_at"`
-	StartedAt        *time.Time              `json:"started_at,omitempty"`
-	StoppedAt        *time.Time              `json:"stopped_at,omitempty"`
-	InitializedAt    *time.Time              `json:"initialized_at,omitempty"`
-	InjectionStatus  *models.InjectionStatus `json:"injection_status,omitempty"`
+	ID                  uint                    `json:"id"`
+	DockerID            string                  `json:"docker_id"`
+	Name                string                  `json:"name"`
+	Status              string                  `json:"status"`
+	InitStatus          string                  `json:"init_status"`
+	InitMessage         string                  `json:"init_message,omitempty"`
+	GitRepoURL          string                  `json:"git_repo_url,omitempty"`
+	GitRepoName         string                  `json:"git_repo_name,omitempty"`
+	WorkDir             string                  `json:"work_dir,omitempty"`
+	MemoryLimit         int64                   `json:"memory_limit,omitempty"`
+	MemoryUnlimited     bool                    `json:"memory_unlimited"`
+	CPULimit            float64                 `json:"cpu_limit,omitempty"`
+	CPUUnlimited        bool                    `json:"cpu_unlimited"`
+	GPUEnabled          bool                    `json:"gpu_enabled"`
+	GPUCount            int                     `json:"gpu_count,omitempty"`
+	AutoInjectAllSkills bool                    `json:"auto_inject_all_skills"`
+	ExposedPorts        string                  `json:"exposed_ports,omitempty"`
+	ProxyEnabled        bool                    `json:"proxy_enabled"`
+	ProxyDomain         string                  `json:"proxy_domain,omitempty"`
+	ProxyPort           int                     `json:"proxy_port,omitempty"`
+	ServicePort         int                     `json:"service_port,omitempty"`
+	EnableCodeServer    bool                    `json:"enable_code_server"`
+	CodeServerPort      int                     `json:"code_server_port,omitempty"`
+	CodeServerDomain    string                  `json:"code_server_domain,omitempty"`
+	CreatedAt           time.Time               `json:"created_at"`
+	StartedAt           *time.Time              `json:"started_at,omitempty"`
+	StoppedAt           *time.Time              `json:"stopped_at,omitempty"`
+	InitializedAt       *time.Time              `json:"initialized_at,omitempty"`
+	InjectionStatus     *models.InjectionStatus `json:"injection_status,omitempty"`
 }
 
 // ToContainerInfo converts a Container model to ContainerInfo
 func ToContainerInfo(c *models.Container) ContainerInfo {
 	return ContainerInfo{
-		ID:               c.ID,
-		DockerID:         c.DockerID,
-		Name:             c.Name,
-		Status:           c.Status,
-		InitStatus:       c.InitStatus,
-		InitMessage:      c.InitMessage,
-		GitRepoURL:       c.GitRepoURL,
-		GitRepoName:      c.GitRepoName,
-		WorkDir:          c.WorkDir,
-		MemoryLimit:      c.MemoryLimit,
-		CPULimit:         c.CPULimit,
-		ExposedPorts:     c.ExposedPorts,
-		ProxyEnabled:     c.ProxyEnabled,
-		ProxyDomain:      c.ProxyDomain,
-		ProxyPort:        c.ProxyPort,
-		ServicePort:      c.ServicePort,
-		EnableCodeServer: c.EnableCodeServer,
-		CodeServerPort:   c.CodeServerPort,
-		CodeServerDomain: c.CodeServerDomain,
-		CreatedAt:        c.CreatedAt,
-		StartedAt:        c.StartedAt,
-		StoppedAt:        c.StoppedAt,
-		InitializedAt:    c.InitializedAt,
-		InjectionStatus:  c.InjectionStatus,
+		ID:                  c.ID,
+		DockerID:            c.DockerID,
+		Name:                c.Name,
+		Status:              c.Status,
+		InitStatus:          c.InitStatus,
+		InitMessage:         c.InitMessage,
+		GitRepoURL:          c.GitRepoURL,
+		GitRepoName:         c.GitRepoName,
+		WorkDir:             c.WorkDir,
+		MemoryLimit:         c.MemoryLimit,
+		MemoryUnlimited:     c.MemoryUnlimited,
+		CPULimit:            c.CPULimit,
+		CPUUnlimited:        c.CPUUnlimited,
+		GPUEnabled:          c.GPUEnabled,
+		GPUCount:            c.GPUCount,
+		AutoInjectAllSkills: c.AutoInjectAllSkills,
+		ExposedPorts:        c.ExposedPorts,
+		ProxyEnabled:        c.ProxyEnabled,
+		ProxyDomain:         c.ProxyDomain,
+		ProxyPort:           c.ProxyPort,
+		ServicePort:         c.ServicePort,
+		EnableCodeServer:    c.EnableCodeServer,
+		CodeServerPort:      c.CodeServerPort,
+		CodeServerDomain:    c.CodeServerDomain,
+		CreatedAt:           c.CreatedAt,
+		StartedAt:           c.StartedAt,
+		StoppedAt:           c.StoppedAt,
+		InitializedAt:       c.InitializedAt,
+		InjectionStatus:     c.InjectionStatus,
 	}
 }
 
@@ -1195,6 +1310,32 @@ func extractRepoName(url string) string {
 		return parts[len(parts)-1]
 	}
 	return "project"
+}
+
+func (s *ContainerService) getTemplateIDsByType(configType models.ConfigType) ([]uint, error) {
+	var templates []models.ClaudeConfigTemplate
+	if err := s.db.Where("config_type = ?", configType).Find(&templates).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]uint, 0, len(templates))
+	for _, template := range templates {
+		result = append(result, template.ID)
+	}
+	return result, nil
+}
+
+func dedupeUintSlice(values []uint) []uint {
+	seen := make(map[uint]struct{}, len(values))
+	result := make([]uint, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 // GetContainerIP gets the IP address of a container

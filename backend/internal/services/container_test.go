@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -129,7 +130,6 @@ func TestContainerInfoOptionalFields(t *testing.T) {
 		t.Error("ContainerInfo should not include StartedAt when not present")
 	}
 }
-
 
 // ==================== Task 5.4: Container Service Unit Tests ====================
 
@@ -831,6 +831,44 @@ func TestResourceValidationEdgeCases(t *testing.T) {
 				t.Errorf("Expected validation to fail for %s, but it passed", tt.name)
 			}
 		})
+	}
+}
+
+func TestBuildManagedContainerBinds(t *testing.T) {
+	binds := buildManagedContainerBinds("demo-container")
+
+	expected := []string{
+		fmt.Sprintf("%s:/workspace", managedWorkspaceVolumeName("demo-container")),
+		fmt.Sprintf("%s:/app", managedAppVolumeName("demo-container")),
+		fmt.Sprintf("%s:/home/developer/.npm", sharedNpmCacheVolume),
+		fmt.Sprintf("%s:/home/developer/.cache", sharedHomeCacheVolume),
+		fmt.Sprintf("%s:/home/developer/.npm-global", sharedNpmGlobalVolume),
+		fmt.Sprintf("%s:/home/developer/.local/share/pnpm/store", sharedPnpmStoreVolume),
+	}
+
+	if len(binds) != len(expected) {
+		t.Fatalf("expected %d binds, got %d", len(expected), len(binds))
+	}
+
+	for i, bind := range expected {
+		if binds[i] != bind {
+			t.Fatalf("bind %d mismatch: expected %s, got %s", i, bind, binds[i])
+		}
+	}
+}
+
+func TestManagedPerContainerVolumesAreStable(t *testing.T) {
+	first := managedPerContainerVolumes("stable-name")
+	second := managedPerContainerVolumes("stable-name")
+
+	if len(first) != 2 || len(second) != 2 {
+		t.Fatalf("expected two managed volumes, got %d and %d", len(first), len(second))
+	}
+
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("volume name at index %d should be stable, got %s and %s", i, first[i], second[i])
+		}
 	}
 }
 

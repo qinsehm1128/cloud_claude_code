@@ -119,7 +119,11 @@ export default function Dashboard() {
     gitRepoUrl: '',
     skipClaudeInit: false,
     memoryLimit: 2048,
+    memoryUnlimited: false,
     cpuLimit: 1,
+    cpuUnlimited: false,
+    gpuEnabled: false,
+    gpuCount: -1,
     portMappings: [] as PortMapping[],
     proxy: {
       enabled: false,
@@ -136,6 +140,7 @@ export default function Dashboard() {
     skipGitRepo: false,
     enableYoloMode: false,
     runAsRoot: false,
+    autoInjectAllSkills: true,
     selectedClaudeMD: undefined as number | undefined,
     selectedSkills: [] as number[],
     selectedMCPs: [] as number[],
@@ -310,6 +315,10 @@ export default function Dashboard() {
         formData.skipClaudeInit,
         formData.memoryLimit,
         formData.cpuLimit,
+        formData.memoryUnlimited,
+        formData.cpuUnlimited,
+        formData.gpuEnabled,
+        formData.gpuCount,
         formData.portMappings,
         formData.proxy.enabled ? formData.proxy : undefined,
         formData.enableCodeServer,
@@ -319,6 +328,7 @@ export default function Dashboard() {
         formData.skipGitRepo,
         formData.enableYoloMode,
         claudeConfigSelection,
+        formData.autoInjectAllSkills,
         formData.runAsRoot
       )
       setCreateDialogOpen(false)
@@ -328,7 +338,11 @@ export default function Dashboard() {
         gitRepoUrl: '',
         skipClaudeInit: false,
         memoryLimit: 2048,
+        memoryUnlimited: false,
         cpuLimit: 1,
+        cpuUnlimited: false,
+        gpuEnabled: false,
+        gpuCount: -1,
         portMappings: [],
         proxy: { enabled: false, domain: '', port: 0, service_port: 3000 },
         enableCodeServer: false,
@@ -338,6 +352,7 @@ export default function Dashboard() {
         skipGitRepo: false,
         enableYoloMode: false,
         runAsRoot: false,
+        autoInjectAllSkills: true,
         selectedClaudeMD: undefined,
         selectedSkills: [],
         selectedMCPs: [],
@@ -977,7 +992,7 @@ export default function Dashboard() {
                           <AlertDescription>
                             Container will run as root user with full system privileges.
                             This grants elevated permissions for system-level operations.
-                            Default: runs as 'dev' user with limited permissions.
+                            Default: runs as 'developer' user with limited permissions.
                           </AlertDescription>
                         </Alert>
                       )}
@@ -1061,6 +1076,21 @@ export default function Dashboard() {
                       <div className="space-y-2">
                         <Label className="text-sm font-medium">Skills</Label>
                         <p className="text-xs text-muted-foreground">Select multiple skill templates (optional)</p>
+                        <div className="flex items-center space-x-2 rounded-md border p-2">
+                          <Checkbox
+                            id="autoInjectAllSkills"
+                            checked={formData.autoInjectAllSkills}
+                            onCheckedChange={(checked) => {
+                              setFormData({
+                                ...formData,
+                                autoInjectAllSkills: checked === true,
+                              })
+                            }}
+                          />
+                          <label htmlFor="autoInjectAllSkills" className="text-sm leading-none">
+                            Auto inject all skill templates on startup
+                          </label>
+                        </div>
                         <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
                           {claudeConfigs
                             .filter(c => c.config_type === ConfigTypes.SKILL)
@@ -1306,12 +1336,15 @@ export default function Dashboard() {
                   )}
 
                   {/* Selection Summary */}
-                  {(formData.selectedClaudeMD || formData.selectedSkills.length > 0 || formData.selectedMCPs.length > 0 || formData.selectedCommands.length > 0 || formData.selectedCodexConfigs.length > 0 || formData.selectedCodexAuths.length > 0 || formData.selectedGeminiEnvs.length > 0) && (
+                  {(formData.selectedClaudeMD || formData.autoInjectAllSkills || formData.selectedSkills.length > 0 || formData.selectedMCPs.length > 0 || formData.selectedCommands.length > 0 || formData.selectedCodexConfigs.length > 0 || formData.selectedCodexAuths.length > 0 || formData.selectedGeminiEnvs.length > 0) && (
                     <div className="rounded-md bg-muted p-3 text-sm">
                       <p className="font-medium mb-2">Selected Configurations:</p>
                       <ul className="list-disc list-inside space-y-1 text-xs text-muted-foreground">
                         {formData.selectedClaudeMD && (
                           <li>CLAUDE.MD: {claudeConfigs.find(c => c.id === formData.selectedClaudeMD)?.name}</li>
+                        )}
+                        {formData.autoInjectAllSkills && (
+                          <li>Auto inject all skills: Enabled</li>
                         )}
                         {formData.selectedSkills.length > 0 && (
                           <li>Skills: {formData.selectedSkills.map(id => claudeConfigs.find(c => c.id === id)?.name).join(', ')}</li>
@@ -1350,6 +1383,45 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">
                       Configure CPU and memory limits for the container
                     </p>
+
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="flex items-center space-x-2 rounded-md border p-3">
+                        <Checkbox
+                          id="memoryUnlimited"
+                          checked={formData.memoryUnlimited}
+                          onCheckedChange={(checked) =>
+                            setFormData({ ...formData, memoryUnlimited: checked === true })
+                          }
+                        />
+                        <label htmlFor="memoryUnlimited" className="text-sm leading-none">
+                          Unlimited memory
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2 rounded-md border p-3">
+                        <Checkbox
+                          id="cpuUnlimited"
+                          checked={formData.cpuUnlimited}
+                          onCheckedChange={(checked) =>
+                            setFormData({ ...formData, cpuUnlimited: checked === true })
+                          }
+                        />
+                        <label htmlFor="cpuUnlimited" className="text-sm leading-none">
+                          Unlimited CPU
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2 rounded-md border p-3">
+                        <Checkbox
+                          id="gpuEnabled"
+                          checked={formData.gpuEnabled}
+                          onCheckedChange={(checked) =>
+                            setFormData({ ...formData, gpuEnabled: checked === true })
+                          }
+                        />
+                        <label htmlFor="gpuEnabled" className="text-sm leading-none">
+                          Enable GPU passthrough
+                        </label>
+                      </div>
+                    </div>
                     
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
@@ -1363,6 +1435,7 @@ export default function Dashboard() {
                           min={512}
                           max={16384}
                           value={formData.memoryLimit}
+                          disabled={formData.memoryUnlimited}
                           onChange={(e) => setFormData({ ...formData, memoryLimit: parseInt(e.target.value) || 2048 })}
                         />
                       </div>
@@ -1378,10 +1451,26 @@ export default function Dashboard() {
                           max={8}
                           step={0.5}
                           value={formData.cpuLimit}
+                          disabled={formData.cpuUnlimited}
                           onChange={(e) => setFormData({ ...formData, cpuLimit: parseFloat(e.target.value) || 1 })}
                         />
                       </div>
                     </div>
+
+                    {formData.gpuEnabled && (
+                      <div className="space-y-1">
+                        <Label htmlFor="gpuCount" className="text-xs text-muted-foreground">
+                          GPU Count (`-1` means all GPUs)
+                        </Label>
+                        <Input
+                          id="gpuCount"
+                          type="number"
+                          min={-1}
+                          value={formData.gpuCount}
+                          onChange={(e) => setFormData({ ...formData, gpuCount: parseInt(e.target.value) || -1 })}
+                        />
+                      </div>
+                    )}
                   </div>
                   
                   <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
@@ -1390,6 +1479,8 @@ export default function Dashboard() {
                       <li>Small projects: 1GB RAM, 0.5 CPU</li>
                       <li>Medium projects: 2GB RAM, 1 CPU</li>
                       <li>Large projects: 4GB+ RAM, 2+ CPU</li>
+                      <li>Unlimited CPU / memory disables Docker throttling and may increase host pressure</li>
+                      <li>GPU passthrough requires NVIDIA Container Toolkit on the Docker host</li>
                     </ul>
                   </div>
                 </div>

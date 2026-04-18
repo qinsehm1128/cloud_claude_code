@@ -16,17 +16,17 @@ import (
 
 // HeadlessManager 管理所有 Headless 会话
 type HeadlessManager struct {
-	db             *gorm.DB
-	sessions       map[string]*HeadlessSession // sessionID -> session
-	conversationSessions map[uint]string       // conversationID -> sessionID (支持多会话)
-	mu             sync.RWMutex
-	monitoringMgr  *monitoring.Manager
-	historyManager *HeadlessHistoryManager
+	db                   *gorm.DB
+	sessions             map[string]*HeadlessSession // sessionID -> session
+	conversationSessions map[uint]string             // conversationID -> sessionID (支持多会话)
+	mu                   sync.RWMutex
+	monitoringMgr        *monitoring.Manager
+	historyManager       *HeadlessHistoryManager
 
 	// 清理配置
-	idleTimeout    time.Duration // 空闲超时时间
-	cleanupTicker  *time.Ticker
-	cleanupDone    chan struct{}
+	idleTimeout   time.Duration // 空闲超时时间
+	cleanupTicker *time.Ticker
+	cleanupDone   chan struct{}
 }
 
 // NewHeadlessManager 创建新的 HeadlessManager
@@ -185,17 +185,39 @@ func (m *HeadlessManager) GetSessionByConversationID(conversationID uint) *Headl
 	return nil
 }
 
-// GetSessionForContainer 获取容器的活跃会话（返回第一个找到的）
+func (m *HeadlessManager) fixConversationTurnsAfterClose(conversationID uint) {
+	if m.historyManager == nil || conversationID == 0 {
+		return
+	}
+	m.historyManager.FixStaleTurns(conversationID)
+}
+
+// GetSessionForContainer 获取容器最近活跃的会话，避免 map 遍历顺序导致串线。
 func (m *HeadlessManager) GetSessionForContainer(containerID uint) *HeadlessSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	var latest *HeadlessSession
 	for _, session := range m.sessions {
 		if session.ContainerID == containerID && !session.IsClosed() {
-			return session
+			if latest == nil {
+				latest = session
+				continue
+			}
+
+			sessionLastActive := session.GetLastActive()
+			latestLastActive := latest.GetLastActive()
+			if sessionLastActive.After(latestLastActive) {
+				latest = session
+				continue
+			}
+
+			if sessionLastActive.Equal(latestLastActive) && session.CreatedAt.After(latest.CreatedAt) {
+				latest = session
+			}
 		}
 	}
-	return nil
+	return latest
 }
 
 // GetAllSessionsForContainer 获取容器的所有活跃会话
@@ -232,6 +254,7 @@ func (m *HeadlessManager) CloseSession(sessionID string) error {
 	if err := session.Close(); err != nil {
 		log.Printf("[HeadlessManager] Error closing session %s: %v", sessionID, err)
 	}
+	m.fixConversationTurnsAfterClose(session.ConversationID)
 
 	// 从 map 中移除
 	delete(m.sessions, sessionID)
@@ -262,6 +285,7 @@ func (m *HeadlessManager) CloseSessionByConversationID(conversationID uint) erro
 	if err := session.Close(); err != nil {
 		log.Printf("[HeadlessManager] Error closing session %s: %v", sessionID, err)
 	}
+	m.fixConversationTurnsAfterClose(session.ConversationID)
 
 	// 从 map 中移除
 	delete(m.sessions, sessionID)
@@ -284,6 +308,7 @@ func (m *HeadlessManager) CloseSessionsForContainer(containerID uint) int {
 			if err := session.Close(); err != nil {
 				log.Printf("[HeadlessManager] Error closing session %s: %v", sessionID, err)
 			}
+			m.fixConversationTurnsAfterClose(session.ConversationID)
 			delete(m.sessions, sessionID)
 			delete(m.conversationSessions, session.ConversationID)
 			closedCount++
